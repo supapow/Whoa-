@@ -1,11 +1,12 @@
 import { useRef, useState, useEffect } from 'react'
 import {
   X, Upload, Type as TypeIcon, Folder, FolderPlus,
-  Component as ComponentIcon, ChevronRight, ChevronDown, Plus, Trash2,
-  Lock, Unlock, CircleDot,
+  Component as ComponentIcon, ChevronRight, ChevronLeft, ChevronDown, Plus, Trash2,
+  Lock, Unlock, CircleDot, Diamond, Droplet,
 } from 'lucide-react'
 import { useEditor } from '#/store/editor'
 import type { ShapeKind, Layer } from '#/types'
+import { hasKeyframeAt, getAdjacentKeyframes, interpolateKeyframes } from '#/lib/keyframes'
 import {
   FONTS, PALETTE, GRADIENTS, BG_IMAGES, STOCK_IMAGES, STICKERS, SHAPES,
 } from '#/lib/data'
@@ -15,6 +16,7 @@ const TITLES: Record<string, string> = {
   text: 'Add Text', elements: 'Elements', stickers: 'Stickers', image: 'Image',
   components: 'Components Library',
   background: 'Background', layers: 'Layers', font: 'Font', color: 'Color',
+  blur: 'Blur & Effects',
   style: 'Text Style', align: 'Alignment', shape: 'Shape', radius: 'Corner Radius',
   animate: 'Animation', mask: 'Mask & Cut', crop: 'Crop',
 }
@@ -42,7 +44,7 @@ export default function ToolSheet() {
 
 function PanelBody({ tool }: { tool: string }) {
   const { selected } = useEditor()
-  const needsLayer = ['font', 'color', 'style', 'align', 'shape', 'radius', 'animate', 'mask', 'crop']
+  const needsLayer = ['font', 'color', 'blur', 'style', 'align', 'shape', 'radius', 'animate', 'mask', 'crop']
   if (needsLayer.includes(tool) && !selected) {
     return <MockPanel text="Select a layer on the canvas first." />
   }
@@ -56,6 +58,7 @@ function PanelBody({ tool }: { tool: string }) {
     case 'layers': return <LayersPanel />
     case 'font': return <FontPanel />
     case 'color': return <ColorPanel />
+    case 'blur': return <BlurPanel />
     case 'style': return <StylePanel />
     case 'align': return <AlignPanel />
     case 'shape': return <ShapePanel />
@@ -660,26 +663,190 @@ function FontPanel() {
 }
 
 function ColorPanel() {
-  const { selected, selectedIds, updateLayers } = useEditor()
+  const { selected, selectedIds, updateLayers, updateLayer, time } = useEditor()
   const l = selected!
   const key = l.type === 'shape' ? 'fill' : 'color'
-  const cur = (l as any)[key]
-  const up = (patch: Record<string, string>) => updateLayers(selectedIds, patch)
-  return (
-  <>
-  <div className="pb-1">
-  <Grid cols={6}>
-  {PALETTE.map((c) => (
-  <button key={c} data-testid={`color-${c}`} onClick={() => up({ [key]: c })}
-  style={{ background: c }}
-  className={`aspect-square rounded-full border-2 transition-transform active:scale-90 ${cur === c ? 'border-accent ring-2 ring-accent/40' : 'border-line'}`} />
-  ))}
-  </Grid>
-  </div>
-  <Slider label="Opacity" tid="slider-opacity" value={(l.opacity ?? 1) * 100} min={0} max={100} suffix="%" onChange={(v: number) => updateLayers(selectedIds, { opacity: v / 100 })} />
-  </>
-  )
+  const effective = l && l.keyframes && l.keyframes.length > 0 ? interpolateKeyframes(l, time) : l
+  const cur = (effective as any)?.[key] || (l as any)?.[key]
+  const up = (patch: Record<string, string>) => {
+    if (selectedIds.length > 1) {
+      updateLayers(selectedIds, patch)
+    } else if (selected) {
+      updateLayer(selected.id, patch)
+    }
   }
+  return (
+    <>
+      <div className="pb-1">
+        <Grid cols={6}>
+          {PALETTE.map((c) => (
+            <button
+              key={c}
+              data-testid={`color-${c}`}
+              onClick={() => up({ [key]: c })}
+              style={{ background: c }}
+              className={`aspect-square rounded-full border-2 transition-transform active:scale-90 ${cur === c ? 'border-accent ring-2 ring-accent/40' : 'border-line'}`}
+            />
+          ))}
+        </Grid>
+      </div>
+      <Slider
+        label="Opacity"
+        tid="slider-opacity"
+        value={Math.round((effective?.opacity ?? l?.opacity ?? 1) * 100)}
+        min={0}
+        max={100}
+        suffix="%"
+        onChange={(v: number) => {
+          if (selectedIds.length > 1) {
+            updateLayers(selectedIds, { opacity: v / 100 })
+          } else if (selected) {
+            updateLayer(selected.id, { opacity: v / 100 })
+          }
+        }}
+      />
+    </>
+  )
+}
+
+function BlurPanel() {
+  const { selected, selectedIds, updateLayers, updateLayer, time } = useEditor()
+  const l = selected!
+  const effective = l && l.keyframes && l.keyframes.length > 0 ? interpolateKeyframes(l, time) : l
+  const currentBlur = effective?.blur ?? l?.blur ?? 0
+  const currentType = l?.blurType ?? 'element'
+
+  const up = (patch: Partial<Layer>) => {
+    if (selectedIds.length > 1) {
+      updateLayers(selectedIds, patch)
+    } else if (selected) {
+      updateLayer(selected.id, patch)
+    }
+  }
+
+  const presets = [
+    { label: 'Off', val: 0, desc: '0px' },
+    { label: 'Subtle', val: 4, desc: '4px' },
+    { label: 'Soft', val: 10, desc: '10px' },
+    { label: 'Medium', val: 20, desc: '20px' },
+    { label: 'Heavy', val: 36, desc: '36px' },
+    { label: 'Deep', val: 64, desc: '64px' },
+  ]
+
+  return (
+    <div className="space-y-5 pb-6" data-testid="panel-blur">
+      {/* Quick Status / Reset header */}
+      <div className="flex items-center justify-between rounded-xl bg-surface2 px-3.5 py-2.5">
+        <div className="flex items-center gap-2.5">
+          <div className={`grid h-8 w-8 place-items-center rounded-lg ${currentBlur > 0 ? 'bg-accent/15 text-accent' : 'bg-surface text-txt3'}`}>
+            <Droplet className="h-4 w-4" />
+          </div>
+          <div>
+            <div className="text-xs font-semibold text-txt">
+              {currentBlur > 0 ? `${currentBlur}px Blur Active` : 'No Blur Applied'}
+            </div>
+            <div className="text-[11px] text-txt3">
+              {currentType === 'backdrop' ? 'Backdrop frosted glass' : 'Element blur'}
+            </div>
+          </div>
+        </div>
+        {currentBlur > 0 && (
+          <button
+            type="button"
+            data-testid="blur-reset-btn"
+            onClick={() => up({ blur: 0 })}
+            className="text-xs font-medium text-txt3 hover:text-danger active:scale-95 transition-colors cursor-pointer"
+          >
+            Reset
+          </button>
+        )}
+      </div>
+
+      {/* Main Blur Radius Slider */}
+      <Slider
+        label="Blur Radius"
+        tid="slider-blur"
+        value={currentBlur}
+        min={0}
+        max={80}
+        step={1}
+        suffix="px"
+        onChange={(v: number) => up({ blur: v })}
+      />
+
+      {/* Quick Presets */}
+      <div>
+        <div className="mb-2.5 text-xs font-medium text-txt2">Quick Presets</div>
+        <div className="grid grid-cols-3 gap-2">
+          {presets.map((p) => {
+            const isSelected = currentBlur === p.val
+            return (
+              <button
+                key={p.label}
+                type="button"
+                data-testid={`blur-preset-${p.val}`}
+                onClick={() => up({ blur: p.val })}
+                className={`flex flex-col items-center justify-center rounded-xl border py-2 px-1 text-center transition-all active:scale-95 cursor-pointer ${
+                  isSelected
+                    ? 'border-accent bg-accent/10 text-accent font-semibold shadow-xs'
+                    : 'border-line bg-surface2 text-txt hover:bg-surface2/80'
+                }`}
+              >
+                <span className="text-xs">{p.label}</span>
+                <span className="text-[10px] text-txt3">{p.desc}</span>
+              </button>
+            )
+          })}
+        </div>
+      </div>
+
+      {/* Blur Mode / Target Setting */}
+      <div>
+        <div className="mb-2.5 text-xs font-medium text-txt2">Blur Style</div>
+        <div className="grid grid-cols-2 gap-2">
+          <button
+            type="button"
+            data-testid="blur-type-element"
+            onClick={() => up({ blurType: 'element' })}
+            className={`flex flex-col items-start rounded-xl border p-3 text-left transition-all active:scale-95 cursor-pointer ${
+              currentType !== 'backdrop'
+                ? 'border-accent bg-accent/10 text-accent ring-1 ring-accent/30'
+                : 'border-line bg-surface2 text-txt hover:bg-surface2/80'
+            }`}
+          >
+            <span className="text-xs font-semibold">Element Blur</span>
+            <span className="text-[10px] text-txt3 mt-0.5">Blurs this element itself</span>
+          </button>
+
+          <button
+            type="button"
+            data-testid="blur-type-backdrop"
+            onClick={() => up({ blurType: 'backdrop' })}
+            className={`flex flex-col items-start rounded-xl border p-3 text-left transition-all active:scale-95 cursor-pointer ${
+              currentType === 'backdrop'
+                ? 'border-accent bg-accent/10 text-accent ring-1 ring-accent/30'
+                : 'border-line bg-surface2 text-txt hover:bg-surface2/80'
+            }`}
+          >
+            <span className="text-xs font-semibold">Backdrop Frost</span>
+            <span className="text-[10px] text-txt3 mt-0.5">Blurs content underneath</span>
+          </button>
+        </div>
+      </div>
+
+      {/* Opacity slider for convenient pairing with blur / frosted glass */}
+      <Slider
+        label="Layer Opacity"
+        tid="slider-blur-opacity"
+        value={Math.round((effective?.opacity ?? l?.opacity ?? 1) * 100)}
+        min={0}
+        max={100}
+        suffix="%"
+        onChange={(v: number) => up({ opacity: v / 100 })}
+      />
+    </div>
+  )
+}
 
 
 function Slider({ label, value, min, max, step = 1, onChange, tid, suffix = '' }: any) {
@@ -740,8 +907,127 @@ function RadiusPanel() {
 
   function AnimatePanel() {
     const { l, up } = useSel()
-    const { setMode, animationSide, setAnimationSide, setTime } = useEditor()
+    const { setMode, animationSide, setAnimationSide, setTime, time, toggleKeyframe, clearKeyframes, deleteKeyframe } = useEditor()
     const [configOpen, setConfigOpen] = useState(false)
+
+    const hasKeyframes = Boolean(l.keyframes && l.keyframes.length > 0)
+
+    if (hasKeyframes) {
+      const isAtKf = hasKeyframeAt(l, time, 60)
+      const { prev: prevKf, next: nextKf } = getAdjacentKeyframes(l.keyframes, time)
+      const sortedKfs = [...(l.keyframes || [])].sort((a, b) => a.time - b.time)
+
+      return (
+        <div className="pb-4 space-y-4">
+          <div className="flex items-center justify-between rounded-2xl border border-amber-500/30 bg-amber-500/10 p-3.5">
+            <div className="flex items-center gap-2.5">
+              <div className="grid h-8 w-8 place-items-center rounded-xl bg-amber-400/20 text-amber-300">
+                <Diamond className="h-4 w-4 fill-amber-400" />
+              </div>
+              <div>
+                <span className="text-xs font-bold text-amber-300">Keyframe Animation</span>
+                <p className="text-[11px] text-txt2">{sortedKfs.length} keyframes on timeline</p>
+              </div>
+            </div>
+            <button
+              type="button"
+              data-testid="reset-to-presets-btn"
+              onClick={() => clearKeyframes(l.id)}
+              className="rounded-lg border border-white/10 px-2.5 py-1.5 text-[11px] font-semibold text-txt2 hover:bg-white/10 hover:text-white transition-colors"
+            >
+              Reset to Presets
+            </button>
+          </div>
+
+          <div className="flex items-center gap-2">
+            <button
+              type="button"
+              data-testid="panel-prev-kf-btn"
+              disabled={!prevKf}
+              onClick={() => prevKf && setTime(prevKf.time)}
+              className="grid h-9 w-9 place-items-center rounded-xl border border-line bg-surface2 text-txt2 hover:text-white disabled:opacity-30 disabled:pointer-events-none transition-colors"
+              title="Jump to previous keyframe"
+            >
+              <ChevronLeft className="h-4 w-4" />
+            </button>
+
+            <button
+              type="button"
+              data-testid="panel-toggle-kf-btn"
+              onClick={() => toggleKeyframe(l.id, time)}
+              className={`flex-1 flex items-center justify-center gap-2 h-9 rounded-xl text-xs font-semibold transition-all ${
+                isAtKf
+                  ? 'bg-amber-400/20 text-amber-300 border border-amber-400/40 hover:bg-amber-400/30'
+                  : 'bg-amber-500 text-black hover:bg-amber-400'
+              }`}
+            >
+              <Diamond className={`h-3.5 w-3.5 ${isAtKf ? 'fill-amber-400' : ''}`} />
+              <span>{isAtKf ? `Remove Keyframe at ${(time / 1000).toFixed(2)}s` : `Add Keyframe at ${(time / 1000).toFixed(2)}s`}</span>
+            </button>
+
+            <button
+              type="button"
+              data-testid="panel-next-kf-btn"
+              disabled={!nextKf}
+              onClick={() => nextKf && setTime(nextKf.time)}
+              className="grid h-9 w-9 place-items-center rounded-xl border border-line bg-surface2 text-txt2 hover:text-white disabled:opacity-30 disabled:pointer-events-none transition-colors"
+              title="Jump to next keyframe"
+            >
+              <ChevronRight className="h-4 w-4" />
+            </button>
+          </div>
+
+          <div>
+            <span className="text-xs font-semibold text-txt2 block mb-2">Keyframe Points</span>
+            <div className="space-y-1.5 max-h-56 overflow-y-auto pr-1">
+              {sortedKfs.map((kf) => {
+                const isActive = Math.abs(time - kf.time) <= 60
+                const summary = [
+                  kf.blur !== undefined && kf.blur > 0 ? `Blur ${kf.blur}px` : (kf.blur === 0 ? 'No Blur' : null),
+                  kf.color !== undefined ? `Color ${kf.color}` : (kf.fill !== undefined ? `Fill ${kf.fill}` : null),
+                  kf.opacity !== undefined && kf.opacity < 1 ? `Opacity ${Math.round(kf.opacity * 100)}%` : null,
+                  kf.rotation !== undefined && kf.rotation !== 0 ? `Rot ${kf.rotation}°` : null,
+                  kf.fontSize !== undefined ? `${kf.fontSize}px` : null,
+                  kf.x !== undefined ? `X:${Math.round(kf.x)}` : null,
+                  kf.y !== undefined ? `Y:${Math.round(kf.y)}` : null,
+                ].filter(Boolean).slice(0, 4).join(' • ')
+
+                return (
+                  <div
+                    key={kf.id}
+                    data-testid={`panel-kf-item-${kf.id}`}
+                    onClick={() => setTime(kf.time)}
+                    className={`flex items-center justify-between p-2 rounded-xl border transition-all cursor-pointer ${
+                      isActive
+                        ? 'border-amber-400 bg-amber-400/15 text-white ring-1 ring-amber-400/50'
+                        : 'border-line bg-surface2 text-txt2 hover:border-white/20 hover:text-white'
+                    }`}
+                  >
+                    <div className="flex items-center gap-2 min-w-0">
+                      <Diamond className={`h-3 w-3 shrink-0 ${isActive ? 'text-amber-400 fill-amber-400' : 'text-txt3'}`} />
+                      <span className="font-mono text-xs font-semibold">{(kf.time / 1000).toFixed(2)}s</span>
+                      <span className="text-[11px] text-txt3 truncate">{summary || 'Keyframe state'}</span>
+                    </div>
+                    <button
+                      type="button"
+                      data-testid={`delete-kf-${kf.id}`}
+                      onClick={(e) => {
+                        e.stopPropagation()
+                        deleteKeyframe(l.id, kf.id)
+                      }}
+                      className="grid h-6 w-6 place-items-center rounded-lg text-txt3 hover:text-rose-400 hover:bg-rose-400/10 transition-colors"
+                      title="Delete keyframe"
+                    >
+                      <Trash2 className="h-3.5 w-3.5" />
+                    </button>
+                  </div>
+                )
+              })}
+            </div>
+          </div>
+        </div>
+      )
+    }
 
     const anims = [
       { k: 'none', label: 'None' },
@@ -927,6 +1213,16 @@ function RadiusPanel() {
             </div>
           </div>
         )}
+
+        <button
+          data-testid="convert-to-keyframes-btn"
+          type="button"
+          onClick={() => toggleKeyframe(l.id, time)}
+          className="mt-3 flex w-full items-center justify-center gap-2 rounded-xl border border-amber-500/30 bg-amber-500/10 py-2.5 px-3 text-xs font-semibold text-amber-300 hover:bg-amber-500/20 active:scale-[0.99] transition-all"
+        >
+          <Diamond className="h-4 w-4 fill-amber-400" />
+          <span>Convert to Keyframe Animation</span>
+        </button>
       </div>
     )
   }

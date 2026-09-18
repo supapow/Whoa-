@@ -7,6 +7,25 @@ export interface Background {
   value: string // hex, css-gradient, or image url
 }
 
+export interface Keyframe {
+  id: string
+  time: number // ms on timeline within [layer.start, layer.end]
+  // transforms
+  x: number
+  y: number
+  w: number
+  h: number
+  rotation: number
+  opacity: number
+  // styles
+  fontSize?: number
+  fontWeight?: number
+  color?: string
+  fill?: string
+  radius?: number
+  blur?: number
+}
+
 export interface Layer {
   id: string
   type: LayerType
@@ -17,6 +36,8 @@ export interface Layer {
   h: number
   rotation: number
   opacity: number
+  blur?: number // px blur radius
+  blurType?: 'element' | 'backdrop' // element blur or backdrop frosted blur
   visible: boolean
   alwaysVisible?: boolean
   locked: boolean
@@ -32,6 +53,8 @@ export interface Layer {
   outRotateStart?: number // degrees (default: 0)
   outRotateEnd?: number // degrees (default: 30)
   outRotateMs?: number // ms (default: 150)
+  // keyframes
+  keyframes?: Keyframe[]
   // text
   text?: string
   fontFamily?: string

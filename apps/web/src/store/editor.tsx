@@ -13,6 +13,12 @@ import {
   computeGroupBounds,
   type ComponentItem,
 } from '#/lib/groups'
+import {
+  convertAnimationToKeyframes,
+  hasKeyframeAt,
+  removeKeyframeAt,
+  upsertKeyframe,
+} from '#/lib/keyframes'
 
 interface State {
   project: Project
@@ -66,9 +72,40 @@ type Action =
   | { t: 'setImagePositioningId'; id: string | null }
   | { t: 'setAnimationSide'; side: 'in' | 'out' }
   | { t: 'nudge'; dx: number; dy: number; measured?: Record<string, { x: number; y: number; w: number; h: number }> }
+  | { t: 'toggleKeyframe'; layerId?: string; time?: number }
+  | { t: 'moveKeyframe'; layerId: string; keyframeId: string; newTime: number }
+  | { t: 'deleteKeyframe'; layerId: string; keyframeId: string }
+  | { t: 'clearKeyframes'; layerId: string }
 
 function touch(p: Project): Project {
   return { ...p, updatedAt: Date.now() }
+}
+
+function applyLayerUpdate(l: Layer, patch: Partial<Layer>, currentTime: number): Layer {
+  let updated = { ...l, ...patch }
+
+  // If layer has keyframes and a transform or style property is patched, update/upsert keyframe at currentTime
+  if (l.keyframes && l.keyframes.length > 0 && !('keyframes' in patch)) {
+    const keyframePropKeys = [
+      'x', 'y', 'w', 'h', 'rotation', 'opacity',
+      'fontSize', 'fontWeight', 'color', 'fill', 'radius', 'blur'
+    ]
+    const isKeyframeProp = keyframePropKeys.some((k) => k in patch)
+    if (isKeyframeProp) {
+      updated.keyframes = upsertKeyframe(l, currentTime, patch)
+    }
+
+    // If layer start or end was trimmed, clamp keyframes to valid range
+    if ('start' in patch || 'end' in patch) {
+      const newStart = updated.start
+      const newEnd = updated.end
+      updated.keyframes = (updated.keyframes || []).map((kf) => ({
+        ...kf,
+        time: Math.max(newStart, Math.min(newEnd, kf.time)),
+      }))
+    }
+  }
+  return updated
 }
 
 function reducer(state: State, a: Action): State {
@@ -441,7 +478,7 @@ function reducer(state: State, a: Action): State {
     case 'addLayer':
       return { ...state, project: touch({ ...p, layers: [...p.layers, a.layer] }), selectedId: a.layer.id, selectedIds: [a.layer.id], tool: null }
     case 'updateLayer': {
-      let layers = p.layers.map((l) => (l.id === a.id ? { ...l, ...a.patch } : l))
+      let layers = p.layers.map((l) => (l.id === a.id ? applyLayerUpdate(l, a.patch, state.time) : l))
       const targetLayer = layers.find((l) => l.id === a.id)
       if (targetLayer?.groupId) {
         let currGroupId: string | undefined = targetLayer.groupId
@@ -455,8 +492,25 @@ function reducer(state: State, a: Action): State {
       }
       return { ...state, project: touch({ ...p, layers }) }
     }
-    case 'updateLayers':
-      return { ...state, project: touch({ ...p, layers: p.layers.map((l) => (a.ids.includes(l.id) ? { ...l, ...a.patch } : l)) }) }
+    case 'updateLayers': {
+      let layers = p.layers.map((l) => (a.ids.includes(l.id) ? applyLayerUpdate(l, a.patch, state.time) : l))
+      const affectedGroupIds = new Set<string>()
+      for (const id of a.ids) {
+        const targetLayer = p.layers.find((layer) => layer.id === id)
+        if (targetLayer?.groupId) affectedGroupIds.add(targetLayer.groupId)
+      }
+      for (const gid of affectedGroupIds) {
+        let currGroupId: string | undefined = gid
+        while (currGroupId) {
+          const bounds = computeGroupBounds(currGroupId, layers)
+          const gId: string = currGroupId
+          layers = layers.map((l) => (l.id === gId ? { ...l, ...bounds } : l))
+          const parent = layers.find((l) => l.id === gId)
+          currGroupId = parent?.groupId
+        }
+      }
+      return { ...state, project: touch({ ...p, layers }) }
+    }
     case 'createGroup': {
       const targetIds = a.ids || state.selectedIds
       if (!targetIds || targetIds.length === 0) return state
@@ -553,6 +607,80 @@ function reducer(state: State, a: Action): State {
       return { ...state, timelineOpen: a.open !== undefined ? a.open : !state.timelineOpen }
     case 'setTimelineOpen':
       return { ...state, timelineOpen: a.open }
+    case 'toggleKeyframe': {
+      const targetId = a.layerId || state.selectedId
+      if (!targetId) return state
+      const targetLayer = p.layers.find((l) => l.id === targetId)
+      if (!targetLayer) return state
+
+      const targetTime = a.time !== undefined ? a.time : state.time
+      const hasKeyframes = Boolean(targetLayer.keyframes && targetLayer.keyframes.length > 0)
+
+      let updatedLayers: Layer[]
+
+      if (hasKeyframes) {
+        const isAtKeyframe = hasKeyframeAt(targetLayer, targetTime, 60)
+        if (isAtKeyframe) {
+          // Remove keyframe at playhead
+          const remaining = removeKeyframeAt(targetLayer, targetTime, 60)
+          updatedLayers = p.layers.map((l) => {
+            if (l.id !== targetId) return l
+            return {
+              ...l,
+              keyframes: remaining.length > 0 ? remaining : undefined,
+            }
+          })
+        } else {
+          // Add keyframe at playhead with current interpolated state
+          const nextKeyframes = upsertKeyframe(targetLayer, targetTime)
+          updatedLayers = p.layers.map((l) => (l.id === targetId ? { ...l, keyframes: nextKeyframes } : l))
+        }
+      } else {
+        // Convert existing animation presets into editable keyframes, ensuring a keyframe at targetTime
+        const initialKeyframes = convertAnimationToKeyframes(targetLayer, targetTime)
+        updatedLayers = p.layers.map((l) => {
+          if (l.id !== targetId) return l
+          return {
+            ...l,
+            anim: 'none',
+            inAnim: 'none',
+            outAnim: 'none',
+            keyframes: initialKeyframes,
+          }
+        })
+      }
+
+      return { ...state, project: touch({ ...p, layers: updatedLayers }) }
+    }
+    case 'moveKeyframe': {
+      const targetLayer = p.layers.find((l) => l.id === a.layerId)
+      if (!targetLayer || !targetLayer.keyframes) return state
+
+      const clampedTime = Math.max(targetLayer.start, Math.min(targetLayer.end, Math.round(a.newTime)))
+      const nextKeyframes = targetLayer.keyframes.map((kf) =>
+        kf.id === a.keyframeId ? { ...kf, time: clampedTime } : kf
+      )
+      nextKeyframes.sort((x, y) => x.time - y.time)
+
+      const layers = p.layers.map((l) => (l.id === a.layerId ? { ...l, keyframes: nextKeyframes } : l))
+      return { ...state, project: touch({ ...p, layers }) }
+    }
+    case 'deleteKeyframe': {
+      const targetLayer = p.layers.find((l) => l.id === a.layerId)
+      if (!targetLayer || !targetLayer.keyframes) return state
+
+      const nextKeyframes = targetLayer.keyframes.filter((kf) => kf.id !== a.keyframeId)
+      const layers = p.layers.map((l) =>
+        l.id === a.layerId
+          ? { ...l, keyframes: nextKeyframes.length > 0 ? nextKeyframes : undefined }
+          : l
+      )
+      return { ...state, project: touch({ ...p, layers }) }
+    }
+    case 'clearKeyframes': {
+      const layers = p.layers.map((l) => (l.id === a.layerId ? { ...l, keyframes: undefined } : l))
+      return { ...state, project: touch({ ...p, layers }) }
+    }
     default:
       return state
   }
@@ -591,6 +719,10 @@ interface Ctx extends State {
   setImagePositioningId: (id: string | null) => void
   setAnimationSide: (side: 'in' | 'out') => void
   nudge: (dx: number, dy: number, measured?: Record<string, { x: number; y: number; w: number; h: number }>) => void
+  toggleKeyframe: (layerId?: string, time?: number) => void
+  moveKeyframe: (layerId: string, keyframeId: string, newTime: number) => void
+  deleteKeyframe: (layerId: string, keyframeId: string) => void
+  clearKeyframes: (layerId: string) => void
 }
 
 const EditorCtx = createContext<Ctx | null>(null)
@@ -653,6 +785,10 @@ export function EditorProvider({ project, children }: { project: Project; childr
       dispatch({ t: 'nudge', dx, dy, measured }),
     [],
   )
+  const toggleKeyframe = useCallback((layerId?: string, time?: number) => dispatch({ t: 'toggleKeyframe', layerId, time }), [])
+  const moveKeyframe = useCallback((layerId: string, keyframeId: string, newTime: number) => dispatch({ t: 'moveKeyframe', layerId, keyframeId, newTime }), [])
+  const deleteKeyframe = useCallback((layerId: string, keyframeId: string) => dispatch({ t: 'deleteKeyframe', layerId, keyframeId }), [])
+  const clearKeyframes = useCallback((layerId: string) => dispatch({ t: 'clearKeyframes', layerId }), [])
 
   const addLayer = useCallback(
     (type: LayerType, extra?: Partial<Layer>) => {
@@ -673,8 +809,9 @@ export function EditorProvider({ project, children }: { project: Project; childr
       createGroup, ungroup, toggleGroupCollapse, insertComponent, saveAsComponent,
       setBackground, setTime, setPlaying, setArtboardSnap, setMode, rename, setDuration,
       toggleTimeline, setTimelineOpen, setImagePositioningId, setAnimationSide, nudge,
+      toggleKeyframe, moveKeyframe, deleteKeyframe, clearKeyframes,
     }),
-    [state, select, alignSelected, openTool, addLayer, updateLayer, updateLayers, deleteLayer, deleteLayers, duplicate, reorder, createGroup, ungroup, toggleGroupCollapse, insertComponent, saveAsComponent, setBackground, setTime, setPlaying, setArtboardSnap, setMode, rename, setDuration, toggleTimeline, setTimelineOpen, setImagePositioningId, setAnimationSide, nudge],
+    [state, select, alignSelected, openTool, addLayer, updateLayer, updateLayers, deleteLayer, deleteLayers, duplicate, reorder, createGroup, ungroup, toggleGroupCollapse, insertComponent, saveAsComponent, setBackground, setTime, setPlaying, setArtboardSnap, setMode, rename, setDuration, toggleTimeline, setTimelineOpen, setImagePositioningId, setAnimationSide, nudge, toggleKeyframe, moveKeyframe, deleteKeyframe, clearKeyframes],
   )
 
   return <EditorCtx.Provider value={value}>{children}</EditorCtx.Provider>

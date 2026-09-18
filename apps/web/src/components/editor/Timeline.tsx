@@ -1,12 +1,13 @@
 import React, { useEffect, useRef, useState, useMemo } from 'react'
 import {
   Play, Pause, Scissors, Diamond, ZoomIn, ZoomOut,
-  ChevronDown, ChevronRight, Folder, Component as ComponentIcon,
+  ChevronDown, ChevronRight, ChevronLeft, Folder, Component as ComponentIcon,
   ArrowUp, ArrowDown, Eye, EyeOff, Infinity as InfinityIcon,
 } from 'lucide-react'
 import { useEditor } from '#/store/editor'
-import type { Layer } from '#/types'
+import type { Layer, Keyframe } from '#/types'
 import { getDescendantLayers } from '#/lib/groups'
+import { hasKeyframeAt, getAdjacentKeyframes } from '#/lib/keyframes'
 
 const TRACK_COLOR: Record<string, string> = {
   text: 'var(--color-track-text)',
@@ -23,7 +24,8 @@ function fmt(ms: number) {
 type Drag =
   | { kind: 'playhead' }
   | { kind: 'trim'; id: string; edge: 'l' | 'r'; s0: number; e0: number; sx: number }
-  | { kind: 'move'; id: string; sx: number; initialStart: number; initialEnd: number }
+  | { kind: 'move'; id: string; sx: number; initialStart: number; initialEnd: number; initialKeyframes?: Keyframe[] }
+  | { kind: 'keyframe'; layerId: string; keyframeId: string; sx: number; initialTime: number; layerStart: number; layerEnd: number }
   | { kind: 'trim-group'; id: string; edge: 'l' | 'r'; s0: number; e0: number; sx: number; initialStarts: Map<string, number>; initialEnds: Map<string, number> }
   | { kind: 'move-group'; id: string; sx: number; initialStarts: Map<string, number>; initialEnds: Map<string, number> }
   | null
@@ -45,6 +47,7 @@ export default function Timeline() {
   const {
     project, time, setTime, playing, setPlaying, selectedId, select,
     updateLayer, updateLayers, toggleGroupCollapse, reorder, timelineOpen, toggleTimeline, openTool, setAnimationSide,
+    toggleKeyframe, moveKeyframe, deleteKeyframe,
   } = useEditor()
   const [ppms, setPpms] = useState(0.05)
   const [scrollTop, setScrollTop] = useState(0)
@@ -129,7 +132,24 @@ export default function Timeline() {
         const dt = (e.clientX - d.sx) / ppms
         const span = d.initialEnd - d.initialStart
         const newStart = Math.max(0, Math.min(duration - span, d.initialStart + dt))
-        updateLayer(d.id, { start: newStart, end: newStart + span })
+        let keyframesPatch: Keyframe[] | undefined = undefined
+        if (d.initialKeyframes && d.initialKeyframes.length > 0) {
+          const shift = Math.round(newStart - d.initialStart)
+          keyframesPatch = d.initialKeyframes.map((kf) => ({
+            ...kf,
+            time: Math.round(kf.time + shift),
+          }))
+        }
+        updateLayer(d.id, {
+          start: newStart,
+          end: newStart + span,
+          ...(keyframesPatch ? { keyframes: keyframesPatch } : {}),
+        })
+      } else if (d.kind === 'keyframe') {
+        const dt = (e.clientX - d.sx) / ppms
+        const newTime = Math.max(d.layerStart, Math.min(d.layerEnd, Math.round(d.initialTime + dt)))
+        moveKeyframe(d.layerId, d.keyframeId, newTime)
+        setTime(newTime)
       } else if (d.kind === 'move-group') {
         const dt = (e.clientX - d.sx) / ppms
         for (const [childId, initStart] of d.initialStarts.entries()) {
@@ -228,18 +248,65 @@ export default function Timeline() {
           <button data-testid="split-btn" disabled className="grid h-8 w-8 place-items-center rounded-lg text-txt3 opacity-40" title="Split (coming with backend)">
             <Scissors className="h-4 w-4" />
           </button>
-          <button
-            data-testid="keyframe-btn"
-            onClick={() => {
-              if (!selectedId) return
-              const l = project.layers.find((x) => x.id === selectedId)
-              if (l) updateLayer(selectedId, { start: Math.min(time, l.end - 200) })
-            }}
-            className="grid h-8 w-8 place-items-center rounded-lg text-txt2 active:bg-surface2"
-            title="Set clip start to playhead"
-          >
-            <Diamond className="h-4 w-4" />
-          </button>
+          {(() => {
+            const selectedLayer = project.layers.find((x) => x.id === selectedId)
+            const hasKf = Boolean(selectedLayer?.keyframes && selectedLayer.keyframes.length > 0)
+            const isAtKf = selectedLayer ? hasKeyframeAt(selectedLayer, time, 60) : false
+            const { prev: prevKf, next: nextKf } = getAdjacentKeyframes(selectedLayer?.keyframes, time)
+
+            return (
+              <div className="flex items-center gap-0.5">
+                {hasKf && (
+                  <button
+                    data-testid="keyframe-prev-btn"
+                    disabled={!prevKf}
+                    onClick={() => prevKf && setTime(prevKf.time)}
+                    className="grid h-8 w-6 place-items-center rounded-lg text-txt2 hover:text-white disabled:opacity-30 disabled:pointer-events-none transition-colors"
+                    title={prevKf ? `Jump to previous keyframe (${fmt(prevKf.time)})` : 'No previous keyframe'}
+                  >
+                    <ChevronLeft className="h-3.5 w-3.5" />
+                  </button>
+                )}
+                <button
+                  data-testid="keyframe-btn"
+                  disabled={!selectedLayer || selectedLayer.type === 'group'}
+                  onClick={() => {
+                    if (!selectedId) return
+                    toggleKeyframe(selectedId, time)
+                  }}
+                  className={`grid h-8 w-8 place-items-center rounded-lg transition-all ${
+                    isAtKf
+                      ? 'text-amber-400 bg-amber-400/20 ring-1 ring-amber-400/60 shadow-[0_0_8px_rgba(251,191,36,0.3)]'
+                      : hasKf
+                        ? 'text-amber-400/90 hover:text-amber-300 hover:bg-surface2'
+                        : 'text-txt2 hover:text-white active:bg-surface2'
+                  } disabled:opacity-40`}
+                  title={
+                    !selectedLayer
+                      ? 'Select a layer to add keyframes'
+                      : isAtKf
+                        ? `Remove keyframe at ${fmt(time)}`
+                        : hasKf
+                          ? `Add keyframe at ${fmt(time)}`
+                          : 'Convert to Keyframe animation mode'
+                  }
+                >
+                  <Diamond className={`h-4 w-4 ${isAtKf ? 'fill-amber-400' : ''}`} />
+                </button>
+                {hasKf && (
+                  <button
+                    data-testid="keyframe-next-btn"
+                    disabled={!nextKf}
+                    onClick={() => nextKf && setTime(nextKf.time)}
+                    className="grid h-8 w-6 place-items-center rounded-lg text-txt2 hover:text-white disabled:opacity-30 disabled:pointer-events-none transition-colors"
+                    title={nextKf ? `Jump to next keyframe (${fmt(nextKf.time)})` : 'No next keyframe'}
+                  >
+                    <ChevronRight className="h-3.5 w-3.5" />
+                  </button>
+                )}
+              </div>
+            )
+          })()}
           <button data-testid="zoom-out" onClick={() => setPpms((p) => Math.max(0.03, p - 0.03))} className="grid h-8 w-8 place-items-center rounded-lg text-txt2 active:bg-surface2">
             <ZoomOut className="h-4 w-4" />
           </button>
@@ -333,6 +400,7 @@ export default function Timeline() {
                   key={item.layer.id}
                   item={item}
                   ppms={ppms}
+                  time={time}
                   selected={selectedId === item.layer.id}
                   onSelect={() => select(item.layer.id)}
                   onToggleCollapse={() => toggleGroupCollapse(item.layer.id)}
@@ -345,8 +413,33 @@ export default function Timeline() {
                   }}
                   onMoveLayer={(e) => {
                     e.stopPropagation()
-                    drag.current = { kind: 'move', id: item.layer.id, sx: e.clientX, initialStart: item.layer.start, initialEnd: item.layer.end }
+                    drag.current = {
+                      kind: 'move',
+                      id: item.layer.id,
+                      sx: e.clientX,
+                      initialStart: item.layer.start,
+                      initialEnd: item.layer.end,
+                      initialKeyframes: item.layer.keyframes ? [...item.layer.keyframes] : undefined,
+                    }
                   }}
+                  onKeyframePointerDown={(kfId, e) => {
+                    e.stopPropagation()
+                    select(item.layer.id)
+                    const targetKf = item.layer.keyframes?.find((k) => k.id === kfId)
+                    if (!targetKf) return
+                    setTime(targetKf.time)
+                    drag.current = {
+                      kind: 'keyframe',
+                      layerId: item.layer.id,
+                      keyframeId: kfId,
+                      sx: e.clientX,
+                      initialTime: targetKf.time,
+                      layerStart: item.layer.start,
+                      layerEnd: item.layer.end,
+                    }
+                  }}
+                  onKeyframeClick={(kfTime) => setTime(kfTime)}
+                  onDeleteKeyframe={(kfId) => deleteKeyframe(item.layer.id, kfId)}
                   onAnimation={(side, e) => {
                     e.stopPropagation()
                     select(item.layer.id)
@@ -429,6 +522,7 @@ export default function Timeline() {
 function TimelineRow({
   item,
   ppms,
+  time,
   selected,
   onSelect,
   onToggleCollapse,
@@ -437,12 +531,16 @@ function TimelineRow({
   onReorder,
   onTrimLayer,
   onMoveLayer,
+  onKeyframePointerDown,
+  onKeyframeClick,
+  onDeleteKeyframe,
   onAnimation,
   onDragGroup,
   onTrimGroup,
 }: {
   item: TimelineRowItem
   ppms: number
+  time: number
   selected: boolean
   onSelect: () => void
   onToggleCollapse: () => void
@@ -451,6 +549,9 @@ function TimelineRow({
   onReorder: (dir: number) => void
   onTrimLayer: (edge: 'l' | 'r', e: React.PointerEvent) => void
   onMoveLayer: (e: React.PointerEvent) => void
+  onKeyframePointerDown: (kfId: string, e: React.PointerEvent) => void
+  onKeyframeClick: (kfTime: number) => void
+  onDeleteKeyframe: (kfId: string) => void
   onAnimation: (side: 'in' | 'out', e: React.PointerEvent) => void
   onDragGroup: (e: React.PointerEvent) => void
   onTrimGroup: (edge: 'l' | 'r', e: React.PointerEvent) => void
@@ -773,6 +874,115 @@ function TimelineRow({
               title="Trim group end"
             >
               <span className="pointer-events-none h-3.5 w-0.5 rounded-full bg-white/50" />
+            </div>
+          </div>
+        ) : layer.keyframes && layer.keyframes.length > 0 ? (
+          /* Keyframe Layer clip — seamlessly switches the element in place inside the same lane height */
+          <div
+            onPointerDown={handleLayerPointerDown}
+            onPointerMove={handleLayerPointerMove}
+            onPointerUp={handleLayerPointerUp}
+            onPointerCancel={handleLayerPointerUp}
+            data-testid={`clip-${layer.id}`}
+            className={`absolute top-1.5 flex h-8 items-center rounded-md border shadow-sm select-none transition-colors ${
+              selected
+                ? 'border-amber-400 bg-slate-900/95 ring-1 ring-amber-400/80 shadow-[0_0_10px_rgba(251,191,36,0.18)]'
+                : 'border-amber-500/40 bg-slate-900/85 hover:border-amber-400/70'
+            }`}
+            style={{
+              left: layer.start * ppms,
+              width: Math.max(selected ? 92 : 48, (layer.end - layer.start) * ppms),
+              touchAction: 'pan-x pan-y',
+            }}
+          >
+            {/* Left trim handle */}
+            <div
+              onPointerDown={(e) => {
+                e.stopPropagation()
+                e.currentTarget.setPointerCapture(e.pointerId)
+                onTrimLayer('l', e)
+              }}
+              data-testid={`trim-l-${layer.id}`}
+              className="absolute left-0 top-0 z-20 flex h-full w-4 cursor-ew-resize items-center justify-center bg-black/40 hover:bg-amber-400/30 transition-colors"
+              style={{ touchAction: 'none' }}
+              title="Trim clip start"
+            >
+              <span className="pointer-events-none h-3 w-0.5 rounded-full bg-amber-400/80" />
+            </div>
+
+            {/* Connecting keyframe track line */}
+            {layer.keyframes.length >= 2 && (() => {
+              const times = layer.keyframes.map((k) => k.time)
+              const minT = Math.min(...times)
+              const maxT = Math.max(...times)
+              return (
+                <div
+                  className="absolute top-1/2 h-[2px] -translate-y-1/2 bg-amber-400/40 pointer-events-none z-10"
+                  style={{
+                    left: (minT - layer.start) * ppms,
+                    width: Math.max(0, (maxT - minT) * ppms),
+                  }}
+                />
+              )
+            })()}
+
+            {/* Center label & keyframe badge */}
+            <div className="pointer-events-none flex w-full items-center justify-center gap-1.5 px-5 truncate select-none z-0">
+              <span className="truncate text-[10px] font-semibold text-white/85">{label}</span>
+              <span className="rounded bg-amber-400/20 px-1 py-0.2 text-[8px] font-bold text-amber-300 tracking-wider shrink-0">
+                ◆ {layer.keyframes.length}
+              </span>
+            </div>
+
+            {/* Keyframe Diamond Markers */}
+            {layer.keyframes.map((kf) => {
+              const kfX = (kf.time - layer.start) * ppms
+              const isCurrent = Math.abs(time - kf.time) <= 60
+              return (
+                <button
+                  key={kf.id}
+                  type="button"
+                  data-testid={`keyframe-marker-${kf.id}`}
+                  onPointerDown={(e) => {
+                    e.stopPropagation()
+                    onKeyframePointerDown(kf.id, e)
+                  }}
+                  onClick={(e) => {
+                    e.stopPropagation()
+                    onKeyframeClick(kf.time)
+                  }}
+                  onDoubleClick={(e) => {
+                    e.stopPropagation()
+                    onDeleteKeyframe(kf.id)
+                  }}
+                  title={`Keyframe at ${fmt(kf.time)}\n• Drag to re-time\n• Click to jump\n• Double-click to remove`}
+                  className="absolute top-1/2 -translate-x-1/2 -translate-y-1/2 z-30 flex h-6 w-6 items-center justify-center cursor-ew-resize select-none group touch-none"
+                  style={{ left: kfX }}
+                >
+                  <div
+                    className={`h-3 w-3 rotate-45 transition-transform ${
+                      isCurrent
+                        ? 'bg-amber-300 ring-2 ring-white shadow-[0_0_8px_rgba(251,191,36,0.95)] scale-110'
+                        : 'bg-amber-400 group-hover:bg-amber-200 border border-black/80'
+                    }`}
+                  />
+                </button>
+              )
+            })}
+
+            {/* Right trim handle */}
+            <div
+              onPointerDown={(e) => {
+                e.stopPropagation()
+                e.currentTarget.setPointerCapture(e.pointerId)
+                onTrimLayer('r', e)
+              }}
+              data-testid={`trim-r-${layer.id}`}
+              className="absolute right-0 top-0 z-20 flex h-full w-4 cursor-ew-resize items-center justify-center bg-black/40 hover:bg-amber-400/30 transition-colors"
+              style={{ touchAction: 'none' }}
+              title="Trim clip end"
+            >
+              <span className="pointer-events-none h-3 w-0.5 rounded-full bg-amber-400/80" />
             </div>
           </div>
         ) : (

@@ -8,6 +8,7 @@ import {
   AlignHorizontalDistributeCenter, AlignVerticalDistributeCenter,
   Magnet, ChevronUp, ChevronDown, Lock, Unlock,
   Move, ArrowUpToLine, ArrowDownToLine, ArrowLeftToLine, ArrowRightToLine, Maximize2, Expand,
+  Droplet,
 } from 'lucide-react'
 import { useEditor, type AlignMode } from '#/store/editor'
 import { parseImagePosition } from '#/lib/imagePosition'
@@ -319,6 +320,12 @@ export default function Toolbar() {
     ]
   } else {
     const common: Item[] = [
+      {
+        key: 'blur',
+        label: 'Blur',
+        icon: <Droplet className="h-4 w-4" />,
+        active: Boolean(selected.blur && selected.blur > 0),
+      },
       { key: 'animate', label: 'Animate', icon: <Wand2 /> },
       { key: 'dup', label: 'Duplicate', icon: <Copy />, onClick: () => duplicate(selected.id) },
       { key: 'del', label: 'Delete', icon: <Trash2 />, onClick: () => (isMulti ? deleteLayers(selectedIds) : deleteLayer(selected.id)), danger: true },
@@ -438,9 +445,10 @@ export default function Toolbar() {
       ]
     : alignOptions
 
-  const floatingActionKeys = new Set(['color', 'lock-proportions', 'dup', 'del'])
+  const floatingActionKeys = new Set(['color', 'blur', 'lock-proportions', 'dup', 'del'])
   const floatingItems = selected ? items.filter((it) => floatingActionKeys.has(it.key)) : []
-  const toolbarItems = selected ? items.filter((it) => !floatingActionKeys.has(it.key)) : items
+  const toolbarExcludeKeys = new Set(['color', 'lock-proportions', 'dup', 'del'])
+  const toolbarItems = selected ? items.filter((it) => !toolbarExcludeKeys.has(it.key)) : items
 
   const renderItem = (it: Item) => {
     const isTimeline = it.key === 'timeline'

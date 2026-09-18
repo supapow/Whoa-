@@ -7,6 +7,7 @@ import { findCornerSizeMatch, findSizeMatch, getCandidateTargets, type SizeMatch
 import { findGapMatch, type GapMatchResult } from '#/lib/gapMatch'
 import { findElementAlignMatch, type ElementAlignResult } from '#/lib/elementAlign'
 import { parseImagePosition, formatImagePosition, calcImagePositionDelta } from '#/lib/imagePosition'
+import { interpolateKeyframes } from '#/lib/keyframes'
 
 function useSize<T extends HTMLElement>() {
   const ref = useRef<T>(null)
@@ -38,19 +39,25 @@ function isAlwaysVisible(layer: Layer, allLayers?: Layer[]): boolean {
 
 function anim(layer: Layer, time: number, active: boolean, allLayers?: Layer[]) {
   const baseRot = layer.rotation ? `rotate(${layer.rotation}deg)` : ''
+  const baseBlur = (layer.blur && layer.blur > 0 && layer.blurType !== 'backdrop') ? `blur(${layer.blur}px)` : 'none'
   if (!active) {
-    return { opacity: layer.opacity, transform: baseRot, filter: 'none', hidden: false }
+    return { opacity: layer.opacity, transform: baseRot, filter: baseBlur, hidden: false }
   }
 
   // When alwaysVisible is active, elements are shown at all times in their resting state;
   // in- and out-animations are completely disabled so the user can easily align elements.
   if (isAlwaysVisible(layer, allLayers)) {
-    return { opacity: layer.opacity, transform: baseRot, filter: 'none', hidden: false }
+    return { opacity: layer.opacity, transform: baseRot, filter: baseBlur, hidden: false }
   }
 
   // Outside layer lifespan, completely hidden
   if (time < layer.start || time > layer.end) {
     return { opacity: 0, transform: '', filter: 'none', hidden: true }
+  }
+
+  // If layer has keyframes, keyframe interpolation governs the entire lifespan
+  if (layer.keyframes && layer.keyframes.length > 0) {
+    return { opacity: layer.opacity, transform: baseRot, filter: baseBlur, hidden: false }
   }
 
   const inAnimType = layer.inAnim || layer.anim || 'none'
@@ -77,7 +84,7 @@ function anim(layer: Layer, time: number, active: boolean, allLayers?: Layer[]) 
 
     let opacity = layer.opacity * easeOut
     let transform = baseRot
-    let filter = 'none'
+    let filter = baseBlur
 
     switch (inAnimType) {
       case 'fade':
@@ -99,9 +106,10 @@ function anim(layer: Layer, time: number, active: boolean, allLayers?: Layer[]) 
         break
       }
       case 'blur': {
-        // Pure optical rack-focus: deep 28px blur smoothly resolving into razor-sharp focus
+        // Pure optical rack-focus: deep 28px blur smoothly resolving into razor-sharp focus (or layer blur)
         const falloff = Math.pow(1 - inP, 1.8)
-        const blurPx = falloff * 28
+        const addedBlur = layer.blurType !== 'backdrop' ? (layer.blur || 0) : 0
+        const blurPx = falloff * 28 + addedBlur
         opacity = layer.opacity * easeOut
         filter = blurPx > 0.1 ? `blur(${blurPx.toFixed(1)}px)` : 'none'
         transform = baseRot
@@ -138,7 +146,7 @@ function anim(layer: Layer, time: number, active: boolean, allLayers?: Layer[]) 
 
     let opacity = layer.opacity * (1 - easeIn)
     let transform = baseRot
-    let filter = 'none'
+    let filter = baseBlur
 
     switch (outAnimType) {
       case 'fade':
@@ -165,7 +173,8 @@ function anim(layer: Layer, time: number, active: boolean, allLayers?: Layer[]) 
       case 'blur': {
         // Cinematic defocus: smoothly defocuses into a deep 28px blur as it dissolves away
         const defocus = Math.pow(outP, 1.8)
-        const blurPx = defocus * 28
+        const addedBlur = layer.blurType !== 'backdrop' ? (layer.blur || 0) : 0
+        const blurPx = defocus * 28 + addedBlur
         opacity = layer.opacity * (1 - easeIn)
         filter = blurPx > 0.1 ? `blur(${blurPx.toFixed(1)}px)` : 'none'
         transform = baseRot
@@ -194,7 +203,7 @@ function anim(layer: Layer, time: number, active: boolean, allLayers?: Layer[]) 
   }
 
   // 3. Resting state
-  return { opacity: layer.opacity, transform: baseRot, filter: 'none', hidden: false }
+  return { opacity: layer.opacity, transform: baseRot, filter: baseBlur, hidden: false }
 }
 
 const clampN = (v: number, lo: number, hi: number) => Math.max(lo, Math.min(v, hi))
@@ -2770,7 +2779,8 @@ export default function Canvas() {
             </>
           )}
           {project.layers.map((l) => {
-            const a = anim(l, time, active, project.layers)
+            const effectiveLayer = l.keyframes && l.keyframes.length > 0 ? interpolateKeyframes(l, time) : l
+            const a = anim(effectiveLayer, time, active, project.layers)
             if (l.visible === false || a.hidden) return null
             const isSel = selectedIds.includes(l.id)
             return (
@@ -2845,31 +2855,37 @@ export default function Canvas() {
                 data-layer-id={l.id}
                 style={{
                   position: 'absolute',
-                  left: l.type === 'text' && l.align === 'center' && l.x === 0 && l.w === preset.w && !l.paddingLeft && !l.paddingRight && layerRefs.current.get(l.id)
+                  left: effectiveLayer.type === 'text' && effectiveLayer.align === 'center' && effectiveLayer.x === 0 && effectiveLayer.w === preset.w && !effectiveLayer.paddingLeft && !effectiveLayer.paddingRight && layerRefs.current.get(l.id)
                     ? (preset.w - layerRefs.current.get(l.id)!.offsetWidth) / 2
-                    : l.x,
-                  top: l.y,
-                  width: l.type === 'text' ? 'max-content' : l.w,
-                  height: l.type === 'text' && l.h !== preset.h ? 'auto' : l.h,
-                  fontSize: l.type === 'text' ? l.fontSize : undefined,
-                  lineHeight: l.type === 'text' ? 0.8 : undefined,
-                  paddingTop: l.paddingTop ? `${l.paddingTop}px` : undefined,
-                  paddingRight: l.paddingRight ? `${l.paddingRight}px` : undefined,
-                  paddingBottom: l.paddingBottom ? `${l.paddingBottom}px` : undefined,
-                  paddingLeft: l.paddingLeft ? `${l.paddingLeft}px` : undefined,
-                  background: l.type === 'text' && l.fill ? l.fill : undefined,
-                  borderRadius: l.type === 'shape'
-                    ? (l.shape === 'circle' ? '9999px' : l.radius ? `${l.radius}px` : undefined)
-                    : (l.type === 'text' && l.radius ? `${l.radius}px` : undefined),
+                    : effectiveLayer.x,
+                  top: effectiveLayer.y,
+                  width: effectiveLayer.type === 'text' ? 'max-content' : effectiveLayer.w,
+                  height: effectiveLayer.type === 'text' && effectiveLayer.h !== preset.h ? 'auto' : effectiveLayer.h,
+                  fontSize: effectiveLayer.type === 'text' ? effectiveLayer.fontSize : undefined,
+                  lineHeight: effectiveLayer.type === 'text' ? 0.8 : undefined,
+                  paddingTop: effectiveLayer.paddingTop ? `${effectiveLayer.paddingTop}px` : undefined,
+                  paddingRight: effectiveLayer.paddingRight ? `${effectiveLayer.paddingRight}px` : undefined,
+                  paddingBottom: effectiveLayer.paddingBottom ? `${effectiveLayer.paddingBottom}px` : undefined,
+                  paddingLeft: effectiveLayer.paddingLeft ? `${effectiveLayer.paddingLeft}px` : undefined,
+                  background: effectiveLayer.type === 'text' && effectiveLayer.fill ? effectiveLayer.fill : undefined,
+                  borderRadius: effectiveLayer.type === 'shape'
+                    ? (effectiveLayer.shape === 'circle' ? '9999px' : effectiveLayer.radius ? `${effectiveLayer.radius}px` : undefined)
+                    : (effectiveLayer.type === 'text' && effectiveLayer.radius ? `${effectiveLayer.radius}px` : undefined),
                   margin: 0,
                   boxSizing: 'border-box',
                   opacity: a.opacity,
                   transform: a.transform,
                   filter: a.filter,
-                  willChange: a.filter !== 'none' ? 'filter, opacity' : undefined,
+                  backdropFilter: (effectiveLayer.blurType === 'backdrop' && effectiveLayer.blur && effectiveLayer.blur > 0)
+                    ? `blur(${effectiveLayer.blur}px)`
+                    : undefined,
+                  WebkitBackdropFilter: (effectiveLayer.blurType === 'backdrop' && effectiveLayer.blur && effectiveLayer.blur > 0)
+                    ? `blur(${effectiveLayer.blur}px)`
+                    : undefined,
+                  willChange: (a.filter !== 'none' || Boolean(effectiveLayer.blur)) ? 'filter, opacity' : undefined,
                   WebkitBackfaceVisibility: 'hidden',
                   backfaceVisibility: 'hidden',
-                  outline: (isSel && !playing && a.filter === 'none' && l.type !== 'group')
+                  outline: (isSel && !playing && l.type !== 'group')
                     ? (imagePositioningId === l.id && l.type === 'image'
                         ? `${2 / eff}px solid #38bdf8`
                         : `${2 / eff}px solid ${(multiSelectMode || selectedIds.length > 1) && !pinchActive ? '#4B1D6B' : '#007AFF'}`)
@@ -2886,7 +2902,7 @@ export default function Canvas() {
                 }}
               >
                 <LayerContent
-                  layer={l}
+                  layer={effectiveLayer}
                   editing={editingId === l.id}
                   onEdit={(t) => updateLayer(l.id, { text: t })}
                   onEndEdit={() => setEditingId(null)}
@@ -2920,18 +2936,19 @@ export default function Canvas() {
 
             const isGroup = selected.length > 1 || multiSelectMode || sel.type === 'group'
             const measured = (layer: Layer) => {
-              const node = layerRefs.current.get(layer.id)
-              const isText = layer.type === 'text'
-              const textW = (isText && node ? node.offsetWidth : 0) || layer.w
-              const posX = isText && layer.align === 'center' && layer.x === 0 && layer.w === preset.w
+              const effLayer = layer.keyframes && layer.keyframes.length > 0 ? interpolateKeyframes(layer, time) : layer
+              const node = layerRefs.current.get(effLayer.id)
+              const isText = effLayer.type === 'text'
+              const textW = (isText && node ? node.offsetWidth : 0) || effLayer.w
+              const posX = isText && effLayer.align === 'center' && effLayer.x === 0 && effLayer.w === preset.w
                 ? (preset.w - textW) / 2
-                : layer.x
-              const textH = (isText && node ? node.offsetHeight : 0) || (isText && layer.id === selectedId ? selH : 0) || layer.h
+                : effLayer.x
+              const textH = (isText && node ? node.offsetHeight : 0) || (isText && effLayer.id === selectedId ? selH : 0) || effLayer.h
               return {
                 x: posX,
-                y: layer.y,
-                w: isText ? textW : layer.w,
-                h: isText ? textH : layer.h,
+                y: effLayer.y,
+                w: isText ? textW : effLayer.w,
+                h: isText ? textH : effLayer.h,
               }
             }
             let bounds = selected.reduce(
