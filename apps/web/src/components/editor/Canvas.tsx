@@ -39,15 +39,17 @@ function isAlwaysVisible(layer: Layer, allLayers?: Layer[]): boolean {
 
 function anim(layer: Layer, time: number, active: boolean, allLayers?: Layer[]) {
   const baseRot = layer.rotation ? `rotate(${layer.rotation}deg)` : ''
+  const baseScale = layer.scale !== undefined && Math.abs(layer.scale - 1) > 0.005 ? `scale(${layer.scale.toFixed(3)})` : ''
+  const baseTransform = [baseScale, baseRot].filter(Boolean).join(' ')
   const baseBlur = (layer.blur && layer.blur > 0 && layer.blurType !== 'backdrop') ? `blur(${layer.blur}px)` : 'none'
   if (!active) {
-    return { opacity: layer.opacity, transform: baseRot, filter: baseBlur, hidden: false }
+    return { opacity: layer.opacity, transform: baseTransform, filter: baseBlur, hidden: false }
   }
 
   // When alwaysVisible is active, elements are shown at all times in their resting state;
   // in- and out-animations are completely disabled so the user can easily align elements.
   if (isAlwaysVisible(layer, allLayers)) {
-    return { opacity: layer.opacity, transform: baseRot, filter: baseBlur, hidden: false }
+    return { opacity: layer.opacity, transform: baseTransform, filter: baseBlur, hidden: false }
   }
 
   // Outside layer lifespan, completely hidden
@@ -57,7 +59,7 @@ function anim(layer: Layer, time: number, active: boolean, allLayers?: Layer[]) 
 
   // If layer has keyframes, keyframe interpolation governs the entire lifespan
   if (layer.keyframes && layer.keyframes.length > 0) {
-    return { opacity: layer.opacity, transform: baseRot, filter: baseBlur, hidden: false }
+    return { opacity: layer.opacity, transform: baseTransform, filter: baseBlur, hidden: false }
   }
 
   const inAnimType = layer.inAnim || layer.anim || 'none'
@@ -2855,7 +2857,7 @@ export default function Canvas() {
                 data-layer-id={l.id}
                 style={{
                   position: 'absolute',
-                  left: effectiveLayer.type === 'text' && effectiveLayer.align === 'center' && effectiveLayer.x === 0 && effectiveLayer.w === preset.w && !effectiveLayer.paddingLeft && !effectiveLayer.paddingRight && layerRefs.current.get(l.id)
+                  left: !l.keyframes?.length && effectiveLayer.type === 'text' && effectiveLayer.align === 'center' && effectiveLayer.x === 0 && effectiveLayer.w === preset.w && !effectiveLayer.paddingLeft && !effectiveLayer.paddingRight && layerRefs.current.get(l.id)
                     ? (preset.w - layerRefs.current.get(l.id)!.offsetWidth) / 2
                     : effectiveLayer.x,
                   top: effectiveLayer.y,
@@ -2940,7 +2942,7 @@ export default function Canvas() {
               const node = layerRefs.current.get(effLayer.id)
               const isText = effLayer.type === 'text'
               const textW = (isText && node ? node.offsetWidth : 0) || effLayer.w
-              const posX = isText && effLayer.align === 'center' && effLayer.x === 0 && effLayer.w === preset.w
+              const posX = !effLayer.keyframes?.length && isText && effLayer.align === 'center' && effLayer.x === 0 && effLayer.w === preset.w
                 ? (preset.w - textW) / 2
                 : effLayer.x
               const textH = (isText && node ? node.offsetHeight : 0) || (isText && effLayer.id === selectedId ? selH : 0) || effLayer.h

@@ -983,6 +983,7 @@ function RadiusPanel() {
               {sortedKfs.map((kf) => {
                 const isActive = Math.abs(time - kf.time) <= 60
                 const summary = [
+                  kf.scale !== undefined && Math.abs(kf.scale - 1) > 0.01 ? `Scale ${kf.scale}x` : null,
                   kf.blur !== undefined && kf.blur > 0 ? `Blur ${kf.blur}px` : (kf.blur === 0 ? 'No Blur' : null),
                   kf.color !== undefined ? `Color ${kf.color}` : (kf.fill !== undefined ? `Fill ${kf.fill}` : null),
                   kf.opacity !== undefined && kf.opacity < 1 ? `Opacity ${Math.round(kf.opacity * 100)}%` : null,

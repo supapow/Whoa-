@@ -17,6 +17,7 @@ export interface Keyframe {
   h: number
   rotation: number
   opacity: number
+  scale?: number
   // styles
   fontSize?: number
   fontWeight?: number
@@ -36,6 +37,7 @@ export interface Layer {
   h: number
   rotation: number
   opacity: number
+  scale?: number
   blur?: number // px blur radius
   blurType?: 'element' | 'backdrop' // element blur or backdrop frosted blur
   visible: boolean

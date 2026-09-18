@@ -121,6 +121,7 @@ export function sampleLayerKeyframeState(layer: Layer, time: number, id?: string
     h: layer.h,
     rotation: layer.rotation || 0,
     opacity: layer.opacity ?? 1,
+    scale: layer.scale ?? 1,
     fontSize: layer.fontSize,
     fontWeight: layer.fontWeight,
     color: layer.color,
@@ -134,7 +135,38 @@ export function sampleLayerKeyframeState(layer: Layer, time: number, id?: string
  * Converts a layer's current preset inAnim and outAnim into discrete keyframes.
  * If no animations are set, returns starting and ending resting keyframes.
  */
-export function convertAnimationToKeyframes(layer: Layer, currentTime?: number): Keyframe[] {
+export function convertAnimationToKeyframes(
+  rawLayer: Layer,
+  currentTime?: number,
+  preset?: { w: number; h: number }
+): Keyframe[] {
+  let layer = rawLayer
+
+  // If layer is a centered text layer with template full-canvas width (x === 0 && w === preset.w or w >= 800),
+  // measure or estimate its actual horizontal position so that the keyframes are pinned to the true coordinates.
+  if (
+    layer.type === 'text' &&
+    layer.align === 'center' &&
+    layer.x === 0 &&
+    ((preset && layer.w === preset.w) || layer.w >= 800)
+  ) {
+    let realW = layer.w
+    let realX = layer.x
+    if (typeof document !== 'undefined') {
+      const node = document.querySelector(`[data-layer-id="${layer.id}"]`) as HTMLElement | null
+      if (node && node.offsetWidth > 0) {
+        realW = node.offsetWidth
+        realX = preset ? Math.round((preset.w - realW) / 2) : node.offsetLeft
+      }
+    }
+    if (realX === 0 && (realW === (preset ? preset.w : layer.w) || realW >= 800)) {
+      const estW = Math.max(40, Math.round((layer.fontSize || 32) * (layer.text || '').length * 0.55))
+      realW = estW
+      realX = preset ? Math.round((preset.w - realW) / 2) : 0
+    }
+    layer = { ...rawLayer, x: realX, w: realW }
+  }
+
   const inAnimType = layer.inAnim || layer.anim || 'none'
   const outAnimType = layer.outAnim || 'none'
   const layerDuration = Math.max(1, layer.end - layer.start)
@@ -152,6 +184,7 @@ export function convertAnimationToKeyframes(layer: Layer, currentTime?: number):
     h: layer.h,
     rotation: layer.rotation || 0,
     opacity: layer.opacity ?? 1,
+    scale: layer.scale ?? 1,
     color: layer.color,
     fill: layer.fill,
     blur: layer.blur ?? 0,
@@ -175,18 +208,9 @@ export function convertAnimationToKeyframes(layer: Layer, currentTime?: number):
       case 'rise':
         startState = { y: layer.y + 28, opacity: 0 }
         break
-      case 'pop': {
-        const sw = Math.round(layer.w * 0.72)
-        const sh = Math.round(layer.h * 0.72)
-        startState = {
-          w: sw,
-          h: sh,
-          x: Math.round(layer.x + (layer.w - sw) / 2),
-          y: Math.round(layer.y + (layer.h - sh) / 2),
-          opacity: 0,
-        }
+      case 'pop':
+        startState = { scale: 0.72, opacity: 0 }
         break
-      }
       case 'slide':
         startState = { x: layer.x - 48, opacity: 0 }
         break
@@ -197,7 +221,7 @@ export function convertAnimationToKeyframes(layer: Layer, currentTime?: number):
         }
         break
       case 'pulse':
-        startState = { opacity: 0 }
+        startState = { scale: 0.85, opacity: 0 }
         break
     }
 
@@ -212,25 +236,23 @@ export function convertAnimationToKeyframes(layer: Layer, currentTime?: number):
     // Intermediate keyframe for pulse
     if (inAnimType === 'pulse') {
       const pulseT = Math.round(layer.start + inDur * 0.35)
-      const pw = Math.round(layer.w * 1.16)
-      const ph = Math.round(layer.h * 1.16)
       keyframes.push({
         id: uid(),
         time: pulseT,
         ...base,
-        w: pw,
-        h: ph,
-        x: Math.round(layer.x + (layer.w - pw) / 2),
-        y: Math.round(layer.y + (layer.h - ph) / 2),
+        scale: 1.16,
         opacity: base.opacity,
       })
     }
 
     // Resting keyframe at end of entrance
+    const restingRot = inAnimType === 'rotate' ? (layer.rotation || 0) + (layer.inRotateEnd !== undefined ? layer.inRotateEnd : 0) : base.rotation
     keyframes.push({
       id: uid(),
       time: layer.start + inDur,
       ...base,
+      rotation: restingRot,
+      scale: 1,
     })
   } else {
     // Standard resting keyframe at clip start
@@ -247,26 +269,24 @@ export function convertAnimationToKeyframes(layer: Layer, currentTime?: number):
 
     // Keyframe at start of exit (holding resting state)
     if (exitStartTime > layer.start + inDur) {
+      const exitStartRot = outAnimType === 'rotate' ? (layer.rotation || 0) + (layer.outRotateStart ?? 0) : base.rotation
       keyframes.push({
         id: uid(),
         time: exitStartTime,
         ...base,
+        rotation: exitStartRot,
+        scale: 1,
       })
     }
 
     // Intermediate keyframe for pulse exit
     if (outAnimType === 'pulse') {
       const pulseOutT = Math.round(exitStartTime + outDur * 0.3)
-      const pw = Math.round(layer.w * 1.1)
-      const ph = Math.round(layer.h * 1.1)
       keyframes.push({
         id: uid(),
         time: pulseOutT,
         ...base,
-        w: pw,
-        h: ph,
-        x: Math.round(layer.x + (layer.w - pw) / 2),
-        y: Math.round(layer.y + (layer.h - ph) / 2),
+        scale: 1.1,
         opacity: Math.max(0, base.opacity * 0.85),
       })
     }
@@ -282,18 +302,9 @@ export function convertAnimationToKeyframes(layer: Layer, currentTime?: number):
       case 'rise':
         endState = { y: layer.y - 28, opacity: 0 }
         break
-      case 'pop': {
-        const sw = Math.round(layer.w * 0.72)
-        const sh = Math.round(layer.h * 0.72)
-        endState = {
-          w: sw,
-          h: sh,
-          x: Math.round(layer.x + (layer.w - sw) / 2),
-          y: Math.round(layer.y + (layer.h - sh) / 2),
-          opacity: 0,
-        }
+      case 'pop':
+        endState = { scale: 0.72, opacity: 0 }
         break
-      }
       case 'slide':
         endState = { x: layer.x + 48, opacity: 0 }
         break
@@ -303,18 +314,9 @@ export function convertAnimationToKeyframes(layer: Layer, currentTime?: number):
           opacity: 0,
         }
         break
-      case 'pulse': {
-        const sw = Math.round(layer.w * 0.65)
-        const sh = Math.round(layer.h * 0.65)
-        endState = {
-          w: sw,
-          h: sh,
-          x: Math.round(layer.x + (layer.w - sw) / 2),
-          y: Math.round(layer.y + (layer.h - sh) / 2),
-          opacity: 0,
-        }
+      case 'pulse':
+        endState = { scale: 0.65, opacity: 0 }
         break
-      }
     }
 
     // Keyframe at end
@@ -333,15 +335,21 @@ export function convertAnimationToKeyframes(layer: Layer, currentTime?: number):
     })
   }
 
-  // If a current time was requested and is strictly within clip lifespan, ensure a keyframe at currentTime
+  // If a current time was requested and is strictly within clip lifespan:
+  // Only inject if there were no animations, or if currentTime is in the resting interval between
+  // entrance end and exit start, avoiding corrupting in-flight animation curves
   if (currentTime !== undefined && currentTime > layer.start && currentTime < layer.end) {
-    const hasNearby = keyframes.some((k) => Math.abs(k.time - currentTime) <= 40)
-    if (!hasNearby) {
-      keyframes.push({
-        id: uid(),
-        time: Math.round(currentTime),
-        ...base,
-      })
+    const inFinished = inAnimType !== 'none' ? layer.start + inDur : layer.start
+    const outStarted = outAnimType !== 'none' ? Math.max(inFinished + 10, layer.end - outDur) : layer.end
+    if ((inAnimType === 'none' && outAnimType === 'none') || (currentTime >= inFinished && currentTime <= outStarted)) {
+      const hasNearby = keyframes.some((k) => Math.abs(k.time - currentTime) <= 40)
+      if (!hasNearby) {
+        keyframes.push({
+          id: uid(),
+          time: Math.round(currentTime),
+          ...base,
+        })
+      }
     }
   }
 
@@ -351,7 +359,6 @@ export function convertAnimationToKeyframes(layer: Layer, currentTime?: number):
   for (const kf of keyframes) {
     const last = deduped[deduped.length - 1]
     if (last && Math.abs(last.time - kf.time) <= 15) {
-      // replace or keep
       deduped[deduped.length - 1] = kf
     } else {
       deduped.push(kf)
@@ -381,6 +388,7 @@ export function interpolateKeyframes(layer: Layer, time: number): Layer {
       h: k.h,
       rotation: k.rotation,
       opacity: k.opacity,
+      scale: k.scale ?? layer.scale ?? 1,
       fontSize: k.fontSize ?? layer.fontSize,
       fontWeight: k.fontWeight ?? layer.fontWeight,
       color: k.color ?? layer.color,
@@ -396,6 +404,7 @@ export function interpolateKeyframes(layer: Layer, time: number): Layer {
   const hasRadiusKeyframe = kfs.some((kf) => kf.radius !== undefined)
   const hasFontSizeKeyframe = kfs.some((kf) => kf.fontSize !== undefined)
   const hasFontWeightKeyframe = kfs.some((kf) => kf.fontWeight !== undefined)
+  const hasScaleKeyframe = kfs.some((kf) => kf.scale !== undefined)
 
   const getKfColor = (kf: Keyframe): string | undefined => (kf.color !== undefined ? kf.color : layer.color)
   const getKfFill = (kf: Keyframe): string | undefined => (kf.fill !== undefined ? kf.fill : layer.fill)
@@ -415,6 +424,7 @@ export function interpolateKeyframes(layer: Layer, time: number): Layer {
       h: first.h,
       rotation: first.rotation,
       opacity: first.opacity,
+      scale: hasScaleKeyframe ? (first.scale ?? 1) : (layer.scale ?? 1),
       fontSize: hasFontSizeKeyframe ? getKfFontSize(first) : layer.fontSize,
       fontWeight: hasFontWeightKeyframe ? getKfFontWeight(first) : layer.fontWeight,
       color: hasColorKeyframe ? getKfColor(first) : layer.color,
@@ -434,6 +444,7 @@ export function interpolateKeyframes(layer: Layer, time: number): Layer {
       h: last.h,
       rotation: last.rotation,
       opacity: last.opacity,
+      scale: hasScaleKeyframe ? (last.scale ?? 1) : (layer.scale ?? 1),
       fontSize: hasFontSizeKeyframe ? getKfFontSize(last) : layer.fontSize,
       fontWeight: hasFontWeightKeyframe ? getKfFontWeight(last) : layer.fontWeight,
       color: hasColorKeyframe ? getKfColor(last) : layer.color,
@@ -465,6 +476,9 @@ export function interpolateKeyframes(layer: Layer, time: number): Layer {
   const h = Math.round(k0.h + (k1.h - k0.h) * p)
   const rotation = Number((k0.rotation + (k1.rotation - k0.rotation) * p).toFixed(2))
   const opacity = Number(Math.max(0, Math.min(1, k0.opacity + (k1.opacity - k0.opacity) * p)).toFixed(3))
+  const scale = hasScaleKeyframe
+    ? Number(((k0.scale ?? 1) + ((k1.scale ?? 1) - (k0.scale ?? 1)) * p).toFixed(3))
+    : (layer.scale ?? 1)
 
   // Interpolate styles
   const fontSize = (hasFontSizeKeyframe && getKfFontSize(k0) !== undefined && getKfFontSize(k1) !== undefined)
@@ -499,6 +513,7 @@ export function interpolateKeyframes(layer: Layer, time: number): Layer {
     h,
     rotation,
     opacity,
+    scale,
     fontSize,
     fontWeight,
     color,
@@ -549,7 +564,7 @@ export function upsertKeyframe(layer: Layer, time: number, customProps?: Partial
   // keyframe 2 has blur 0 + black color).
   if (customProps && existing.length > 0) {
     const animatableKeys: (keyof Keyframe)[] = [
-      'color', 'fill', 'blur', 'opacity', 'radius', 'fontSize', 'fontWeight', 'rotation', 'x', 'y', 'w', 'h'
+      'color', 'fill', 'blur', 'opacity', 'radius', 'fontSize', 'fontWeight', 'rotation', 'x', 'y', 'w', 'h', 'scale'
     ]
 
     for (const key of animatableKeys) {
@@ -561,6 +576,7 @@ export function upsertKeyframe(layer: Layer, time: number, customProps?: Partial
             else if (key === 'blur') existing[i].blur = layer.blur ?? 0
             else if (key === 'radius') existing[i].radius = layer.radius ?? 0
             else if (key === 'opacity') existing[i].opacity = layer.opacity ?? 1
+            else if (key === 'scale') existing[i].scale = layer.scale ?? 1
             else if (key === 'rotation') existing[i].rotation = layer.rotation ?? 0
             else if (key === 'fontSize') existing[i].fontSize = layer.fontSize
             else if (key === 'fontWeight') existing[i].fontWeight = layer.fontWeight
@@ -591,6 +607,7 @@ export function upsertKeyframe(layer: Layer, time: number, customProps?: Partial
       h: currentSample.h,
       rotation: currentSample.rotation || 0,
       opacity: currentSample.opacity ?? 1,
+      scale: customProps?.scale !== undefined ? customProps.scale : (currentSample.scale ?? 1),
       fontSize: currentSample.fontSize,
       fontWeight: currentSample.fontWeight,
       color: customProps?.color !== undefined ? customProps.color : currentSample.color,

@@ -637,11 +637,42 @@ function reducer(state: State, a: Action): State {
         }
       } else {
         // Convert existing animation presets into editable keyframes, ensuring a keyframe at targetTime
-        const initialKeyframes = convertAnimationToKeyframes(targetLayer, targetTime)
+        let layerToConvert = targetLayer
+
+        // If targetLayer is a centered text with template coordinates (x === 0 && (w === p.preset.w || w >= 800)),
+        // normalize its x and w to its real visual artboard coordinates before converting
+        if (
+          targetLayer.type === 'text' &&
+          targetLayer.align === 'center' &&
+          targetLayer.x === 0 &&
+          (targetLayer.w === p.preset.w || targetLayer.w >= 800)
+        ) {
+          let realW = targetLayer.w
+          let realX = targetLayer.x
+          if (typeof document !== 'undefined') {
+            const node = document.querySelector(`[data-layer-id="${targetId}"]`) as HTMLElement | null
+            if (node && node.offsetWidth > 0) {
+              realW = node.offsetWidth
+              realX = Math.round((p.preset.w - realW) / 2)
+            }
+          }
+          if (realX === 0 && (realW === p.preset.w || realW >= 800)) {
+            const estW = Math.max(40, Math.round((targetLayer.fontSize || 32) * (targetLayer.text || '').length * 0.55))
+            realW = estW
+            realX = Math.round((p.preset.w - realW) / 2)
+          }
+          layerToConvert = {
+            ...targetLayer,
+            x: realX,
+            w: realW,
+          }
+        }
+
+        const initialKeyframes = convertAnimationToKeyframes(layerToConvert, targetTime, p.preset)
         updatedLayers = p.layers.map((l) => {
           if (l.id !== targetId) return l
           return {
-            ...l,
+            ...layerToConvert,
             anim: 'none',
             inAnim: 'none',
             outAnim: 'none',
