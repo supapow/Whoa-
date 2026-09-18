@@ -22,9 +22,9 @@ export interface Layer {
   locked: boolean
   start: number // ms
   end: number // ms
-  anim: 'none' | 'fade' | 'rise' | 'pop' | 'slide' | 'blur' | 'rotate'
-  inAnim?: 'none' | 'fade' | 'rise' | 'pop' | 'slide' | 'blur' | 'rotate'
-  outAnim?: 'none' | 'fade' | 'rise' | 'pop' | 'slide' | 'blur' | 'rotate'
+  anim: 'none' | 'fade' | 'rise' | 'pop' | 'slide' | 'blur' | 'rotate' | 'pulse'
+  inAnim?: 'none' | 'fade' | 'rise' | 'pop' | 'slide' | 'blur' | 'rotate' | 'pulse'
+  outAnim?: 'none' | 'fade' | 'rise' | 'pop' | 'slide' | 'blur' | 'rotate' | 'pulse'
   // rotate animation settings
   inRotateStart?: number // degrees (default: 0)
   inRotateEnd?: number // degrees (default: 30)

@@ -750,6 +750,7 @@ function RadiusPanel() {
       { k: 'pop', label: animationSide === 'in' ? 'Pop In' : 'Pop Out' },
       { k: 'slide', label: animationSide === 'in' ? 'Slide In' : 'Slide Out' },
       { k: 'blur', label: animationSide === 'in' ? 'Blur In' : 'Blur Out' },
+      { k: 'pulse', label: animationSide === 'in' ? 'Pulse In' : 'Pulse Out' },
       { k: 'rotate', label: 'Rotate' },
     ]
     const current = animationSide === 'in' ? (l.inAnim || l.anim || 'none') : (l.outAnim || 'none')
@@ -764,14 +765,14 @@ function RadiusPanel() {
       if (animationSide === 'in') {
         setTime(l.start)
       } else {
-        const dur = animType === 'blur' ? 650 : animType === 'rotate' ? (customMs ?? msVal) : 380
+        const dur = animType === 'blur' ? 650 : animType === 'rotate' ? (customMs ?? msVal) : animType === 'pulse' ? 500 : 380
         setTime(Math.max(0, l.end - dur))
       }
     }
 
     return (
       <div className="pb-4">
-        <div className="mb-4 flex rounded-xl bg-surface2 p-1">
+        <div className="mb-3 flex rounded-xl bg-surface2 p-1">
           {(['in', 'out'] as const).map((side) => (
             <button
               key={side}
@@ -782,7 +783,7 @@ function RadiusPanel() {
                   setTime(l.start)
                 } else {
                   const outType = l.outAnim || 'none'
-                  const dur = outType === 'blur' ? 650 : outType === 'rotate' ? (l.outRotateMs ?? 150) : 380
+                  const dur = outType === 'blur' ? 650 : outType === 'rotate' ? (l.outRotateMs ?? 150) : outType === 'pulse' ? 500 : 380
                   setTime(Math.max(0, l.end - dur))
                 }
               }}
@@ -794,10 +795,10 @@ function RadiusPanel() {
             </button>
           ))}
         </div>
-        <p className="mb-3 text-sm text-txt2">
+        <p className="mb-2.5 text-xs text-txt2">
           Choose the {animationSide === 'in' ? 'entrance' : 'exit'} animation for this layer.
         </p>
-        <Grid cols={2}>
+        <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 pb-3">
           {anims.map((a) => {
             const isRotateBtn = a.k === 'rotate'
             const isSel = current === a.k
@@ -812,15 +813,15 @@ function RadiusPanel() {
                       previewAnim(a.k)
                     }
                   }}
-                  className={`w-full rounded-2xl border py-5 text-sm font-semibold transition-all ${
-                    isRotateBtn ? 'pr-8 pl-3' : 'px-3'
+                  className={`flex h-11 w-full items-center justify-center rounded-xl border py-2 text-xs font-semibold transition-all ${
+                    isRotateBtn ? 'pr-7 pl-2.5' : 'px-2.5'
                   } ${
                     isSel
-                      ? 'border-accent bg-accent/10 text-white shadow-sm'
-                      : 'border-line bg-surface2 text-txt2 hover:text-white'
+                      ? 'border-accent bg-accent/10 text-white shadow-sm ring-1 ring-accent/30'
+                      : 'border-line bg-surface2 text-txt2 hover:border-white/20 hover:text-white'
                   }`}
                 >
-                  {a.label}
+                  <span className="truncate">{a.label}</span>
                 </button>
 
                 {/* Dot icon button for Rotate animation options */}
@@ -838,7 +839,7 @@ function RadiusPanel() {
                       }
                       setConfigOpen((prev) => !prev)
                     }}
-                    className={`absolute right-2.5 top-1/2 -translate-y-1/2 grid h-7 w-7 place-items-center rounded-full transition-colors ${
+                    className={`absolute right-1.5 top-1/2 -translate-y-1/2 grid h-6 w-6 place-items-center rounded-full transition-colors ${
                       configOpen
                         ? 'bg-accent text-white ring-2 ring-accent/30'
                         : isSel
@@ -846,13 +847,13 @@ function RadiusPanel() {
                         : 'bg-white/10 text-txt2 hover:bg-white/20 hover:text-white'
                     }`}
                   >
-                    <CircleDot className="h-3.5 w-3.5" />
+                    <CircleDot className="h-3 w-3" />
                   </button>
                 )}
               </div>
             )
           })}
-        </Grid>
+        </div>
 
         {/* Rotate configuration drawer / panel when open or active */}
         {isRotate && configOpen && (

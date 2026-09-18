@@ -58,8 +58,8 @@ function anim(layer: Layer, time: number, active: boolean, allLayers?: Layer[]) 
   const layerDuration = Math.max(1, layer.end - layer.start)
 
   // Determine standard or custom duration for animations
-  const defaultInDur = inAnimType === 'blur' ? 650 : inAnimType === 'rotate' ? (layer.inRotateMs ?? 150) : 380
-  const defaultOutDur = outAnimType === 'blur' ? 650 : outAnimType === 'rotate' ? (layer.outRotateMs ?? 150) : 380
+  const defaultInDur = inAnimType === 'blur' ? 650 : inAnimType === 'rotate' ? (layer.inRotateMs ?? 150) : inAnimType === 'pulse' ? 500 : 380
+  const defaultOutDur = outAnimType === 'blur' ? 650 : outAnimType === 'rotate' ? (layer.outRotateMs ?? 150) : outAnimType === 'pulse' ? 500 : 380
 
   const inDur = Math.min(defaultInDur, Math.max(50, layerDuration / 2))
   const outDur = Math.min(defaultOutDur, Math.max(50, layerDuration / 2))
@@ -116,6 +116,14 @@ function anim(layer: Layer, time: number, active: boolean, allLayers?: Layer[]) 
         transform = `rotate(${totalRot.toFixed(2)}deg)`
         break
       }
+      case 'pulse': {
+        // Pulse entrance: enters with smooth opacity fade and a rhythmic scale pulse
+        opacity = layer.opacity * Math.min(1, inP * 2)
+        const pulseCycle = Math.sin(inP * Math.PI * 2) * Math.pow(1 - inP, 0.75) * 0.22
+        const scale = 1 + pulseCycle
+        transform = [Math.abs(scale - 1) > 0.005 ? `scale(${scale.toFixed(3)})` : '', baseRot].filter(Boolean).join(' ')
+        break
+      }
     }
 
     return { opacity, transform, filter, hidden: false }
@@ -170,6 +178,14 @@ function anim(layer: Layer, time: number, active: boolean, allLayers?: Layer[]) 
         const totalRot = (layer.rotation || 0) + currentDeg
         opacity = layer.opacity * (1 - easeIn)
         transform = `rotate(${totalRot.toFixed(2)}deg)`
+        break
+      }
+      case 'pulse': {
+        // Pulse exit: quick energetic pulse swell, then smoothly shrinks and dissolves
+        const pulseCycle = Math.sin(outP * Math.PI * 2) * (1 - outP) * 0.2
+        const scale = Math.max(0.01, (1 + pulseCycle) * (1 - outP * 0.35))
+        opacity = layer.opacity * (1 - Math.pow(outP, 1.4))
+        transform = [Math.abs(scale - 1) > 0.005 ? `scale(${scale.toFixed(3)})` : '', baseRot].filter(Boolean).join(' ')
         break
       }
     }
