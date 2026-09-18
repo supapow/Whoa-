@@ -354,7 +354,7 @@ export default function Timeline() {
                     if (side === 'in') {
                       setTime(item.layer.start)
                     } else {
-                      const dur = item.layer.outAnim === 'blur' ? 650 : 380
+                      const dur = item.layer.outAnim === 'blur' ? 650 : item.layer.outAnim === 'rotate' ? (item.layer.outRotateMs ?? 150) : 380
                       setTime(Math.max(0, item.layer.end - dur))
                     }
                     openTool('animate')

@@ -57,10 +57,12 @@ function anim(layer: Layer, time: number, active: boolean, allLayers?: Layer[]) 
   const outAnimType = layer.outAnim || 'none'
   const layerDuration = Math.max(1, layer.end - layer.start)
 
-  // Blur animation is longer & slower (650ms) to allow a deep cinematic lens focus;
-  // other transitions use standard 380ms. Both are bounded to half layer duration.
-  const inDur = Math.min(inAnimType === 'blur' ? 650 : 380, Math.max(50, layerDuration / 2))
-  const outDur = Math.min(outAnimType === 'blur' ? 650 : 380, Math.max(50, layerDuration / 2))
+  // Determine standard or custom duration for animations
+  const defaultInDur = inAnimType === 'blur' ? 650 : inAnimType === 'rotate' ? (layer.inRotateMs ?? 150) : 380
+  const defaultOutDur = outAnimType === 'blur' ? 650 : outAnimType === 'rotate' ? (layer.outRotateMs ?? 150) : 380
+
+  const inDur = Math.min(defaultInDur, Math.max(50, layerDuration / 2))
+  const outDur = Math.min(defaultOutDur, Math.max(50, layerDuration / 2))
 
   const inElapsed = time - layer.start
   const outRemaining = layer.end - time
@@ -103,6 +105,15 @@ function anim(layer: Layer, time: number, active: boolean, allLayers?: Layer[]) 
         opacity = layer.opacity * easeOut
         filter = blurPx > 0.1 ? `blur(${blurPx.toFixed(1)}px)` : 'none'
         transform = baseRot
+        break
+      }
+      case 'rotate': {
+        const startDeg = layer.inRotateStart ?? 0
+        const endDeg = layer.inRotateEnd ?? 30
+        const currentDeg = startDeg + (endDeg - startDeg) * easeOut
+        const totalRot = (layer.rotation || 0) + currentDeg
+        opacity = layer.opacity * easeOut
+        transform = `rotate(${totalRot.toFixed(2)}deg)`
         break
       }
     }
@@ -150,6 +161,15 @@ function anim(layer: Layer, time: number, active: boolean, allLayers?: Layer[]) 
         opacity = layer.opacity * (1 - easeIn)
         filter = blurPx > 0.1 ? `blur(${blurPx.toFixed(1)}px)` : 'none'
         transform = baseRot
+        break
+      }
+      case 'rotate': {
+        const startDeg = layer.outRotateStart ?? 0
+        const endDeg = layer.outRotateEnd ?? 30
+        const currentDeg = startDeg + (endDeg - startDeg) * easeIn
+        const totalRot = (layer.rotation || 0) + currentDeg
+        opacity = layer.opacity * (1 - easeIn)
+        transform = `rotate(${totalRot.toFixed(2)}deg)`
         break
       }
     }

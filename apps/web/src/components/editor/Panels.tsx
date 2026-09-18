@@ -2,7 +2,7 @@ import { useRef, useState, useEffect } from 'react'
 import {
   X, Upload, Type as TypeIcon, Folder, FolderPlus,
   Component as ComponentIcon, ChevronRight, ChevronDown, Plus, Trash2,
-  Lock, Unlock,
+  Lock, Unlock, CircleDot,
 } from 'lucide-react'
 import { useEditor } from '#/store/editor'
 import type { ShapeKind, Layer } from '#/types'
@@ -741,6 +741,8 @@ function RadiusPanel() {
   function AnimatePanel() {
     const { l, up } = useSel()
     const { setMode, animationSide, setAnimationSide, setTime } = useEditor()
+    const [configOpen, setConfigOpen] = useState(false)
+
     const anims = [
       { k: 'none', label: 'None' },
       { k: 'fade', label: animationSide === 'in' ? 'Fade In' : 'Fade Out' },
@@ -748,8 +750,25 @@ function RadiusPanel() {
       { k: 'pop', label: animationSide === 'in' ? 'Pop In' : 'Pop Out' },
       { k: 'slide', label: animationSide === 'in' ? 'Slide In' : 'Slide Out' },
       { k: 'blur', label: animationSide === 'in' ? 'Blur In' : 'Blur Out' },
+      { k: 'rotate', label: 'Rotate' },
     ]
     const current = animationSide === 'in' ? (l.inAnim || l.anim || 'none') : (l.outAnim || 'none')
+
+    const isRotate = current === 'rotate'
+    const startDeg = animationSide === 'in' ? (l.inRotateStart ?? 0) : (l.outRotateStart ?? 0)
+    const endDeg = animationSide === 'in' ? (l.inRotateEnd ?? 30) : (l.outRotateEnd ?? 30)
+    const msVal = animationSide === 'in' ? (l.inRotateMs ?? 150) : (l.outRotateMs ?? 150)
+
+    const previewAnim = (animType: string, customMs?: number) => {
+      setMode('animated')
+      if (animationSide === 'in') {
+        setTime(l.start)
+      } else {
+        const dur = animType === 'blur' ? 650 : animType === 'rotate' ? (customMs ?? msVal) : 380
+        setTime(Math.max(0, l.end - dur))
+      }
+    }
+
     return (
       <div className="pb-4">
         <div className="mb-4 flex rounded-xl bg-surface2 p-1">
@@ -762,7 +781,8 @@ function RadiusPanel() {
                 if (side === 'in') {
                   setTime(l.start)
                 } else {
-                  const dur = l.outAnim === 'blur' ? 650 : 380
+                  const outType = l.outAnim || 'none'
+                  const dur = outType === 'blur' ? 650 : outType === 'rotate' ? (l.outRotateMs ?? 150) : 380
                   setTime(Math.max(0, l.end - dur))
                 }
               }}
@@ -778,33 +798,134 @@ function RadiusPanel() {
           Choose the {animationSide === 'in' ? 'entrance' : 'exit'} animation for this layer.
         </p>
         <Grid cols={2}>
-          {anims.map((a) => (
-            <button
-              key={a.k}
-              data-testid={`anim-${animationSide}-${a.k}`}
-              type="button"
-              onClick={() => {
-                up(animationSide === 'in' ? { anim: a.k, inAnim: a.k } : { outAnim: a.k })
-                if (a.k !== 'none') {
-                  setMode('animated')
-                  if (animationSide === 'in') {
-                    setTime(l.start)
-                  } else {
-                    const dur = a.k === 'blur' ? 650 : 380
-                    setTime(Math.max(0, l.end - dur))
-                  }
-                }
-              }}
-              className={`rounded-2xl border py-5 text-sm font-semibold transition-all ${
-                current === a.k
-                  ? 'border-accent bg-accent/10 text-white shadow-sm'
-                  : 'border-line bg-surface2 text-txt2 hover:text-white'
-              }`}
-            >
-              {a.label}
-            </button>
-          ))}
+          {anims.map((a) => {
+            const isRotateBtn = a.k === 'rotate'
+            const isSel = current === a.k
+            return (
+              <div key={a.k} className="relative">
+                <button
+                  data-testid={`anim-${animationSide}-${a.k}`}
+                  type="button"
+                  onClick={() => {
+                    up(animationSide === 'in' ? { anim: a.k, inAnim: a.k } : { outAnim: a.k })
+                    if (a.k !== 'none') {
+                      previewAnim(a.k)
+                    }
+                  }}
+                  className={`w-full rounded-2xl border py-5 text-sm font-semibold transition-all ${
+                    isRotateBtn ? 'pr-8 pl-3' : 'px-3'
+                  } ${
+                    isSel
+                      ? 'border-accent bg-accent/10 text-white shadow-sm'
+                      : 'border-line bg-surface2 text-txt2 hover:text-white'
+                  }`}
+                >
+                  {a.label}
+                </button>
+
+                {/* Dot icon button for Rotate animation options */}
+                {isRotateBtn && (
+                  <button
+                    type="button"
+                    data-testid={`anim-rotate-config-btn-${animationSide}`}
+                    title="Rotate animation settings"
+                    aria-label="Rotate animation settings"
+                    onClick={(e) => {
+                      e.stopPropagation()
+                      if (!isSel) {
+                        up(animationSide === 'in' ? { anim: 'rotate', inAnim: 'rotate' } : { outAnim: 'rotate' })
+                        previewAnim('rotate')
+                      }
+                      setConfigOpen((prev) => !prev)
+                    }}
+                    className={`absolute right-2.5 top-1/2 -translate-y-1/2 grid h-7 w-7 place-items-center rounded-full transition-colors ${
+                      configOpen
+                        ? 'bg-accent text-white ring-2 ring-accent/30'
+                        : isSel
+                        ? 'bg-white/20 text-white hover:bg-white/30'
+                        : 'bg-white/10 text-txt2 hover:bg-white/20 hover:text-white'
+                    }`}
+                  >
+                    <CircleDot className="h-3.5 w-3.5" />
+                  </button>
+                )}
+              </div>
+            )
+          })}
         </Grid>
+
+        {/* Rotate configuration drawer / panel when open or active */}
+        {isRotate && configOpen && (
+          <div
+            data-testid="rotate-config-panel"
+            className="mt-3 rounded-2xl border border-line bg-surface2/80 p-4 animate-fade"
+          >
+            <div className="mb-3 flex items-center justify-between">
+              <div className="flex items-center gap-2">
+                <CircleDot className="h-4 w-4 text-accent" />
+                <span className="text-sm font-semibold text-white">Rotate Settings ({animationSide === 'in' ? 'In' : 'Out'})</span>
+              </div>
+              <button
+                type="button"
+                onClick={() => {
+                  if (animationSide === 'in') {
+                    up({ inRotateStart: 0, inRotateEnd: 30, inRotateMs: 150 })
+                  } else {
+                    up({ outRotateStart: 0, outRotateEnd: 30, outRotateMs: 150 })
+                  }
+                  previewAnim('rotate', 150)
+                }}
+                className="text-[11px] text-accent hover:underline"
+              >
+                Reset (0° to 30°, 150ms)
+              </button>
+            </div>
+
+            <div className="space-y-3">
+              <Slider
+                label="Start Degree"
+                tid="slider-rotate-start"
+                value={startDeg}
+                min={-360}
+                max={360}
+                step={5}
+                suffix="°"
+                onChange={(v: number) => {
+                  up(animationSide === 'in' ? { inRotateStart: v } : { outRotateStart: v })
+                  previewAnim('rotate')
+                }}
+              />
+
+              <Slider
+                label="End Degree"
+                tid="slider-rotate-end"
+                value={endDeg}
+                min={-360}
+                max={360}
+                step={5}
+                suffix="°"
+                onChange={(v: number) => {
+                  up(animationSide === 'in' ? { inRotateEnd: v } : { outRotateEnd: v })
+                  previewAnim('rotate')
+                }}
+              />
+
+              <Slider
+                label="Duration (ms)"
+                tid="slider-rotate-ms"
+                value={msVal}
+                min={50}
+                max={1500}
+                step={25}
+                suffix="ms"
+                onChange={(v: number) => {
+                  up(animationSide === 'in' ? { inRotateMs: v } : { outRotateMs: v })
+                  previewAnim('rotate', v)
+                }}
+              />
+            </div>
+          </div>
+        )}
       </div>
     )
   }
