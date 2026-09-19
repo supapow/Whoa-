@@ -26,6 +26,7 @@ const TITLES: Record<string, string> = {
 export default function ToolSheet() {
   const { tool, openTool } = useEditor()
   if (!tool) return null
+  if (tool === 'vector') return <VectorToolPanel />
   return (
     <div className="absolute inset-0 z-60 flex flex-col justify-end" data-testid="tool-sheet">
       <div className="absolute inset-0 bg-black/40 animate-fade" onClick={() => openTool(null)} />
@@ -1485,6 +1486,21 @@ export function VectorFloatingPanel() {
   )
 }
 
+function VectorToolPanel() {
+  const { openTool, selected } = useEditor()
+  if (!selected || selected.type !== 'path') return null
+  return (
+    <div className="absolute right-3 top-1/2 z-60 -translate-y-1/2" data-testid="vector-tool-panel">
+      <div className="flex flex-col items-center gap-1.5 rounded-full border border-line bg-surface/95 p-1.5 shadow-2xl backdrop-blur-md">
+        <PanelBody tool="vector" />
+        <button type="button" onClick={() => openTool(null)} aria-label="Close vector tools" title="Close vector tools" className="grid size-9 place-items-center rounded-full text-txt3 transition-colors hover:bg-surface2 hover:text-txt1">
+          <X className="size-4" />
+        </button>
+      </div>
+    </div>
+  )
+}
+
 function VectorPanel() {
   const { l, up } = useSel()
   const pts = l.points || []
@@ -1538,111 +1554,30 @@ function VectorPanel() {
     up(tight)
   }
 
+  const [activePoint, setActivePoint] = useState(0)
+  const point = pts[Math.min(activePoint, Math.max(pts.length - 1, 0))]
+  const hasHandles = point ? point.cp1 !== undefined || point.cp2 !== undefined : false
+
+  const actionClass = 'grid size-9 place-items-center rounded-full text-txt2 transition-colors hover:bg-surface2 hover:text-txt1 active:scale-95 disabled:pointer-events-none disabled:opacity-35'
   return (
-    <div className="space-y-4 pb-4">
-      {/* Path state summary */}
-      <div className="flex items-center justify-between rounded-xl bg-surface2 px-3.5 py-2.5 text-xs">
-        <span className="text-txt2 font-medium">Anchor Points: <strong className="text-txt1">{pts.length}</strong></span>
-        <button
-          type="button"
-          data-testid="vector-toggle-closed"
-          onClick={toggleClosed}
-          className={`rounded-lg px-2.5 py-1 text-[11px] font-semibold transition-colors ${l.closed ? 'bg-accent text-white' : 'bg-surface border border-line text-txt2'}`}
-        >
-          {l.closed ? 'Closed Path' : 'Open Stroke'}
-        </button>
-      </div>
-
-      {/* Stroke width & cap controls */}
-      <div className="rounded-xl border border-line bg-surface2/50 p-3 space-y-3">
-        <Slider
-          label="Stroke Width"
-          tid="slider-stroke-width"
-          value={l.strokeWidth ?? (l.stroke ? 2 : 0)}
-          min={0}
-          max={40}
-          suffix="px"
-          onChange={(v: number) => up({ strokeWidth: v, stroke: v > 0 ? (l.stroke || '#007AFF') : undefined })}
-        />
-
-        <div className="flex items-center justify-between pt-1 text-xs">
-          <span className="text-txt2">Line Cap</span>
-          <div className="flex gap-1.5">
-            {(['butt', 'round', 'square'] as const).map((cap) => (
-              <button
-                key={cap}
-                type="button"
-                data-testid={`stroke-cap-${cap}`}
-                onClick={() => up({ strokeLinecap: cap })}
-                className={`rounded px-2 py-1 text-[10px] font-semibold capitalize border ${l.strokeLinecap === cap || (!l.strokeLinecap && cap === 'round') ? 'border-accent bg-accent/20 text-white' : 'border-line text-txt3 bg-surface'}`}
-              >
-                {cap}
-              </button>
-            ))}
-          </div>
-        </div>
-      </div>
-
-      {/* Interactive Anchor Points List */}
-      <div>
-        <div className="mb-2 flex items-center justify-between">
-          <span className="text-xs font-bold uppercase tracking-wider text-txt3">Points & Béziers</span>
-          <button
-            type="button"
-            data-testid="add-anchor-point-btn"
-            onClick={addPoint}
-            className="flex items-center gap-1 rounded-lg bg-surface2 px-2.5 py-1 text-xs font-semibold text-accent hover:bg-surface2/80 active:scale-95"
-          >
-            <Plus className="h-3 w-3" />
-            <span>Add Anchor</span>
-          </button>
-        </div>
-
-        <div className="space-y-1.5 max-h-48 overflow-y-auto no-scrollbar">
-          {pts.map((pt, i) => {
-            const hasHandles = pt.cp1 !== undefined || pt.cp2 !== undefined
-            return (
-              <div
-                key={i}
-                data-testid={`vector-point-row-${i}`}
-                className="flex items-center justify-between rounded-xl border border-line bg-surface2 px-3 py-2 text-xs"
-              >
-                <div className="flex items-center gap-2">
-                  <span className="grid h-5 w-5 place-items-center rounded-full bg-surface text-[10px] font-bold text-txt3">
-                    {i + 1}
-                  </span>
-                  <span className="font-mono text-[11px] text-txt2">
-                    X: {Math.round(pt.x)}, Y: {Math.round(pt.y)}
-                  </span>
-                </div>
-
-                <div className="flex items-center gap-1.5">
-                  <button
-                    type="button"
-                    data-testid={`vector-point-curve-${i}`}
-                    onClick={() => toggleSmooth(i)}
-                    className={`rounded px-2 py-0.5 text-[10px] font-semibold border ${hasHandles ? 'border-accent bg-accent/20 text-white' : 'border-line text-txt3 bg-surface'}`}
-                    title={hasHandles ? 'Curved (Bézier handles active)' : 'Linear (Sharp corner)'}
-                  >
-                    {hasHandles ? 'Smooth' : 'Sharp'}
-                  </button>
-
-                  {pts.length > 2 && (
-                    <button
-                      type="button"
-                      data-testid={`vector-point-delete-${i}`}
-                      onClick={() => removePoint(i)}
-                      className="grid h-6 w-6 place-items-center rounded text-txt3 hover:text-danger hover:bg-danger/10"
-                      title="Remove point"
-                    >
-                      <Trash2 className="h-3 w-3" />
-                    </button>
-                  )}
-                </div>
-              </div>
-            )
-          })}
-        </div>
+    <div className="flex flex-col items-center gap-1">
+      <button type="button" data-testid="add-anchor-point-btn" onClick={addPoint} aria-label="Add anchor point" title="Add anchor point" className={actionClass}>
+        <Plus className="size-4" />
+      </button>
+      <button type="button" data-testid="remove-anchor-point-btn" onClick={() => removePoint(activePoint)} disabled={pts.length <= 2} aria-label="Remove selected anchor point" title="Remove selected anchor point" className={actionClass}>
+        <Trash2 className="size-4" />
+      </button>
+      <button type="button" data-testid="toggle-point-type-btn" onClick={() => point && toggleSmooth(activePoint)} disabled={!point} aria-label={hasHandles ? 'Make point sharp' : 'Make point smooth'} title={hasHandles ? 'Sharp point' : 'Smooth point'} className={`${actionClass} ${hasHandles ? 'bg-accent/20 text-accent' : ''}`}>
+        {hasHandles ? <CircleDot className="size-4" /> : <PenTool className="size-4" />}
+      </button>
+      <button type="button" data-testid="vector-toggle-closed" onClick={toggleClosed} disabled={pts.length < 2} aria-label={l.closed ? 'Open path' : 'Close path'} title={l.closed ? 'Open path' : 'Close path'} className={`${actionClass} ${l.closed ? 'bg-accent text-white' : ''}`}>
+        <Spline className="size-4" />
+      </button>
+      <div className="my-0.5 h-px w-5 bg-line" />
+      <div className="flex flex-col items-center gap-0.5" aria-label="Select anchor point">
+        {pts.map((_, i) => (
+          <button key={i} type="button" onClick={() => setActivePoint(i)} aria-label={`Select anchor point ${i + 1}`} title={`Point ${i + 1}`} className={`size-2 rounded-full transition-colors ${i === activePoint ? 'bg-accent' : 'bg-txt3/50 hover:bg-txt2'}`} />
+        ))}
       </div>
     </div>
   )
