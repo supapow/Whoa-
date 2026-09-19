@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react'
 import { ArrowLeft, ArrowRight, ArrowUp, ArrowDown, Move } from 'lucide-react'
-import type { Layer, LayerType } from '#/types'
+import type { Layer, LayerType, VectorPoint } from '#/types'
 import { useEditor } from '#/store/editor'
 import { getDescendantLayers, getTopmostGroup } from '#/lib/groups'
 import { findCornerSizeMatch, findSizeMatch, getCandidateTargets, type SizeMatch } from '#/lib/sizeMatch'
@@ -8,6 +8,7 @@ import { findGapMatch, type GapMatchResult } from '#/lib/gapMatch'
 import { findElementAlignMatch, type ElementAlignResult } from '#/lib/elementAlign'
 import { parseImagePosition, formatImagePosition, calcImagePositionDelta } from '#/lib/imagePosition'
 import { interpolateKeyframes } from '#/lib/keyframes'
+import { buildSvgPath, scaleVectorPoints, tightenVectorLayer } from '#/lib/vector'
 
 function useSize<T extends HTMLElement>() {
   const ref = useRef<T>(null)
@@ -286,13 +287,14 @@ type Gesture =
       origPadRight: number
       origPadBottom: number
       origPadLeft: number
-      group?: { id: string; x: number; y: number; w: number; h: number; fontSize?: number; crop0?: { x: number; y: number; w: number; h: number }; isCroppedImage?: boolean }[]
+      group?: { id: string; x: number; y: number; w: number; h: number; fontSize?: number; crop0?: { x: number; y: number; w: number; h: number }; isCroppedImage?: boolean; origPoints?: VectorPoint[] }[]
       bgShapeIds?: string[]
       minFgLeft?: number
       maxFgRight?: number
       minFgTop?: number
       maxFgBottom?: number
       origCrop?: { x: number; y: number; w: number; h: number }
+      origPoints?: VectorPoint[]
     }
   | {
       id: string
@@ -349,9 +351,10 @@ type Pinch =
       x0: number
       y0: number
       fontSize: number
-      group?: { id: string; x: number; y: number; w: number; h: number; fontSize?: number; crop0?: { x: number; y: number; w: number; h: number }; isCroppedImage?: boolean }[]
+      group?: { id: string; x: number; y: number; w: number; h: number; fontSize?: number; crop0?: { x: number; y: number; w: number; h: number }; isCroppedImage?: boolean; origPoints?: VectorPoint[] }[]
       crop0?: { x: number; y: number; w: number; h: number }
       isCroppedImage?: boolean
+      points0?: VectorPoint[]
     }
   | null
 
@@ -742,6 +745,11 @@ export default function Canvas() {
                   h: Math.round(item.crop0.h * sy),
                 },
               })
+            } else if (layer?.type === 'path' && (item as any).origPoints) {
+              updateLayer(item.id, {
+                ...patch,
+                points: scaleVectorPoints((item as any).origPoints, sx, sy),
+              })
             } else {
               updateLayer(item.id, patch)
             }
@@ -1060,6 +1068,11 @@ export default function Canvas() {
                 h: Math.round(g.origCrop.h * scaleFactor),
               }
             }
+            if (g.layerType === 'path' && g.origPoints) {
+              const sx = g.ow > 0 ? matchRes.w / g.ow : 1
+              const sy = g.oh > 0 ? matchRes.h / g.oh : 1
+              patch.points = scaleVectorPoints(g.origPoints, sx, sy)
+            }
             updateLayer(g.id, patch)
           }
         }
@@ -1189,10 +1202,15 @@ export default function Canvas() {
                 } : {}),
               })
             } else {
-              updateLayer(g.id, {
+              const patch: Partial<Layer> = {
                 w: finalW,
                 ...(g.origCrop ? { crop: { ...g.origCrop } } : {}),
-              })
+              }
+              if (g.layerType === 'path' && g.origPoints) {
+                const sx = g.ow > 0 ? finalW / g.ow : 1
+                patch.points = scaleVectorPoints(g.origPoints, sx, 1)
+              }
+              updateLayer(g.id, patch)
             }
           } else if (handle === 'l') {
             const rawW = Math.max(15, Math.round(g.ow - dx))
@@ -1248,7 +1266,7 @@ export default function Canvas() {
                 } : {}),
               })
             } else {
-              updateLayer(g.id, {
+              const patch: Partial<Layer> = {
                 x: Math.round(finalX),
                 w: finalW,
                 ...(g.origCrop ? {
@@ -1257,7 +1275,12 @@ export default function Canvas() {
                     x: Math.round(g.origCrop.x - (finalX - g.ox)),
                   },
                 } : {}),
-              })
+              }
+              if (g.layerType === 'path' && g.origPoints) {
+                const sx = g.ow > 0 ? finalW / g.ow : 1
+                patch.points = scaleVectorPoints(g.origPoints, sx, 1)
+              }
+              updateLayer(g.id, patch)
             }
           } else if (handle === 'b') {
             const rawH = Math.max(15, Math.round(g.oh + dy))
@@ -1308,10 +1331,15 @@ export default function Canvas() {
                 } : {}),
               })
             } else {
-              updateLayer(g.id, {
+              const patch: Partial<Layer> = {
                 h: finalH,
                 ...(g.origCrop ? { crop: { ...g.origCrop } } : {}),
-              })
+              }
+              if (g.layerType === 'path' && g.origPoints) {
+                const sy = g.oh > 0 ? finalH / g.oh : 1
+                patch.points = scaleVectorPoints(g.origPoints, 1, sy)
+              }
+              updateLayer(g.id, patch)
             }
           } else if (handle === 't') {
             const rawH = Math.max(15, Math.round(g.oh - dy))
@@ -1367,7 +1395,7 @@ export default function Canvas() {
                 } : {}),
               })
             } else {
-              updateLayer(g.id, {
+              const patch: Partial<Layer> = {
                 y: Math.round(finalY),
                 h: finalH,
                 ...(g.origCrop ? {
@@ -1376,7 +1404,12 @@ export default function Canvas() {
                     y: Math.round(g.origCrop.y - (finalY - g.oy)),
                   },
                 } : {}),
-              })
+              }
+              if (g.layerType === 'path' && g.origPoints) {
+                const sy = g.oh > 0 ? finalH / g.oh : 1
+                patch.points = scaleVectorPoints(g.origPoints, 1, sy)
+              }
+              updateLayer(g.id, patch)
             }
           }
         }
@@ -1392,6 +1425,13 @@ export default function Canvas() {
       lastGestureMovedRef.current = moved
       if (moved) {
         tapTrackerRef.current = { layerId: '', time: 0, count: 0 }
+      }
+      if (g?.mode === 'resize' && g.id) {
+        const l = layersRef.current.find((cand) => cand.id === g.id)
+        if (l && l.type === 'path' && l.points) {
+          const tight = tightenVectorLayer(l)
+          updateLayer(l.id, tight)
+        }
       }
       if (g?.mode === 'move' && !g.moved && g.tapAddId) {
         select(g.tapAddId, true)
@@ -2318,6 +2358,7 @@ export default function Canvas() {
       minFgTop,
       maxFgBottom,
       origCrop,
+      origPoints: l.type === 'path' && l.points ? JSON.parse(JSON.stringify(l.points)) : undefined,
     }
   }
 
@@ -3005,6 +3046,7 @@ export default function Canvas() {
                 fontSize: layer.type === 'text' ? layer.fontSize : undefined,
                 crop0: layer.type === 'image' && layer.crop ? { ...layer.crop } : undefined,
                 isCroppedImage: layer.type === 'image' && Boolean(layer.crop),
+                origPoints: layer.type === 'path' && layer.points ? JSON.parse(JSON.stringify(layer.points)) : undefined,
               }
             }) : undefined
             const isImagePositioning = Boolean(imagePositioningId && imagePositioningId === sel.id && sel.type === 'image')
@@ -3195,6 +3237,217 @@ export default function Canvas() {
                     <div style={{ width: dot, height: dot, borderRadius: '9999px', background: '#fff', border: `${Math.max(1.5, dot * 0.18)}px solid ${multiSelectMode || isGroup ? (sel.isComponent ? '#9333ea' : '#4f46e5') : '#007AFF'}` }} />
                   </div>
                 ))}
+
+                {/* ON-CANVAS VECTOR ANCHOR POINTS & BÉZIER CONTROLS */}
+                {sel.type === 'path' && sel.points && sel.points.length > 0 && !multiSelectMode && (
+                  <div
+                    data-testid="vector-canvas-points-overlay"
+                    style={{ position: 'absolute', inset: 0, pointerEvents: 'none', zIndex: 70 }}
+                  >
+                    {sel.points.map((pt, pIdx) => {
+                      const pRadius = Math.max(5, 7 / eff)
+                      const cRadius = Math.max(3.5, 5 / eff)
+                      const pts = sel.points!
+                      const handlePointDrag = (e: React.PointerEvent) => {
+                        e.stopPropagation()
+                        e.preventDefault()
+                        const target = e.currentTarget as HTMLElement
+                        target.setPointerCapture?.(e.pointerId)
+                        const startPt = { ...pts[pIdx] }
+                        const startX = e.clientX
+                        const startY = e.clientY
+
+                        const onPointerMove = (ev: PointerEvent) => {
+                          const dx = (ev.clientX - startX) / (scale * view.scale)
+                          const dy = (ev.clientY - startY) / (scale * view.scale)
+                          const updated = [...pts]
+                          const newX = Math.round(startPt.x + dx)
+                          const newY = Math.round(startPt.y + dy)
+                          const pointPatch: any = { ...startPt, x: newX, y: newY }
+                          if (startPt.cp1) {
+                            pointPatch.cp1 = { x: Math.round(startPt.cp1.x + dx), y: Math.round(startPt.cp1.y + dy) }
+                          }
+                          if (startPt.cp2) {
+                            pointPatch.cp2 = { x: Math.round(startPt.cp2.x + dx), y: Math.round(startPt.cp2.y + dy) }
+                          }
+                          updated[pIdx] = pointPatch
+                          updateLayer(sel.id, { points: updated })
+                        }
+
+                        const onPointerUp = () => {
+                          window.removeEventListener('pointermove', onPointerMove)
+                          window.removeEventListener('pointerup', onPointerUp)
+                          const current = layersRef.current.find((cand) => cand.id === sel.id)
+                          if (current && current.type === 'path' && current.points) {
+                            const tight = tightenVectorLayer(current)
+                            updateLayer(sel.id, tight)
+                          }
+                        }
+
+                        window.addEventListener('pointermove', onPointerMove)
+                        window.addEventListener('pointerup', onPointerUp)
+                      }
+
+                      const handleCpDrag = (cpKey: 'cp1' | 'cp2', e: React.PointerEvent) => {
+                        e.stopPropagation()
+                        e.preventDefault()
+                        const target = e.currentTarget as HTMLElement
+                        target.setPointerCapture?.(e.pointerId)
+                        const origCp = pts[pIdx][cpKey] || { x: pt.x, y: pt.y }
+                        const startX = e.clientX
+                        const startY = e.clientY
+
+                        const onPointerMove = (ev: PointerEvent) => {
+                          const dx = (ev.clientX - startX) / (scale * view.scale)
+                          const dy = (ev.clientY - startY) / (scale * view.scale)
+                          const updated = [...pts]
+                          updated[pIdx] = {
+                            ...pts[pIdx],
+                            [cpKey]: {
+                              x: Math.round(origCp.x + dx),
+                              y: Math.round(origCp.y + dy),
+                            },
+                          }
+                          updateLayer(sel.id, { points: updated })
+                        }
+
+                        const onPointerUp = () => {
+                          window.removeEventListener('pointermove', onPointerMove)
+                          window.removeEventListener('pointerup', onPointerUp)
+                          const current = layersRef.current.find((cand) => cand.id === sel.id)
+                          if (current && current.type === 'path' && current.points) {
+                            const tight = tightenVectorLayer(current)
+                            updateLayer(sel.id, tight)
+                          }
+                        }
+
+                        window.addEventListener('pointermove', onPointerMove)
+                        window.addEventListener('pointerup', onPointerUp)
+                      }
+
+                      return (
+                        <div key={`vpt-group-${pIdx}`}>
+                          {/* Bézier Handle Lines */}
+                          {pt.cp1 && (
+                            <svg style={{ position: 'absolute', inset: 0, width: '100%', height: '100%', pointerEvents: 'none', overflow: 'visible' }}>
+                              <line
+                                x1={pt.x}
+                                y1={pt.y}
+                                x2={pt.cp1.x}
+                                y2={pt.cp1.y}
+                                stroke="#ec4899"
+                                strokeWidth={1.5 / eff}
+                                strokeDasharray={`${3 / eff} ${3 / eff}`}
+                              />
+                            </svg>
+                          )}
+                          {pt.cp2 && (
+                            <svg style={{ position: 'absolute', inset: 0, width: '100%', height: '100%', pointerEvents: 'none', overflow: 'visible' }}>
+                              <line
+                                x1={pt.x}
+                                y1={pt.y}
+                                x2={pt.cp2.x}
+                                y2={pt.cp2.y}
+                                stroke="#ec4899"
+                                strokeWidth={1.5 / eff}
+                                strokeDasharray={`${3 / eff} ${3 / eff}`}
+                              />
+                            </svg>
+                          )}
+
+                          {/* Control Handle 1 Pip */}
+                          {pt.cp1 && (
+                            <div
+                              data-testid={`vector-cp1-${pIdx}`}
+                              onPointerDown={(e) => handleCpDrag('cp1', e)}
+                              style={{
+                                position: 'absolute',
+                                left: pt.cp1.x - cRadius,
+                                top: pt.cp1.y - cRadius,
+                                width: cRadius * 2,
+                                height: cRadius * 2,
+                                borderRadius: '9999px',
+                                background: '#ec4899',
+                                border: `${1.5 / eff}px solid #fff`,
+                                cursor: 'crosshair',
+                                pointerEvents: 'auto',
+                                touchAction: 'none',
+                                zIndex: 72,
+                              }}
+                              title={`Control Point 1 (${Math.round(pt.cp1.x)}, ${Math.round(pt.cp1.y)})`}
+                            />
+                          )}
+
+                          {/* Control Handle 2 Pip */}
+                          {pt.cp2 && (
+                            <div
+                              data-testid={`vector-cp2-${pIdx}`}
+                              onPointerDown={(e) => handleCpDrag('cp2', e)}
+                              style={{
+                                position: 'absolute',
+                                left: pt.cp2.x - cRadius,
+                                top: pt.cp2.y - cRadius,
+                                width: cRadius * 2,
+                                height: cRadius * 2,
+                                borderRadius: '9999px',
+                                background: '#ec4899',
+                                border: `${1.5 / eff}px solid #fff`,
+                                cursor: 'crosshair',
+                                pointerEvents: 'auto',
+                                touchAction: 'none',
+                                zIndex: 72,
+                              }}
+                              title={`Control Point 2 (${Math.round(pt.cp2.x)}, ${Math.round(pt.cp2.y)})`}
+                            />
+                          )}
+
+                          {/* Main Anchor Point Handle */}
+                          <div
+                            data-testid={`vector-anchor-${pIdx}`}
+                            onPointerDown={handlePointDrag}
+                            onDoubleClick={(e) => {
+                              e.stopPropagation()
+                              const hasCp = pt.cp1 !== undefined || pt.cp2 !== undefined
+                              const updated = [...pts]
+                              if (hasCp) {
+                                updated[pIdx] = { x: pt.x, y: pt.y }
+                              } else {
+                                const prev = pts[(pIdx - 1 + pts.length) % pts.length]
+                                const next = pts[(pIdx + 1) % pts.length]
+                                const dx = (next.x - prev.x) * 0.2
+                                const dy = (next.y - prev.y) * 0.2
+                                updated[pIdx] = {
+                                  x: pt.x,
+                                  y: pt.y,
+                                  cp1: { x: Math.round(pt.x - dx), y: Math.round(pt.y - dy) },
+                                  cp2: { x: Math.round(pt.x + dx), y: Math.round(pt.y + dy) },
+                                }
+                              }
+                              const tight = tightenVectorLayer({ ...sel, points: updated })
+                              updateLayer(sel.id, tight)
+                            }}
+                            style={{
+                              position: 'absolute',
+                              left: pt.x - pRadius,
+                              top: pt.y - pRadius,
+                              width: pRadius * 2,
+                              height: pRadius * 2,
+                              borderRadius: pt.cp1 || pt.cp2 ? '9999px' : '2px',
+                              background: '#007AFF',
+                              border: `${2 / eff}px solid #fff`,
+                              boxShadow: '0 2px 4px rgba(0,0,0,0.35)',
+                              cursor: 'grab',
+                              pointerEvents: 'auto',
+                              touchAction: 'none',
+                              zIndex: 75,
+                            }}
+                            title={`Anchor ${pIdx + 1}: (${Math.round(pt.x)}, ${Math.round(pt.y)}). Double-click to toggle curves.`}
+                          />
+                        </div>
+                      )
+                    })}
+                  </div>
+                )}
               </div>
             )
           })()}
@@ -3898,6 +4151,33 @@ function LayerContent({
       default:
         return <div style={{ ...common, borderRadius: layer.radius }} />
     }
+  }
+
+  if (layer.type === 'path') {
+    const d = layer.pathData || (layer.points ? buildSvgPath(layer.points, layer.closed !== false, layer.w, layer.h) : '')
+    const fill = layer.fill || 'none'
+    const stroke = layer.stroke || (layer.strokeWidth ? '#007AFF' : undefined)
+    const strokeWidth = layer.strokeWidth ?? (stroke ? 2 : 0)
+    const strokeLinecap = layer.strokeLinecap || 'round'
+    const strokeLinejoin = layer.strokeLinejoin || 'round'
+
+    return (
+      <svg
+        viewBox={`0 0 ${layer.w} ${layer.h}`}
+        width="100%"
+        height="100%"
+        style={{ display: 'block', overflow: 'visible' }}
+      >
+        <path
+          d={d}
+          fill={fill}
+          stroke={stroke}
+          strokeWidth={strokeWidth}
+          strokeLinecap={strokeLinecap}
+          strokeLinejoin={strokeLinejoin}
+        />
+      </svg>
+    )
   }
 
   if (layer.type === 'image') {

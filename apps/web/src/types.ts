@@ -1,6 +1,13 @@
-export type LayerType = 'text' | 'shape' | 'image' | 'sticker' | 'group'
+export type LayerType = 'text' | 'shape' | 'path' | 'image' | 'sticker' | 'group'
 export type ShapeKind = 'rect' | 'circle' | 'triangle' | 'star' | 'line'
 export type BgType = 'color' | 'gradient' | 'image'
+
+export interface VectorPoint {
+  x: number // px inside layer bounding box
+  y: number
+  cp1?: { x: number; y: number } // incoming control handle
+  cp2?: { x: number; y: number } // outgoing control handle
+}
 
 export interface Background {
   type: BgType
@@ -68,6 +75,15 @@ export interface Layer {
   shape?: ShapeKind
   fill?: string
   radius?: number
+  // vector path
+  pathData?: string
+  points?: VectorPoint[]
+  closed?: boolean
+  stroke?: string
+  strokeWidth?: number
+  strokeLinecap?: 'butt' | 'round' | 'square'
+  strokeLinejoin?: 'miter' | 'round' | 'bevel'
+  fillRule?: 'nonzero' | 'evenodd'
   // padding
   paddingTop?: number
   paddingRight?: number

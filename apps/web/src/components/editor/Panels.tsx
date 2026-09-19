@@ -2,7 +2,7 @@ import { useRef, useState, useEffect } from 'react'
 import {
   X, Upload, Type as TypeIcon, Folder, FolderPlus,
   Component as ComponentIcon, ChevronRight, ChevronLeft, ChevronDown, Plus, Trash2,
-  Lock, Unlock, CircleDot, Diamond, Droplet,
+  Lock, Unlock, CircleDot, Diamond, Droplet, PenTool, Spline,
 } from 'lucide-react'
 import { useEditor } from '#/store/editor'
 import type { ShapeKind, Layer } from '#/types'
@@ -11,6 +11,7 @@ import {
   FONTS, PALETTE, GRADIENTS, BG_IMAGES, STOCK_IMAGES, STICKERS, SHAPES,
 } from '#/lib/data'
 import { getLibraryComponents, deleteComponentFromLibrary, type ComponentItem } from '#/lib/groups'
+import { VECTOR_PRESETS, convertShapeToVector, buildSvgPath, tightenVectorLayer } from '#/lib/vector'
 
 const TITLES: Record<string, string> = {
   text: 'Add Text', elements: 'Elements', stickers: 'Stickers', image: 'Image',
@@ -19,6 +20,7 @@ const TITLES: Record<string, string> = {
   blur: 'Blur & Effects',
   style: 'Text Style', align: 'Alignment', shape: 'Shape', radius: 'Corner Radius',
   animate: 'Animation', mask: 'Mask & Cut', crop: 'Crop',
+  vector: 'Vector Path & Béziers',
 }
 
 export default function ToolSheet() {
@@ -44,7 +46,7 @@ export default function ToolSheet() {
 
 function PanelBody({ tool }: { tool: string }) {
   const { selected } = useEditor()
-  const needsLayer = ['font', 'color', 'blur', 'style', 'align', 'shape', 'radius', 'animate', 'mask', 'crop']
+  const needsLayer = ['font', 'color', 'blur', 'style', 'align', 'shape', 'radius', 'animate', 'mask', 'crop', 'vector']
   if (needsLayer.includes(tool) && !selected) {
     return <MockPanel text="Select a layer on the canvas first." />
   }
@@ -63,6 +65,7 @@ function PanelBody({ tool }: { tool: string }) {
     case 'align': return <AlignPanel />
     case 'shape': return <ShapePanel />
     case 'radius': return <RadiusPanel />
+    case 'vector': return <VectorPanel />
     case 'animate': return <AnimatePanel />
     case 'mask': return <MaskPanel />
     case 'crop': return <MockPanel text="Pinch & drag on canvas to crop — full crop tool coming with the backend." />
@@ -102,22 +105,73 @@ function TextAdd() {
 }
 
 function Elements() {
-  const { addLayer } = useEditor()
+  const { addLayer, openTool } = useEditor()
   const labels: Record<ShapeKind, string> = { rect: 'Square', circle: 'Circle', triangle: 'Triangle', star: 'Star', line: 'Line' }
   return (
-    <Grid cols={3}>
-      {SHAPES.map((s) => (
-        <button
-          key={s}
-          data-testid={`add-shape-${s}`}
-          onClick={() => addLayer('shape', { shape: s })}
-          className="flex aspect-square flex-col items-center justify-center gap-2 rounded-2xl border border-line bg-surface2 transition-colors active:border-accent"
-        >
-          <ShapeGlyph kind={s} />
-          <span className="text-[11px] text-txt2">{labels[s]}</span>
-        </button>
-      ))}
-    </Grid>
+    <div className="space-y-5 pb-4">
+      <div>
+        <div className="mb-2 text-xs font-bold uppercase tracking-wider text-txt3">Basic Shapes</div>
+        <Grid cols={3}>
+          {SHAPES.map((s) => (
+            <button
+              key={s}
+              data-testid={`add-shape-${s}`}
+              onClick={() => addLayer('shape', { shape: s })}
+              className="flex aspect-square flex-col items-center justify-center gap-2 rounded-2xl border border-line bg-surface2 transition-colors active:border-accent"
+            >
+              <ShapeGlyph kind={s} />
+              <span className="text-[11px] text-txt2">{labels[s]}</span>
+            </button>
+          ))}
+        </Grid>
+      </div>
+
+      <div>
+        <div className="mb-2 flex items-center justify-between">
+          <span className="text-xs font-bold uppercase tracking-wider text-txt3">Vector Paths (Bézier Curves)</span>
+          <span className="text-[11px] text-emerald-400 font-medium">Ultralight &lt;1KB SVG</span>
+        </div>
+        <div className="grid grid-cols-2 gap-2.5">
+          {VECTOR_PRESETS.map((vp) => (
+            <button
+              key={vp.id}
+              data-testid={`add-vector-${vp.id}`}
+              onClick={() => {
+                const w = 180
+                const h = 135
+                addLayer('path', {
+                  name: vp.name,
+                  w,
+                  h,
+                  closed: vp.closed,
+                  stroke: vp.strokeWidth ? '#007AFF' : undefined,
+                  strokeWidth: vp.strokeWidth || 0,
+                  fill: vp.closed ? '#007AFF' : 'transparent',
+                  points: vp.getPoints(w, h),
+                })
+                openTool(null)
+              }}
+              className="flex items-center gap-2.5 rounded-2xl border border-line bg-surface2 p-3 text-left transition-colors hover:border-accent active:scale-98"
+            >
+              <div className="grid h-10 w-10 shrink-0 place-items-center rounded-xl bg-surface border border-line/60">
+                <svg viewBox="0 0 100 80" className="h-6 w-6">
+                  <path
+                    d={buildSvgPath(vp.getPoints(100, 80), vp.closed, 100, 80)}
+                    fill={vp.closed ? '#60a5fa' : 'none'}
+                    stroke="#60a5fa"
+                    strokeWidth={vp.strokeWidth ? 4 : 1.5}
+                  />
+                </svg>
+              </div>
+              <div className="min-w-0 flex-1">
+                <div className="truncate text-xs font-semibold text-txt1">{vp.name}</div>
+                <div className="text-[10px] text-txt3">{vp.closed ? 'Closed vector' : 'Open stroke'}</div>
+              </div>
+            </button>
+          ))}
+        </div>
+      </div>
+    </div>
   )
 }
 
@@ -664,11 +718,13 @@ function FontPanel() {
 
 function ColorPanel() {
   const { selected, selectedIds, updateLayers, updateLayer, time } = useEditor()
+  const [colorMode, setColorMode] = useState<'fill' | 'stroke'>('fill')
   const l = selected!
-  const key = l.type === 'shape' ? 'fill' : 'color'
+  const isPath = l.type === 'path'
+  const key = isPath ? (colorMode === 'stroke' ? 'stroke' : 'fill') : (l.type === 'shape' ? 'fill' : 'color')
   const effective = l && l.keyframes && l.keyframes.length > 0 ? interpolateKeyframes(l, time) : l
   const cur = (effective as any)?.[key] || (l as any)?.[key]
-  const up = (patch: Record<string, string>) => {
+  const up = (patch: Record<string, any>) => {
     if (selectedIds.length > 1) {
       updateLayers(selectedIds, patch)
     } else if (selected) {
@@ -677,17 +733,51 @@ function ColorPanel() {
   }
   return (
     <>
+      {isPath && (
+        <div className="flex gap-2 mb-3">
+          <button
+            type="button"
+            onClick={() => setColorMode('fill')}
+            className={`flex-1 py-1.5 text-xs font-semibold rounded-lg border transition-colors ${colorMode === 'fill' ? 'border-accent bg-accent/20 text-white' : 'border-line bg-surface2 text-txt2'}`}
+          >
+            Fill Color
+          </button>
+          <button
+            type="button"
+            onClick={() => setColorMode('stroke')}
+            className={`flex-1 py-1.5 text-xs font-semibold rounded-lg border transition-colors ${colorMode === 'stroke' ? 'border-accent bg-accent/20 text-white' : 'border-line bg-surface2 text-txt2'}`}
+          >
+            Stroke Color
+          </button>
+        </div>
+      )}
       <div className="pb-1">
         <Grid cols={6}>
           {PALETTE.map((c) => (
             <button
               key={c}
               data-testid={`color-${c}`}
-              onClick={() => up({ [key]: c })}
+              onClick={() => {
+                if (isPath && colorMode === 'stroke' && (!l.strokeWidth || l.strokeWidth === 0)) {
+                  up({ stroke: c, strokeWidth: 3 })
+                } else {
+                  up({ [key]: c })
+                }
+              }}
               style={{ background: c }}
               className={`aspect-square rounded-full border-2 transition-transform active:scale-90 ${cur === c ? 'border-accent ring-2 ring-accent/40' : 'border-line'}`}
             />
           ))}
+          {isPath && colorMode === 'fill' && (
+            <button
+              data-testid="color-transparent"
+              onClick={() => up({ fill: 'transparent' })}
+              className={`aspect-square rounded-full border-2 border-line bg-surface2 text-[10px] text-txt3 font-bold flex items-center justify-center transition-transform active:scale-90 ${l.fill === 'transparent' ? 'border-accent ring-2 ring-accent/40 text-accent' : ''}`}
+              title="No fill"
+            >
+              None
+            </button>
+          )}
         </Grid>
       </div>
       <Slider
@@ -887,15 +977,44 @@ function AlignPanel() {
 
 function ShapePanel() {
   const { l, up } = useSel()
+  const { updateLayer, openTool } = useEditor()
   return (
-    <Grid cols={3}>
-      {SHAPES.map((s) => (
-        <button key={s} data-testid={`swap-shape-${s}`} onClick={() => up({ shape: s })}
-          className={`flex aspect-square items-center justify-center rounded-2xl border ${l.shape === s ? 'border-accent bg-accent/10' : 'border-line bg-surface2'}`}>
-          <ShapeGlyph kind={s} />
+    <div className="space-y-4 pb-4">
+      <Grid cols={3}>
+        {SHAPES.map((s) => (
+          <button key={s} data-testid={`swap-shape-${s}`} onClick={() => up({ shape: s })}
+            className={`flex aspect-square items-center justify-center rounded-2xl border ${l.shape === s ? 'border-accent bg-accent/10' : 'border-line bg-surface2'}`}>
+            <ShapeGlyph kind={s} />
+          </button>
+        ))}
+      </Grid>
+
+      <div className="rounded-2xl border border-line bg-surface2/60 p-3.5">
+        <div className="flex items-center justify-between gap-2 mb-2">
+          <div className="flex items-center gap-2">
+            <PenTool className="h-4 w-4 text-accent" />
+            <span className="text-xs font-semibold text-txt1">Convert to Vector Path</span>
+          </div>
+          <span className="text-[10px] text-txt3 uppercase tracking-wider font-semibold">SVG / Bézier</span>
+        </div>
+        <p className="text-[11px] text-txt3 mb-3 leading-relaxed">
+          Transforms this basic shape into an editable vector element with anchor points and Bézier curve control handles.
+        </p>
+        <button
+          type="button"
+          data-testid="convert-shape-to-vector-btn"
+          onClick={() => {
+            const patch = convertShapeToVector(l)
+            updateLayer(l.id, patch)
+            openTool('vector')
+          }}
+          className="flex w-full items-center justify-center gap-2 rounded-xl bg-accent py-2.5 px-3 text-xs font-semibold text-white shadow-sm transition-all hover:bg-accent/90 active:scale-[0.99]"
+        >
+          <Spline className="h-3.5 w-3.5" />
+          <span>Convert Shape to Vector</span>
         </button>
-      ))}
-    </Grid>
+      </div>
+    </div>
   )
 }
 
@@ -1228,6 +1347,169 @@ function RadiusPanel() {
     )
   }
 
+
+function VectorPanel() {
+  const { l, up } = useSel()
+  const pts = l.points || []
+
+  const toggleClosed = () => {
+    up({ closed: !l.closed })
+  }
+
+  const addPoint = () => {
+    if (pts.length === 0) {
+      const tight = tightenVectorLayer({ ...l, points: [{ x: l.w * 0.5, y: l.h * 0.5 }] })
+      up(tight)
+      return
+    }
+    const last = pts[pts.length - 1]
+    const prev = pts.length > 1 ? pts[pts.length - 2] : { x: 0, y: 0 }
+    const nx = Math.round(Math.min(l.w, Math.max(0, last.x + (last.x - prev.x || 30))))
+    const ny = Math.round(Math.min(l.h, Math.max(0, last.y + (last.y - prev.y || 30))))
+    const tight = tightenVectorLayer({ ...l, points: [...pts, { x: nx, y: ny }] })
+    up(tight)
+  }
+
+  const removePoint = (idx: number) => {
+    if (pts.length <= 2) return
+    const updated = pts.filter((_, i) => i !== idx)
+    const tight = tightenVectorLayer({ ...l, points: updated })
+    up(tight)
+  }
+
+  const toggleSmooth = (idx: number) => {
+    const pt = pts[idx]
+    const isCurved = pt.cp1 !== undefined || pt.cp2 !== undefined
+    const updated = [...pts]
+    if (isCurved) {
+      // Make sharp / linear
+      updated[idx] = { x: pt.x, y: pt.y }
+    } else {
+      // Add smooth control handles
+      const prev = pts[(idx - 1 + pts.length) % pts.length]
+      const next = pts[(idx + 1) % pts.length]
+      const dx = (next.x - prev.x) * 0.2
+      const dy = (next.y - prev.y) * 0.2
+      updated[idx] = {
+        x: pt.x,
+        y: pt.y,
+        cp1: { x: Math.round(pt.x - dx), y: Math.round(pt.y - dy) },
+        cp2: { x: Math.round(pt.x + dx), y: Math.round(pt.y + dy) },
+      }
+    }
+    const tight = tightenVectorLayer({ ...l, points: updated })
+    up(tight)
+  }
+
+  return (
+    <div className="space-y-4 pb-4">
+      {/* Path state summary */}
+      <div className="flex items-center justify-between rounded-xl bg-surface2 px-3.5 py-2.5 text-xs">
+        <span className="text-txt2 font-medium">Anchor Points: <strong className="text-txt1">{pts.length}</strong></span>
+        <button
+          type="button"
+          data-testid="vector-toggle-closed"
+          onClick={toggleClosed}
+          className={`rounded-lg px-2.5 py-1 text-[11px] font-semibold transition-colors ${l.closed ? 'bg-accent text-white' : 'bg-surface border border-line text-txt2'}`}
+        >
+          {l.closed ? 'Closed Path' : 'Open Stroke'}
+        </button>
+      </div>
+
+      {/* Stroke width & cap controls */}
+      <div className="rounded-xl border border-line bg-surface2/50 p-3 space-y-3">
+        <Slider
+          label="Stroke Width"
+          tid="slider-stroke-width"
+          value={l.strokeWidth ?? (l.stroke ? 2 : 0)}
+          min={0}
+          max={40}
+          suffix="px"
+          onChange={(v: number) => up({ strokeWidth: v, stroke: v > 0 ? (l.stroke || '#007AFF') : undefined })}
+        />
+
+        <div className="flex items-center justify-between pt-1 text-xs">
+          <span className="text-txt2">Line Cap</span>
+          <div className="flex gap-1.5">
+            {(['butt', 'round', 'square'] as const).map((cap) => (
+              <button
+                key={cap}
+                type="button"
+                data-testid={`stroke-cap-${cap}`}
+                onClick={() => up({ strokeLinecap: cap })}
+                className={`rounded px-2 py-1 text-[10px] font-semibold capitalize border ${l.strokeLinecap === cap || (!l.strokeLinecap && cap === 'round') ? 'border-accent bg-accent/20 text-white' : 'border-line text-txt3 bg-surface'}`}
+              >
+                {cap}
+              </button>
+            ))}
+          </div>
+        </div>
+      </div>
+
+      {/* Interactive Anchor Points List */}
+      <div>
+        <div className="mb-2 flex items-center justify-between">
+          <span className="text-xs font-bold uppercase tracking-wider text-txt3">Points & Béziers</span>
+          <button
+            type="button"
+            data-testid="add-anchor-point-btn"
+            onClick={addPoint}
+            className="flex items-center gap-1 rounded-lg bg-surface2 px-2.5 py-1 text-xs font-semibold text-accent hover:bg-surface2/80 active:scale-95"
+          >
+            <Plus className="h-3 w-3" />
+            <span>Add Anchor</span>
+          </button>
+        </div>
+
+        <div className="space-y-1.5 max-h-48 overflow-y-auto no-scrollbar">
+          {pts.map((pt, i) => {
+            const hasHandles = pt.cp1 !== undefined || pt.cp2 !== undefined
+            return (
+              <div
+                key={i}
+                data-testid={`vector-point-row-${i}`}
+                className="flex items-center justify-between rounded-xl border border-line bg-surface2 px-3 py-2 text-xs"
+              >
+                <div className="flex items-center gap-2">
+                  <span className="grid h-5 w-5 place-items-center rounded-full bg-surface text-[10px] font-bold text-txt3">
+                    {i + 1}
+                  </span>
+                  <span className="font-mono text-[11px] text-txt2">
+                    X: {Math.round(pt.x)}, Y: {Math.round(pt.y)}
+                  </span>
+                </div>
+
+                <div className="flex items-center gap-1.5">
+                  <button
+                    type="button"
+                    data-testid={`vector-point-curve-${i}`}
+                    onClick={() => toggleSmooth(i)}
+                    className={`rounded px-2 py-0.5 text-[10px] font-semibold border ${hasHandles ? 'border-accent bg-accent/20 text-white' : 'border-line text-txt3 bg-surface'}`}
+                    title={hasHandles ? 'Curved (Bézier handles active)' : 'Linear (Sharp corner)'}
+                  >
+                    {hasHandles ? 'Smooth' : 'Sharp'}
+                  </button>
+
+                  {pts.length > 2 && (
+                    <button
+                      type="button"
+                      data-testid={`vector-point-delete-${i}`}
+                      onClick={() => removePoint(i)}
+                      className="grid h-6 w-6 place-items-center rounded text-txt3 hover:text-danger hover:bg-danger/10"
+                      title="Remove point"
+                    >
+                      <Trash2 className="h-3 w-3" />
+                    </button>
+                  )}
+                </div>
+              </div>
+            )
+          })}
+        </div>
+      </div>
+    </div>
+  )
+}
 
 function MaskPanel() {
   const { l, up } = useSel()

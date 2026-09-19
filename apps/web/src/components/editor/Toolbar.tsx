@@ -8,7 +8,7 @@ import {
   AlignHorizontalDistributeCenter, AlignVerticalDistributeCenter,
   Magnet, ChevronUp, ChevronDown, Lock, Unlock,
   Move, ArrowUpToLine, ArrowDownToLine, ArrowLeftToLine, ArrowRightToLine, Maximize2, Expand,
-  Droplet,
+  Droplet, PenTool,
 } from 'lucide-react'
 import { useEditor, type AlignMode } from '#/store/editor'
 import { parseImagePosition } from '#/lib/imagePosition'
@@ -365,6 +365,12 @@ export default function Toolbar() {
         { key: 'color', label: 'Fill', icon: <PaintBucket /> },
         { key: 'radius', label: 'Corners', icon: <Square /> },
         { key: 'mask', label: 'Mask', icon: <Scissors /> },
+        ...common,
+      ]
+    } else if (selected.type === 'path') {
+      items = [
+        { key: 'vector', label: 'Vector', icon: <PenTool /> },
+        { key: 'color', label: 'Color', icon: <PaintBucket /> },
         ...common,
       ]
     } else if (selected.type === 'image') {

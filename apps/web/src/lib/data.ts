@@ -119,6 +119,27 @@ export function createLayer(type: LayerType, preset: Preset, extra: Partial<Laye
       y: (preset.h - s) / 2,
       anim: 'pop',
     })
+  } else if (type === 'path') {
+    const w = Math.round(preset.w * 0.4)
+    const h = Math.round(w * 0.75)
+    Object.assign(base, {
+      name: 'Vector Path',
+      w,
+      h,
+      x: (preset.w - w) / 2,
+      y: (preset.h - h) / 2,
+      fill: '#007AFF',
+      stroke: undefined,
+      strokeWidth: 0,
+      closed: true,
+      points: [
+        { x: w * 0.5, y: h * 0.08, cp1: { x: w * 0.22, y: h * 0.08 }, cp2: { x: w * 0.85, y: h * 0.12 } },
+        { x: w * 0.92, y: h * 0.5, cp1: { x: w * 0.92, y: h * 0.25 }, cp2: { x: w * 0.85, y: h * 0.82 } },
+        { x: w * 0.5, y: h * 0.92, cp1: { x: w * 0.75, y: h * 0.92 }, cp2: { x: w * 0.18, y: h * 0.85 } },
+        { x: w * 0.08, y: h * 0.5, cp1: { x: w * 0.08, y: h * 0.72 }, cp2: { x: w * 0.12, y: h * 0.2 } },
+      ],
+      anim: 'pop',
+    })
   } else if (type === 'image') {
     const w = preset.w * 0.55
     Object.assign(base, {

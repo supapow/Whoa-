@@ -19,6 +19,7 @@ import {
   removeKeyframeAt,
   upsertKeyframe,
 } from '#/lib/keyframes'
+import { scaleVectorPoints } from '#/lib/vector'
 
 interface State {
   project: Project
@@ -83,6 +84,17 @@ function touch(p: Project): Project {
 
 function applyLayerUpdate(l: Layer, patch: Partial<Layer>, currentTime: number): Layer {
   let updated = { ...l, ...patch }
+
+  // If path layer's dimensions changed without explicit points provided, scale points proportionally
+  if (l.type === 'path' && l.points && !patch.points) {
+    const nextW = patch.w !== undefined ? patch.w : l.w
+    const nextH = patch.h !== undefined ? patch.h : l.h
+    const sx = l.w > 0 ? nextW / l.w : 1
+    const sy = l.h > 0 ? nextH / l.h : 1
+    if (Math.abs(sx - 1) > 1e-4 || Math.abs(sy - 1) > 1e-4) {
+      updated.points = scaleVectorPoints(l.points, sx, sy)
+    }
+  }
 
   // If layer has keyframes and a transform or style property is patched, update/upsert keyframe at currentTime
   if (l.keyframes && l.keyframes.length > 0 && !('keyframes' in patch)) {
