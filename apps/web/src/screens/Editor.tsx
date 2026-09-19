@@ -136,7 +136,7 @@ function EditorInner({ onExit }: { onExit: () => void }) {
         </div>
       </div>
 
-      <div className="relative min-h-0 flex-1">
+      <div className="relative min-h-0 flex flex-1">
         <Canvas />
         <VectorFloatingPanel />
       </div>
