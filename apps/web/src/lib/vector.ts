@@ -433,51 +433,379 @@ export function createShapeVectorPoints(shape: ShapeKind, w: number, h: number, 
   }
 }
 
-/**
- * Default preset vector templates for quick-adding vector elements.
- */
-export const VECTOR_PRESETS: {
+export interface VectorPreset {
   id: string
   name: string
   closed: boolean
   strokeWidth?: number
+  defaultW?: number
+  defaultH?: number
+  category?: 'basic' | 'geometric' | 'symbol' | 'arrow' | 'organic' | 'callout'
+  isBasic?: boolean
   getPoints: (w: number, h: number) => VectorPoint[]
-}[] = [
+}
+
+/**
+ * Default preset vector templates for quick-adding vector elements.
+ * Includes full vector versions of all basic shapes (Square, Circle, Triangle, Star, Line)
+ * followed by a rich library of decorative, symbol, arrow, and organic vector shapes.
+ */
+export const VECTOR_PRESETS: VectorPreset[] = [
+  /* ---------------- BASIC SHAPES (Vector Versions) ---------------- */
   {
-    id: 'organic-blob',
-    name: 'Organic Blob',
+    id: 'rect',
+    name: 'Square',
     closed: true,
+    category: 'basic',
+    isBasic: true,
+    defaultW: 160,
+    defaultH: 160,
+    getPoints: (w, h) => [
+      { x: 0, y: 0 },
+      { x: w, y: 0 },
+      { x: w, y: h },
+      { x: 0, y: h },
+    ],
+  },
+  {
+    id: 'circle',
+    name: 'Circle',
+    closed: true,
+    category: 'basic',
+    isBasic: true,
+    defaultW: 160,
+    defaultH: 160,
+    getPoints: (w, h) => createShapeVectorPoints('circle', w, h, 0),
+  },
+  {
+    id: 'triangle',
+    name: 'Triangle',
+    closed: true,
+    category: 'basic',
+    isBasic: true,
+    defaultW: 160,
+    defaultH: 160,
+    getPoints: (w, h) => [
+      { x: w / 2, y: 0 },
+      { x: w, y: h },
+      { x: 0, y: h },
+    ],
+  },
+  {
+    id: 'star',
+    name: 'Star',
+    closed: true,
+    category: 'basic',
+    isBasic: true,
+    defaultW: 160,
+    defaultH: 160,
+    getPoints: (w, h) => createShapeVectorPoints('star', w, h, 0),
+  },
+  {
+    id: 'line',
+    name: 'Line',
+    closed: false,
+    strokeWidth: 4,
+    category: 'basic',
+    isBasic: true,
+    defaultW: 200,
+    defaultH: 30,
+    getPoints: (w, h) => [
+      { x: 0, y: h / 2 },
+      { x: w, y: h / 2 },
+    ],
+  },
+
+  /* ---------------- GEOMETRIC & POLYGONS ---------------- */
+  {
+    id: 'hexagon',
+    name: 'Hexagon',
+    closed: true,
+    category: 'geometric',
+    defaultW: 160,
+    defaultH: 160,
+    getPoints: (w, h) => {
+      const cx = w / 2
+      const cy = h / 2
+      const rx = w / 2
+      const ry = h / 2
+      const pts: VectorPoint[] = []
+      for (let i = 0; i < 6; i++) {
+        const angle = (i * Math.PI) / 3 - Math.PI / 6
+        pts.push({
+          x: round(cx + rx * Math.cos(angle)),
+          y: round(cy + ry * Math.sin(angle)),
+        })
+      }
+      return fitVectorPointsToBounds(pts, true, w, h)
+    },
+  },
+  {
+    id: 'diamond',
+    name: 'Diamond',
+    closed: true,
+    category: 'geometric',
+    defaultW: 160,
+    defaultH: 160,
+    getPoints: (w, h) => [
+      { x: w / 2, y: 0 },
+      { x: w, y: h / 2 },
+      { x: w / 2, y: h },
+      { x: 0, y: h / 2 },
+    ],
+  },
+  {
+    id: 'pentagon',
+    name: 'Pentagon',
+    closed: true,
+    category: 'geometric',
+    defaultW: 160,
+    defaultH: 160,
+    getPoints: (w, h) => {
+      const cx = w / 2
+      const cy = h / 2
+      const rx = w / 2
+      const ry = h / 2
+      const pts: VectorPoint[] = []
+      for (let i = 0; i < 5; i++) {
+        const angle = -Math.PI / 2 + (i * 2 * Math.PI) / 5
+        pts.push({
+          x: round(cx + rx * Math.cos(angle)),
+          y: round(cy + ry * Math.sin(angle)),
+        })
+      }
+      return fitVectorPointsToBounds(pts, true, w, h)
+    },
+  },
+  {
+    id: 'octagon',
+    name: 'Octagon',
+    closed: true,
+    category: 'geometric',
+    defaultW: 160,
+    defaultH: 160,
+    getPoints: (w, h) => {
+      const d = 0.29289
+      return [
+        { x: w * d, y: 0 },
+        { x: w * (1 - d), y: 0 },
+        { x: w, y: h * d },
+        { x: w, y: h * (1 - d) },
+        { x: w * (1 - d), y: h },
+        { x: w * d, y: h },
+        { x: 0, y: h * (1 - d) },
+        { x: 0, y: h * d },
+      ]
+    },
+  },
+  {
+    id: 'cross',
+    name: 'Plus Cross',
+    closed: true,
+    category: 'geometric',
+    defaultW: 160,
+    defaultH: 160,
+    getPoints: (w, h) => {
+      const x1 = w * 0.35
+      const x2 = w * 0.65
+      const y1 = h * 0.35
+      const y2 = h * 0.65
+      return [
+        { x: x1, y: 0 },
+        { x: x2, y: 0 },
+        { x: x2, y: y1 },
+        { x: w, y: y1 },
+        { x: w, y: y2 },
+        { x: x2, y: y2 },
+        { x: x2, y: h },
+        { x: x1, y: h },
+        { x: x1, y: y2 },
+        { x: 0, y: y2 },
+        { x: 0, y: y1 },
+        { x: x1, y: y1 },
+      ]
+    },
+  },
+
+  /* ---------------- SYMBOLS & BADGES ---------------- */
+  {
+    id: 'heart',
+    name: 'Heart',
+    closed: true,
+    category: 'symbol',
+    defaultW: 160,
+    defaultH: 150,
+    getPoints: (w, h) => {
+      const cx = w / 2
+      const raw: VectorPoint[] = [
+        { x: cx, y: h * 0.95, cp1: { x: w * 0.15, y: h * 0.65 }, cp2: { x: w * 0.85, y: h * 0.65 } },
+        { x: w * 0.95, y: h * 0.35, cp1: { x: w * 0.95, y: h * 0.55 }, cp2: { x: w * 0.95, y: h * 0.15 } },
+        { x: w * 0.72, y: h * 0.05, cp1: { x: w * 0.85, y: h * 0.05 }, cp2: { x: w * 0.6, y: h * 0.05 } },
+        { x: cx, y: h * 0.28, cp1: { x: w * 0.55, y: h * 0.18 }, cp2: { x: w * 0.45, y: h * 0.18 } },
+        { x: w * 0.28, y: h * 0.05, cp1: { x: w * 0.4, y: h * 0.05 }, cp2: { x: w * 0.15, y: h * 0.05 } },
+        { x: w * 0.05, y: h * 0.35, cp1: { x: w * 0.05, y: h * 0.15 }, cp2: { x: w * 0.05, y: h * 0.55 } },
+      ]
+      return fitVectorPointsToBounds(raw, true, w, h)
+    },
+  },
+  {
+    id: 'shield',
+    name: 'Shield',
+    closed: true,
+    category: 'symbol',
+    defaultW: 160,
+    defaultH: 180,
+    getPoints: (w, h) => {
+      const cx = w / 2
+      const raw: VectorPoint[] = [
+        { x: cx, y: 0 },
+        { x: w, y: 0 },
+        { x: w, y: h * 0.45, cp2: { x: w, y: h * 0.75 } },
+        { x: cx, y: h, cp1: { x: w * 0.75, y: h * 0.92 }, cp2: { x: w * 0.25, y: h * 0.92 } },
+        { x: 0, y: h * 0.45, cp1: { x: 0, y: h * 0.75 } },
+        { x: 0, y: 0 },
+      ]
+      return fitVectorPointsToBounds(raw, true, w, h)
+    },
+  },
+  {
+    id: 'lightning',
+    name: 'Lightning',
+    closed: true,
+    category: 'symbol',
+    defaultW: 140,
+    defaultH: 180,
+    getPoints: (w, h) => [
+      { x: w * 0.55, y: 0 },
+      { x: w * 0.1, y: h * 0.55 },
+      { x: w * 0.48, y: h * 0.55 },
+      { x: w * 0.35, y: h },
+      { x: w * 0.9, y: h * 0.42 },
+      { x: w * 0.52, y: h * 0.42 },
+    ],
+  },
+  {
+    id: 'sparkle',
+    name: 'Sparkle',
+    closed: true,
+    category: 'symbol',
+    defaultW: 160,
+    defaultH: 160,
     getPoints: (w, h) => {
       const cx = w / 2
       const cy = h / 2
       const raw: VectorPoint[] = [
-        { x: cx, y: h * 0.08, cp1: { x: cx - w * 0.28, y: h * 0.08 }, cp2: { x: cx + w * 0.35, y: h * 0.12 } },
-        { x: w * 0.92, y: cy, cp1: { x: w * 0.92, y: cy - h * 0.25 }, cp2: { x: w * 0.85, y: cy + h * 0.32 } },
-        { x: cx, y: h * 0.92, cp1: { x: cx + w * 0.25, y: h * 0.92 }, cp2: { x: cx - w * 0.32, y: h * 0.85 } },
-        { x: w * 0.08, y: cy, cp1: { x: w * 0.08, y: cy + h * 0.22 }, cp2: { x: w * 0.12, y: cy - h * 0.3 } },
+        { x: cx, y: 0, cp1: { x: cx * 0.85, y: cy * 0.3 }, cp2: { x: cx + (w - cx) * 0.15, y: cy * 0.3 } },
+        { x: w, y: cy, cp1: { x: cx + (w - cx) * 0.7, y: cy * 0.85 }, cp2: { x: cx + (w - cx) * 0.7, y: cy + (h - cy) * 0.15 } },
+        { x: cx, y: h, cp1: { x: cx + (w - cx) * 0.15, y: cy + (h - cy) * 0.7 }, cp2: { x: cx * 0.85, y: cy + (h - cy) * 0.7 } },
+        { x: 0, y: cy, cp1: { x: cx * 0.3, y: cy + (h - cy) * 0.15 }, cp2: { x: cx * 0.3, y: cy * 0.85 } },
       ]
       return fitVectorPointsToBounds(raw, true, w, h)
     },
   },
   {
-    id: 'smooth-wave',
-    name: 'Smooth Wave',
+    id: 'crescent',
+    name: 'Crescent Moon',
     closed: true,
+    category: 'symbol',
+    defaultW: 150,
+    defaultH: 160,
     getPoints: (w, h) => {
       const raw: VectorPoint[] = [
-        { x: 0, y: h * 0.4, cp2: { x: w * 0.25, y: h * 0.1 } },
-        { x: w * 0.5, y: h * 0.5, cp1: { x: w * 0.35, y: h * 0.75 }, cp2: { x: w * 0.65, y: h * 0.25 } },
-        { x: w, y: h * 0.4, cp1: { x: w * 0.75, y: h * 0.85 } },
-        { x: w, y: h },
-        { x: 0, y: h },
+        { x: w * 0.7, y: 0, cp2: { x: w * 0.95, y: h * 0.3 } },
+        { x: w * 0.9, y: h * 0.5, cp1: { x: w, y: h * 0.4 }, cp2: { x: w, y: h * 0.6 } },
+        { x: w * 0.7, y: h, cp1: { x: w * 0.95, y: h * 0.7 }, cp2: { x: w * 0.25, y: h * 0.75 } },
+        { x: w * 0.35, y: h * 0.5, cp1: { x: w * 0.3, y: h * 0.65 }, cp2: { x: w * 0.3, y: h * 0.35 } },
       ]
       return fitVectorPointsToBounds(raw, true, w, h)
     },
   },
+  {
+    id: 'cloud',
+    name: 'Cloud',
+    closed: true,
+    category: 'symbol',
+    defaultW: 180,
+    defaultH: 120,
+    getPoints: (w, h) => {
+      const raw: VectorPoint[] = [
+        { x: w * 0.15, y: h * 0.8 },
+        { x: w * 0.85, y: h * 0.8, cp2: { x: w * 0.98, y: h * 0.65 } },
+        { x: w * 0.9, y: h * 0.5, cp1: { x: w * 0.98, y: h * 0.6 }, cp2: { x: w * 0.85, y: h * 0.25 } },
+        { x: w * 0.65, y: h * 0.28, cp1: { x: w * 0.8, y: h * 0.2 }, cp2: { x: w * 0.55, y: h * 0.05 } },
+        { x: w * 0.35, y: h * 0.25, cp1: { x: w * 0.45, y: h * 0.05 }, cp2: { x: w * 0.2, y: h * 0.18 } },
+        { x: w * 0.1, y: h * 0.5, cp1: { x: w * 0.15, y: h * 0.3 }, cp2: { x: 0, y: h * 0.65 } },
+      ]
+      return fitVectorPointsToBounds(raw, true, w, h)
+    },
+  },
+  {
+    id: 'sunburst',
+    name: 'Sunburst',
+    closed: true,
+    category: 'symbol',
+    defaultW: 160,
+    defaultH: 160,
+    getPoints: (w, h) => {
+      const cx = w / 2
+      const cy = h / 2
+      const outerR = Math.min(w, h) / 2
+      const innerR = outerR * 0.78
+      const pts: VectorPoint[] = []
+      for (let i = 0; i < 24; i++) {
+        const r = i % 2 === 0 ? outerR : innerR
+        const angle = (i * Math.PI) / 12
+        pts.push({
+          x: round(cx + r * Math.cos(angle)),
+          y: round(cy + r * Math.sin(angle)),
+        })
+      }
+      return fitVectorPointsToBounds(pts, true, w, h)
+    },
+  },
+  {
+    id: 'badge-ribbon',
+    name: 'Badge Ribbon',
+    closed: true,
+    category: 'symbol',
+    defaultW: 180,
+    defaultH: 120,
+    getPoints: (w, h) => {
+      const raw: VectorPoint[] = [
+        { x: 0, y: 0 },
+        { x: w, y: 0 },
+        { x: w * 0.85, y: h * 0.5 },
+        { x: w, y: h },
+        { x: 0, y: h },
+        { x: w * 0.15, y: h * 0.5 },
+      ]
+      return fitVectorPointsToBounds(raw, true, w, h)
+    },
+  },
+  {
+    id: 'tag',
+    name: 'Price Tag',
+    closed: true,
+    category: 'symbol',
+    defaultW: 180,
+    defaultH: 110,
+    getPoints: (w, h) => [
+      { x: w * 0.25, y: 0 },
+      { x: w, y: 0 },
+      { x: w, y: h },
+      { x: w * 0.25, y: h },
+      { x: 0, y: h * 0.5 },
+    ],
+  },
+
+  /* ---------------- CALLOUTS & UI ---------------- */
   {
     id: 'speech-bubble',
     name: 'Speech Bubble',
     closed: true,
+    category: 'callout',
+    defaultW: 180,
+    defaultH: 140,
     getPoints: (w, h) => {
       const bodyH = h * 0.75
       const r = Math.min(16, bodyH * 0.25)
@@ -497,11 +825,49 @@ export const VECTOR_PRESETS: {
       return fitVectorPointsToBounds(raw, true, w, h)
     },
   },
+
+  /* ---------------- ARROWS & DIRECTIONALS ---------------- */
+  {
+    id: 'arrow-right',
+    name: 'Right Arrow',
+    closed: true,
+    category: 'arrow',
+    defaultW: 180,
+    defaultH: 120,
+    getPoints: (w, h) => [
+      { x: 0, y: h * 0.3 },
+      { x: w * 0.55, y: h * 0.3 },
+      { x: w * 0.55, y: 0 },
+      { x: w, y: h * 0.5 },
+      { x: w * 0.55, y: h },
+      { x: w * 0.55, y: h * 0.7 },
+      { x: 0, y: h * 0.7 },
+    ],
+  },
+  {
+    id: 'chevron',
+    name: 'Chevron',
+    closed: true,
+    category: 'arrow',
+    defaultW: 180,
+    defaultH: 130,
+    getPoints: (w, h) => [
+      { x: 0, y: 0 },
+      { x: w * 0.5, y: 0 },
+      { x: w, y: h * 0.5 },
+      { x: w * 0.5, y: h },
+      { x: 0, y: h },
+      { x: w * 0.5, y: h * 0.5 },
+    ],
+  },
   {
     id: 'curved-arrow',
     name: 'Curved Arrow',
     closed: false,
     strokeWidth: 4,
+    category: 'arrow',
+    defaultW: 180,
+    defaultH: 135,
     getPoints: (w, h) => {
       const raw: VectorPoint[] = [
         { x: w * 0.1, y: h * 0.85, cp2: { x: w * 0.2, y: h * 0.2 } },
@@ -512,19 +878,142 @@ export const VECTOR_PRESETS: {
     },
   },
   {
-    id: 'badge-ribbon',
-    name: 'Badge Ribbon',
-    closed: true,
+    id: 's-curve',
+    name: 'S-Curve Stroke',
+    closed: false,
+    strokeWidth: 4,
+    category: 'arrow',
+    defaultW: 180,
+    defaultH: 120,
     getPoints: (w, h) => {
       const raw: VectorPoint[] = [
-        { x: 0, y: 0 },
-        { x: w, y: 0 },
-        { x: w * 0.85, y: h * 0.5 },
-        { x: w, y: h },
-        { x: 0, y: h },
-        { x: w * 0.15, y: h * 0.5 },
+        { x: 0, y: h * 0.8, cp2: { x: w * 0.3, y: 0 } },
+        { x: w, y: h * 0.2, cp1: { x: w * 0.7, y: h } },
+      ]
+      return fitVectorPointsToBounds(raw, false, w, h)
+    },
+  },
+
+  /* ---------------- ORGANIC & DECORATIVE ---------------- */
+  {
+    id: 'organic-blob',
+    name: 'Organic Blob',
+    closed: true,
+    category: 'organic',
+    defaultW: 180,
+    defaultH: 160,
+    getPoints: (w, h) => {
+      const cx = w / 2
+      const cy = h / 2
+      const raw: VectorPoint[] = [
+        { x: cx, y: h * 0.08, cp1: { x: cx - w * 0.28, y: h * 0.08 }, cp2: { x: cx + w * 0.35, y: h * 0.12 } },
+        { x: w * 0.92, y: cy, cp1: { x: w * 0.92, y: cy - h * 0.25 }, cp2: { x: w * 0.85, y: cy + h * 0.32 } },
+        { x: cx, y: h * 0.92, cp1: { x: cx + w * 0.25, y: h * 0.92 }, cp2: { x: cx - w * 0.32, y: h * 0.85 } },
+        { x: w * 0.08, y: cy, cp1: { x: w * 0.08, y: cy + h * 0.22 }, cp2: { x: w * 0.12, y: cy - h * 0.3 } },
       ]
       return fitVectorPointsToBounds(raw, true, w, h)
+    },
+  },
+  {
+    id: 'smooth-wave',
+    name: 'Smooth Wave',
+    closed: true,
+    category: 'organic',
+    defaultW: 180,
+    defaultH: 135,
+    getPoints: (w, h) => {
+      const raw: VectorPoint[] = [
+        { x: 0, y: h * 0.4, cp2: { x: w * 0.25, y: h * 0.1 } },
+        { x: w * 0.5, y: h * 0.5, cp1: { x: w * 0.35, y: h * 0.75 }, cp2: { x: w * 0.65, y: h * 0.25 } },
+        { x: w, y: h * 0.4, cp1: { x: w * 0.75, y: h * 0.85 } },
+        { x: w, y: h },
+        { x: 0, y: h },
+      ]
+      return fitVectorPointsToBounds(raw, true, w, h)
+    },
+  },
+  {
+    id: 'wave-banner',
+    name: 'Wave Banner',
+    closed: true,
+    category: 'organic',
+    defaultW: 180,
+    defaultH: 120,
+    getPoints: (w, h) => {
+      const raw: VectorPoint[] = [
+        { x: 0, y: h * 0.3, cp2: { x: w * 0.25, y: 0 } },
+        { x: w * 0.5, y: h * 0.25, cp1: { x: w * 0.35, y: h * 0.4 }, cp2: { x: w * 0.65, y: 0 } },
+        { x: w, y: h * 0.2, cp1: { x: w * 0.75, y: h * 0.4 } },
+        { x: w, y: h * 0.9, cp2: { x: w * 0.75, y: h * 0.7 } },
+        { x: w * 0.5, y: h * 0.95, cp1: { x: w * 0.65, y: h * 1.1 }, cp2: { x: w * 0.35, y: h * 0.7 } },
+        { x: 0, y: h },
+      ]
+      return fitVectorPointsToBounds(raw, true, w, h)
+    },
+  },
+  {
+    id: 'teardrop',
+    name: 'Teardrop',
+    closed: true,
+    category: 'organic',
+    defaultW: 150,
+    defaultH: 180,
+    getPoints: (w, h) => {
+      const cx = w / 2
+      const raw: VectorPoint[] = [
+        { x: cx, y: h, cp1: { x: w * 0.15, y: h * 0.65 }, cp2: { x: w * 0.85, y: h * 0.65 } },
+        { x: w, y: h * 0.35, cp1: { x: w, y: h * 0.5 }, cp2: { x: w, y: h * 0.15 } },
+        { x: cx, y: 0, cp1: { x: w * 0.8, y: 0 }, cp2: { x: w * 0.2, y: 0 } },
+        { x: 0, y: h * 0.35, cp1: { x: 0, y: h * 0.15 }, cp2: { x: 0, y: h * 0.5 } },
+      ]
+      return fitVectorPointsToBounds(raw, true, w, h)
+    },
+  },
+  {
+    id: 'leaf',
+    name: 'Leaf',
+    closed: true,
+    category: 'organic',
+    defaultW: 160,
+    defaultH: 160,
+    getPoints: (w, h) => {
+      const raw: VectorPoint[] = [
+        { x: 0, y: h, cp2: { x: w * 0.1, y: h * 0.3 } },
+        { x: w, y: 0, cp1: { x: w * 0.6, y: 0 }, cp2: { x: w * 0.9, y: h * 0.7 } },
+      ]
+      return fitVectorPointsToBounds(raw, true, w, h)
+    },
+  },
+  {
+    id: 'flower',
+    name: 'Flower',
+    closed: true,
+    category: 'organic',
+    defaultW: 160,
+    defaultH: 160,
+    getPoints: (w, h) => {
+      const cx = w / 2
+      const cy = h / 2
+      const R = Math.min(w, h) / 2
+      const rInner = R * 0.45
+      const pts: VectorPoint[] = []
+      const petals = 6
+      for (let i = 0; i < petals; i++) {
+        const a1 = (i * 2 * Math.PI) / petals
+        const aMid = a1 + Math.PI / petals
+        pts.push({
+          x: round(cx + rInner * Math.cos(a1)),
+          y: round(cy + rInner * Math.sin(a1)),
+          cp2: { x: round(cx + R * 1.15 * Math.cos(aMid - 0.2)), y: round(cy + R * 1.15 * Math.sin(aMid - 0.2)) },
+        })
+        pts.push({
+          x: round(cx + R * Math.cos(aMid)),
+          y: round(cy + R * Math.sin(aMid)),
+          cp1: { x: round(cx + R * 1.15 * Math.cos(aMid - 0.1)), y: round(cy + R * 1.15 * Math.sin(aMid - 0.1)) },
+          cp2: { x: round(cx + R * 1.15 * Math.cos(aMid + 0.1)), y: round(cy + R * 1.15 * Math.sin(aMid + 0.1)) },
+        })
+      }
+      return fitVectorPointsToBounds(pts, true, w, h)
     },
   },
 ]

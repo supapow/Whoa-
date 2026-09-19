@@ -29,7 +29,7 @@ export default function ToolSheet() {
   return (
     <div className="absolute inset-0 z-60 flex flex-col justify-end" data-testid="tool-sheet">
       <div className="absolute inset-0 bg-black/40 animate-fade" onClick={() => openTool(null)} />
-      <div className="animate-sheet relative max-h-[70vh] overflow-y-auto rounded-t-3xl border-t border-line bg-surface pb-8 no-scrollbar">
+      <div className="animate-sheet relative max-h-[82vh] overflow-y-auto rounded-t-3xl border-t border-line bg-surface pb-8 no-scrollbar">
         <div className="sticky top-0 flex items-center justify-between bg-surface px-5 pt-4 pb-3 z-10">
           <h3 className="text-lg font-bold">{TITLES[tool] || 'Options'}</h3>
           <button onClick={() => openTool(null)} data-testid="sheet-close" className="grid h-8 w-8 place-items-center rounded-full bg-surface2 text-txt2">
@@ -106,69 +106,120 @@ function TextAdd() {
 
 function Elements() {
   const { addLayer, openTool } = useEditor()
+  const [filter, setFilter] = useState<'all' | 'basic' | 'geometric' | 'symbol' | 'arrow' | 'organic'>('all')
   const labels: Record<ShapeKind, string> = { rect: 'Square', circle: 'Circle', triangle: 'Triangle', star: 'Star', line: 'Line' }
-  return (
-    <div className="space-y-5 pb-4">
-      <div>
-        <div className="mb-2 text-xs font-bold uppercase tracking-wider text-txt3">Basic Shapes</div>
-        <Grid cols={3}>
-          {SHAPES.map((s) => (
-            <button
-              key={s}
-              data-testid={`add-shape-${s}`}
-              onClick={() => addLayer('shape', { shape: s })}
-              className="flex aspect-square flex-col items-center justify-center gap-2 rounded-2xl border border-line bg-surface2 transition-colors active:border-accent"
-            >
-              <ShapeGlyph kind={s} />
-              <span className="text-[11px] text-txt2">{labels[s]}</span>
-            </button>
-          ))}
-        </Grid>
-      </div>
 
-      <div>
-        <div className="mb-2 flex items-center justify-between">
-          <span className="text-xs font-bold uppercase tracking-wider text-txt3">Vector Paths (Bézier Curves)</span>
-          <span className="text-[11px] text-emerald-400 font-medium">Ultralight &lt;1KB SVG</span>
+  const filteredVectorPresets = filter === 'all'
+    ? VECTOR_PRESETS
+    : VECTOR_PRESETS.filter((vp) => vp.category === filter || (filter === 'basic' && vp.isBasic))
+
+  return (
+    <div className="pb-6">
+      {/* 2-Column Side-by-Side Layout: Minimalist, clean, borderless */}
+      <div className="grid grid-cols-2 gap-3 sm:gap-4 items-start">
+        {/* COLUMN 1: CSS Shapes */}
+        <div className="sticky top-0 self-start">
+          <div className="mb-2.5 flex items-center justify-between">
+            <span className="text-xs font-bold uppercase tracking-wider text-txt3">CSS Shapes</span>
+            <span className="text-[10px] text-txt3">5</span>
+          </div>
+
+          <div className="grid grid-cols-2 gap-2">
+            {SHAPES.map((s) => (
+              <button
+                key={s}
+                data-testid={`add-shape-${s}`}
+                id={`add-shape-${s}`}
+                aria-label={labels[s]}
+                title={labels[s]}
+                onClick={() => addLayer('shape', { shape: s })}
+                className={`grid place-items-center rounded-2xl bg-surface2 transition-all hover:bg-surface2/75 active:scale-90 cursor-pointer ${
+                  s === 'line' ? 'col-span-2 h-14' : 'aspect-square'
+                }`}
+              >
+                <ShapeGlyph kind={s} />
+              </button>
+            ))}
+          </div>
         </div>
-        <div className="grid grid-cols-2 gap-2.5">
-          {VECTOR_PRESETS.map((vp) => (
-            <button
-              key={vp.id}
-              data-testid={`add-vector-${vp.id}`}
-              onClick={() => {
-                const w = 180
-                const h = 135
-                addLayer('path', {
-                  name: vp.name,
-                  w,
-                  h,
-                  closed: vp.closed,
-                  stroke: vp.strokeWidth ? '#007AFF' : undefined,
-                  strokeWidth: vp.strokeWidth || 0,
-                  fill: vp.closed ? '#007AFF' : 'transparent',
-                  points: vp.getPoints(w, h),
-                })
-                openTool(null)
-              }}
-              className="flex items-center gap-2.5 rounded-2xl border border-line bg-surface2 p-3 text-left transition-colors hover:border-accent active:scale-98"
-            >
-              <div className="grid h-10 w-10 shrink-0 place-items-center rounded-xl bg-surface border border-line/60">
-                <svg viewBox="0 0 100 80" className="h-6 w-6">
+
+        {/* COLUMN 2: Vector Shapes */}
+        <div>
+          <div className="mb-2.5 flex items-center justify-between">
+            <span className="text-xs font-bold uppercase tracking-wider text-txt3">Vector Shapes</span>
+            <span className="text-[10px] text-indigo-400 font-medium">{VECTOR_PRESETS.length}</span>
+          </div>
+
+          {/* Minimalist Filter Chips */}
+          <div className="mb-2 flex items-center gap-1 overflow-x-auto pb-1 no-scrollbar text-[10px]">
+            {(
+              [
+                { id: 'all', label: 'All' },
+                { id: 'basic', label: 'Basic' },
+                { id: 'geometric', label: 'Polygons' },
+                { id: 'symbol', label: 'Symbols' },
+                { id: 'arrow', label: 'Arrows' },
+                { id: 'organic', label: 'Organic' },
+              ] as const
+            ).map((cat) => (
+              <button
+                key={cat.id}
+                type="button"
+                onClick={() => setFilter(cat.id)}
+                className={`shrink-0 rounded-lg px-2 py-0.5 text-[9px] font-semibold transition-colors ${
+                  filter === cat.id
+                    ? 'bg-accent text-white'
+                    : 'bg-surface2 text-txt3 hover:text-txt2'
+                }`}
+              >
+                {cat.label}
+              </button>
+            ))}
+          </div>
+
+          {/* Grid of Vector Shapes without borders or text names */}
+          <div className="grid grid-cols-2 gap-2">
+            {filteredVectorPresets.map((vp) => (
+              <button
+                key={vp.id}
+                data-testid={`add-vector-${vp.id}`}
+                id={`add-vector-${vp.id}`}
+                aria-label={vp.name}
+                title={vp.name}
+                onClick={() => {
+                  const isSquare = vp.defaultW === vp.defaultH || (!vp.defaultW && (vp.isBasic || vp.id === 'heart' || vp.id === 'shield' || vp.id === 'sparkle' || vp.id === 'flower'))
+                  const w = vp.defaultW || (isSquare ? 160 : 180)
+                  const h = vp.defaultH || (isSquare ? 160 : (vp.id === 'line' ? 30 : 135))
+                  addLayer('path', {
+                    name: vp.name,
+                    w,
+                    h,
+                    closed: vp.closed,
+                    stroke: vp.strokeWidth ? '#007AFF' : undefined,
+                    strokeWidth: vp.strokeWidth || 0,
+                    fill: vp.closed ? '#007AFF' : 'transparent',
+                    points: vp.getPoints(w, h),
+                  })
+                  openTool(null)
+                }}
+                className={`grid place-items-center rounded-2xl bg-surface2 transition-all hover:bg-surface2/75 active:scale-90 cursor-pointer ${
+                  vp.id === 'line' ? 'col-span-2 h-14' : 'aspect-square'
+                }`}
+              >
+                <svg viewBox="0 0 100 100" className="h-8 w-8">
                   <path
-                    d={buildSvgPath(vp.getPoints(100, 80), vp.closed, 100, 80)}
-                    fill={vp.closed ? '#60a5fa' : 'none'}
-                    stroke="#60a5fa"
-                    strokeWidth={vp.strokeWidth ? 4 : 1.5}
+                    d={buildSvgPath(vp.getPoints(80, 80), vp.closed, 80, 80)}
+                    transform="translate(10, 10)"
+                    fill={vp.closed ? '#818cf8' : 'none'}
+                    stroke="#818cf8"
+                    strokeWidth={vp.strokeWidth ? 6 : 2.5}
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
                   />
                 </svg>
-              </div>
-              <div className="min-w-0 flex-1">
-                <div className="truncate text-xs font-semibold text-txt1">{vp.name}</div>
-                <div className="text-[10px] text-txt3">{vp.closed ? 'Closed vector' : 'Open stroke'}</div>
-              </div>
-            </button>
-          ))}
+              </button>
+            ))}
+          </div>
         </div>
       </div>
     </div>
@@ -176,12 +227,12 @@ function Elements() {
 }
 
 function ShapeGlyph({ kind }: { kind: ShapeKind }) {
-  const c = 'h-9 w-9 bg-white'
+  const c = 'h-8 w-8 bg-white'
   if (kind === 'circle') return <div className={`${c} rounded-full`} />
-  if (kind === 'triangle') return <div style={{ width: 0, height: 0, borderLeft: '18px solid transparent', borderRight: '18px solid transparent', borderBottom: '32px solid #fff' }} />
-  if (kind === 'star') return <div className="h-9 w-9 bg-white" style={{ clipPath: 'polygon(50% 0%, 61% 35%, 98% 35%, 68% 57%, 79% 91%, 50% 70%, 21% 91%, 32% 57%, 2% 35%, 39% 35%)' }} />
-  if (kind === 'line') return <div className="h-1.5 w-9 rounded bg-white" />
-  return <div className={`${c} rounded-md`} />
+  if (kind === 'triangle') return <div style={{ width: 0, height: 0, borderLeft: '16px solid transparent', borderRight: '16px solid transparent', borderBottom: '28px solid #fff' }} />
+  if (kind === 'star') return <div className="h-8 w-8 bg-white" style={{ clipPath: 'polygon(50% 0%, 61% 35%, 98% 35%, 68% 57%, 79% 91%, 50% 70%, 21% 91%, 32% 57%, 2% 35%, 39% 35%)' }} />
+  if (kind === 'line') return <div className="h-1.5 w-12 rounded-full bg-white" />
+  return <div className={`${c} rounded-lg`} />
 }
 
 function Stickers() {

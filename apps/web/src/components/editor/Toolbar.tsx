@@ -8,14 +8,14 @@ import {
   AlignHorizontalDistributeCenter, AlignVerticalDistributeCenter,
   Magnet, ChevronUp, ChevronDown, Lock, Unlock,
   Move, ArrowUpToLine, ArrowDownToLine, ArrowLeftToLine, ArrowRightToLine, Maximize2, Expand,
-  Droplet, PenTool,
+  Droplet, PenTool, Download,
 } from 'lucide-react'
 import { useEditor, type AlignMode } from '#/store/editor'
 import { parseImagePosition } from '#/lib/imagePosition'
 
 type Item = { key: string; label: string; icon: React.ReactNode; onClick?: () => void; danger?: boolean; accent?: boolean; active?: boolean }
 
-export default function Toolbar() {
+export default function Toolbar({ onExport }: { onExport?: () => void }) {
   const {
     project, selected, selectedIds, alignSelected, openTool, deleteLayer, deleteLayers, duplicate, reorder,
     createGroup, ungroup, saveAsComponent, artboardSnap, setArtboardSnap,
@@ -454,7 +454,10 @@ export default function Toolbar() {
   const floatingActionKeys = new Set(['color', 'blur', 'lock-proportions', 'dup', 'del'])
   const floatingItems = selected ? items.filter((it) => floatingActionKeys.has(it.key)) : []
   const toolbarExcludeKeys = new Set(['color', 'lock-proportions', 'dup', 'del'])
-  const toolbarItems = selected ? items.filter((it) => !toolbarExcludeKeys.has(it.key)) : items
+  const baseToolbarItems = selected ? items.filter((it) => !toolbarExcludeKeys.has(it.key)) : items
+  const toolbarItems = onExport
+    ? [...baseToolbarItems, { key: 'export', label: 'Export', icon: <Download />, onClick: onExport }]
+    : baseToolbarItems
 
   const renderItem = (it: Item) => {
     const isTimeline = it.key === 'timeline'

@@ -21,8 +21,16 @@ import {
 } from '#/lib/keyframes'
 import { scaleVectorPoints } from '#/lib/vector'
 
+export interface HistoryEntry {
+  project: Project
+  selectedId: string | null
+  selectedIds: string[]
+}
+
 interface State {
   project: Project
+  past: HistoryEntry[]
+  future: HistoryEntry[]
   selectedId: string | null
   selectedIds: string[]
   tool: string | null
@@ -32,6 +40,8 @@ interface State {
   timelineOpen: boolean
   imagePositioningId: string | null
   animationSide: 'in' | 'out'
+  _lastHistoryTime?: number
+  _lastHistoryKey?: string
 }
 
 export type AlignMode =
@@ -77,6 +87,9 @@ type Action =
   | { t: 'moveKeyframe'; layerId: string; keyframeId: string; newTime: number }
   | { t: 'deleteKeyframe'; layerId: string; keyframeId: string }
   | { t: 'clearKeyframes'; layerId: string }
+  | { t: 'undo' }
+  | { t: 'redo' }
+  | { t: 'checkpoint' }
 
 function touch(p: Project): Project {
   return { ...p, updatedAt: Date.now() }
@@ -120,7 +133,7 @@ function applyLayerUpdate(l: Layer, patch: Partial<Layer>, currentTime: number):
   return updated
 }
 
-function reducer(state: State, a: Action): State {
+function innerReducer(state: State, a: Action): State {
   const p = state.project
   switch (a.t) {
     case 'setImagePositioningId':
@@ -729,10 +742,156 @@ function reducer(state: State, a: Action): State {
   }
 }
 
+const MAX_HISTORY = 60
+
+function reducer(state: State, a: Action): State {
+  if (a.t === 'undo') {
+    if (state.past.length === 0) return state
+    const prev = state.past[state.past.length - 1]
+    const newPast = state.past.slice(0, -1)
+    const currentEntry: HistoryEntry = {
+      project: state.project,
+      selectedId: state.selectedId,
+      selectedIds: state.selectedIds,
+    }
+    const newFuture = [...state.future, currentEntry]
+
+    const validIds = new Set(prev.project.layers.map((l) => l.id))
+    const newSelectedIds = prev.selectedIds.filter((id) => validIds.has(id))
+    const newSelectedId =
+      prev.selectedId && validIds.has(prev.selectedId)
+        ? prev.selectedId
+        : newSelectedIds[0] ?? null
+
+    return {
+      ...state,
+      project: prev.project,
+      selectedId: newSelectedId,
+      selectedIds: newSelectedIds,
+      past: newPast,
+      future: newFuture,
+      _lastHistoryTime: 0,
+      _lastHistoryKey: undefined,
+    }
+  }
+
+  if (a.t === 'redo') {
+    if (state.future.length === 0) return state
+    const next = state.future[state.future.length - 1]
+    const newFuture = state.future.slice(0, -1)
+    const currentEntry: HistoryEntry = {
+      project: state.project,
+      selectedId: state.selectedId,
+      selectedIds: state.selectedIds,
+    }
+    const newPast = [...state.past.slice(-(MAX_HISTORY - 1)), currentEntry]
+
+    const validIds = new Set(next.project.layers.map((l) => l.id))
+    const newSelectedIds = next.selectedIds.filter((id) => validIds.has(id))
+    const newSelectedId =
+      next.selectedId && validIds.has(next.selectedId)
+        ? next.selectedId
+        : newSelectedIds[0] ?? null
+
+    return {
+      ...state,
+      project: next.project,
+      selectedId: newSelectedId,
+      selectedIds: newSelectedIds,
+      past: newPast,
+      future: newFuture,
+      _lastHistoryTime: 0,
+      _lastHistoryKey: undefined,
+    }
+  }
+
+  if (a.t === 'checkpoint') {
+    return {
+      ...state,
+      _lastHistoryTime: 0,
+      _lastHistoryKey: undefined,
+    }
+  }
+
+  // Pure UI actions that do not change state.project
+  if (
+    a.t === 'select' ||
+    a.t === 'toggleSelect' ||
+    a.t === 'tool' ||
+    a.t === 'setTime' ||
+    a.t === 'setPlaying' ||
+    a.t === 'setArtboardSnap' ||
+    a.t === 'toggleTimeline' ||
+    a.t === 'setTimelineOpen' ||
+    a.t === 'setImagePositioningId' ||
+    a.t === 'setAnimationSide'
+  ) {
+    return innerReducer(state, a)
+  }
+
+  // Mutating action: run inner reducer to calculate new state
+  const nextState = innerReducer(state, a)
+  if (nextState.project === state.project) {
+    return nextState
+  }
+
+  const now = Date.now()
+  const isContinuous =
+    a.t === 'updateLayer' || a.t === 'updateLayers' || a.t === 'nudge' || a.t === 'moveKeyframe'
+
+  const actionKey =
+    a.t === 'updateLayer'
+      ? `updateLayer:${a.id}`
+      : a.t === 'updateLayers'
+      ? `updateLayers:${a.ids.slice().sort().join(',')}`
+      : a.t === 'nudge'
+      ? 'nudge'
+      : a.t === 'moveKeyframe'
+      ? `moveKeyframe:${a.layerId}:${a.keyframeId}`
+      : undefined
+
+  const isSameTick = Boolean(state._lastHistoryTime && now - state._lastHistoryTime < 60)
+  const isCoalescedStream = Boolean(
+    isContinuous &&
+      state._lastHistoryTime &&
+      now - state._lastHistoryTime < 600 &&
+      (state._lastHistoryKey === actionKey || isSameTick),
+  )
+
+  if (isCoalescedStream) {
+    return {
+      ...nextState,
+      past: state.past,
+      future: [],
+      _lastHistoryTime: now,
+      _lastHistoryKey: actionKey || state._lastHistoryKey,
+    }
+  }
+
+  const snapshot: HistoryEntry = {
+    project: state.project,
+    selectedId: state.selectedId,
+    selectedIds: state.selectedIds,
+  }
+
+  return {
+    ...nextState,
+    past: [...state.past.slice(-(MAX_HISTORY - 1)), snapshot],
+    future: [],
+    _lastHistoryTime: isContinuous ? now : 0,
+    _lastHistoryKey: isContinuous ? actionKey : undefined,
+  }
+}
+
 interface Ctx extends State {
   mode: 'static' | 'animated'
   selected: Layer | null
   selectedIds: string[]
+  canUndo: boolean
+  canRedo: boolean
+  undo: () => void
+  redo: () => void
+  checkpoint: () => void
   select: (id: string | null, additive?: boolean, ids?: string[]) => void
   toggleSelect: (id: string) => void
   alignSelected: (mode: AlignMode, measured?: Record<string, { x: number; y: number; w: number; h: number }>, targetGroupId?: string) => void
@@ -771,8 +930,26 @@ interface Ctx extends State {
 const EditorCtx = createContext<Ctx | null>(null)
 
 export function EditorProvider({ project, children }: { project: Project; children: React.ReactNode }) {
-  const [state, dispatch] = useReducer(reducer, { project, selectedId: null, selectedIds: [], tool: null, time: 0, playing: false, artboardSnap: true, timelineOpen: false,   imagePositioningId: null, animationSide: 'in' })
+  const [state, dispatch] = useReducer(reducer, {
+    project,
+    past: [],
+    future: [],
+    selectedId: null,
+    selectedIds: [],
+    tool: null,
+    time: 0,
+    playing: false,
+    artboardSnap: true,
+    timelineOpen: false,
+    imagePositioningId: null,
+    animationSide: 'in',
+    _lastHistoryTime: 0,
+    _lastHistoryKey: undefined,
+  })
 
+  const undo = useCallback(() => dispatch({ t: 'undo' }), [])
+  const redo = useCallback(() => dispatch({ t: 'redo' }), [])
+  const checkpoint = useCallback(() => dispatch({ t: 'checkpoint' }), [])
 
   const select = useCallback((id: string | null, additive = false, ids?: string[]) => dispatch({ t: 'select', id, additive, ids }), [])
   const toggleSelect = useCallback((id: string) => dispatch({ t: 'toggleSelect', id }), [])
@@ -848,13 +1025,82 @@ export function EditorProvider({ project, children }: { project: Project; childr
       mode: state.project.mode,
       selected: state.project.layers.find((l) => l.id === state.selectedId) || null,
       selectedIds: state.selectedIds,
-      select, toggleSelect, alignSelected, openTool, addLayer, updateLayer, updateLayers, deleteLayer, deleteLayers, duplicate, reorder,
-      createGroup, ungroup, toggleGroupCollapse, insertComponent, saveAsComponent,
-      setBackground, setTime, setPlaying, setArtboardSnap, setMode, rename, setDuration,
-      toggleTimeline, setTimelineOpen, setImagePositioningId, setAnimationSide, nudge,
-      toggleKeyframe, moveKeyframe, deleteKeyframe, clearKeyframes,
+      canUndo: state.past.length > 0,
+      canRedo: state.future.length > 0,
+      undo,
+      redo,
+      checkpoint,
+      select,
+      toggleSelect,
+      alignSelected,
+      openTool,
+      addLayer,
+      updateLayer,
+      updateLayers,
+      deleteLayer,
+      deleteLayers,
+      duplicate,
+      reorder,
+      createGroup,
+      ungroup,
+      toggleGroupCollapse,
+      insertComponent,
+      saveAsComponent,
+      setBackground,
+      setTime,
+      setPlaying,
+      setArtboardSnap,
+      setMode,
+      rename,
+      setDuration,
+      toggleTimeline,
+      setTimelineOpen,
+      setImagePositioningId,
+      setAnimationSide,
+      nudge,
+      toggleKeyframe,
+      moveKeyframe,
+      deleteKeyframe,
+      clearKeyframes,
     }),
-    [state, select, alignSelected, openTool, addLayer, updateLayer, updateLayers, deleteLayer, deleteLayers, duplicate, reorder, createGroup, ungroup, toggleGroupCollapse, insertComponent, saveAsComponent, setBackground, setTime, setPlaying, setArtboardSnap, setMode, rename, setDuration, toggleTimeline, setTimelineOpen, setImagePositioningId, setAnimationSide, nudge, toggleKeyframe, moveKeyframe, deleteKeyframe, clearKeyframes],
+    [
+      state,
+      undo,
+      redo,
+      checkpoint,
+      select,
+      toggleSelect,
+      alignSelected,
+      openTool,
+      addLayer,
+      updateLayer,
+      updateLayers,
+      deleteLayer,
+      deleteLayers,
+      duplicate,
+      reorder,
+      createGroup,
+      ungroup,
+      toggleGroupCollapse,
+      insertComponent,
+      saveAsComponent,
+      setBackground,
+      setTime,
+      setPlaying,
+      setArtboardSnap,
+      setMode,
+      rename,
+      setDuration,
+      toggleTimeline,
+      setTimelineOpen,
+      setImagePositioningId,
+      setAnimationSide,
+      nudge,
+      toggleKeyframe,
+      moveKeyframe,
+      deleteKeyframe,
+      clearKeyframes,
+    ],
   )
 
   return <EditorCtx.Provider value={value}>{children}</EditorCtx.Provider>

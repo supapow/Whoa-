@@ -47,7 +47,7 @@ export default function Timeline() {
   const {
     project, time, setTime, playing, setPlaying, selectedId, select,
     updateLayer, updateLayers, toggleGroupCollapse, reorder, timelineOpen, toggleTimeline, openTool, setAnimationSide,
-    toggleKeyframe, moveKeyframe, deleteKeyframe,
+    toggleKeyframe, moveKeyframe, deleteKeyframe, checkpoint,
   } = useEditor()
   const [ppms, setPpms] = useState(0.05)
   const [scrollTop, setScrollTop] = useState(0)
@@ -172,7 +172,12 @@ export default function Timeline() {
         }
       }
     }
-    const up = () => { drag.current = null }
+    const up = () => {
+      if (drag.current && drag.current.kind !== 'playhead') {
+        checkpoint()
+      }
+      drag.current = null
+    }
     window.addEventListener('pointermove', move)
     window.addEventListener('pointerup', up)
     return () => {

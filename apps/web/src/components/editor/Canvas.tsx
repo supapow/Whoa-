@@ -359,7 +359,7 @@ type Pinch =
   | null
 
 export default function Canvas() {
-  const { project, selectedId, selectedIds, select, toggleSelect, updateLayer, time, mode, playing, artboardSnap, nudge, imagePositioningId, setImagePositioningId, timelineOpen } = useEditor()
+  const { project, selectedId, selectedIds, select, toggleSelect, updateLayer, time, mode, playing, artboardSnap, nudge, imagePositioningId, setImagePositioningId, timelineOpen, checkpoint } = useEditor()
   const [nudgeIncrement, setNudgeIncrement] = useState<number>(1)
   const nudgeIncrementRef = useRef<number>(1)
   nudgeIncrementRef.current = nudgeIncrement
@@ -1455,6 +1455,9 @@ export default function Canvas() {
           setEditingComponentId(currentSel.id)
         }
       }
+    if (g && (g.mode === 'resize' || (g.mode === 'move' && g.moved))) {
+      checkpoint()
+    }
     gesture.current = null
     panGesture.current = null
     setSnapGuides(null)
@@ -2738,86 +2741,121 @@ export default function Canvas() {
           style={{
             width: preset.w,
             height: preset.h,
-            transform: `translate(${view.x}px, ${view.y}px) scale(${view.scale})`,
+            transform: `translate(${view.x}px, ${view.y}px) scale(${eff})`,
             transformOrigin: 'center',
-            willChange: 'transform',
           }}
           data-testid="camera-stage"
         >
         <div
           className="relative shrink-0 shadow-2xl"
-          style={{ width: preset.w, height: preset.h, transform: `scale(${scale})`, transformOrigin: 'center', ...bgStyle }}
+          style={{ width: preset.w, height: preset.h, transformOrigin: 'center', ...bgStyle }}
           data-testid="artboard"
         >
           {snapGuides && snapGuides.active && (
             <>
               {snapGuides.xGuides.includes(preset.w / 2) && (
-                <div
+                <svg
                   key="snap-x-center"
                   aria-hidden="true"
-                data-testid="snap-guide-vertical"
-                data-snapped={snapGuides.xGuides.includes(preset.w / 2)}
-                style={{
-                  position: 'absolute',
-                  left: preset.w / 2,
-                  top: -48 / eff,
-                  height: preset.h + 96 / eff,
-                  borderLeft: `${Math.max(1, 1.5 / eff)}px solid ${snapGuides.xGuides.includes(preset.w / 2) ? '#ff3b30' : '#eeeeee'}`,
-                  pointerEvents: 'none',
+                  data-testid="snap-guide-vertical"
+                  data-snapped={snapGuides.xGuides.includes(preset.w / 2)}
+                  className="pointer-events-none absolute overflow-visible"
+                  style={{
+                    left: preset.w / 2,
+                    top: -48 / eff,
+                    width: 1,
+                    height: preset.h + 96 / eff,
                     zIndex: 70,
                   }}
-                />
+                >
+                  <line
+                    x1={0}
+                    y1={0}
+                    x2={0}
+                    y2={preset.h + 96 / eff}
+                    stroke={snapGuides.xGuides.includes(preset.w / 2) ? '#ff3b30' : '#eeeeee'}
+                    strokeWidth={Math.max(1, 1.5 / eff)}
+                    shapeRendering="geometricPrecision"
+                  />
+                </svg>
               )}
               {Array.from(new Set(snapGuides.xGuides.filter((x) => x !== preset.w / 2))).map((x, idx) => (
-                <div
+                <svg
                   key={`snap-x-${x}-${idx}`}
                   aria-hidden="true"
                   data-testid="snap-guide-vertical"
                   data-snapped="true"
+                  className="pointer-events-none absolute overflow-visible"
                   style={{
-                    position: 'absolute',
                     left: x,
                     top: -48 / eff,
+                    width: 1,
                     height: preset.h + 96 / eff,
-                    borderLeft: `${Math.max(1, 1.5 / eff)}px solid #ff3b30`,
-                    pointerEvents: 'none',
                     zIndex: 70,
                   }}
-                />
+                >
+                  <line
+                    x1={0}
+                    y1={0}
+                    x2={0}
+                    y2={preset.h + 96 / eff}
+                    stroke="#ff3b30"
+                    strokeWidth={Math.max(1, 1.5 / eff)}
+                    shapeRendering="geometricPrecision"
+                  />
+                </svg>
               ))}
               {snapGuides.yGuides.includes(preset.h / 2) && (
-                <div
+                <svg
                   key="snap-y-center"
                   aria-hidden="true"
-                data-testid="snap-guide-horizontal"
-                data-snapped={snapGuides.yGuides.includes(preset.h / 2)}
-                style={{
-                  position: 'absolute',
-                  left: -48 / eff,
-                  top: preset.h / 2,
-                  width: preset.w + 96 / eff,
-                    borderTop: `${Math.max(1, 1.5 / eff)}px solid ${snapGuides.yGuides.includes(preset.h / 2) ? '#ff3b30' : '#eeeeee'}`,
-                    pointerEvents: 'none',
+                  data-testid="snap-guide-horizontal"
+                  data-snapped={snapGuides.yGuides.includes(preset.h / 2)}
+                  className="pointer-events-none absolute overflow-visible"
+                  style={{
+                    left: -48 / eff,
+                    top: preset.h / 2,
+                    width: preset.w + 96 / eff,
+                    height: 1,
                     zIndex: 70,
                   }}
-                />
+                >
+                  <line
+                    x1={0}
+                    y1={0}
+                    x2={preset.w + 96 / eff}
+                    y2={0}
+                    stroke={snapGuides.yGuides.includes(preset.h / 2) ? '#ff3b30' : '#eeeeee'}
+                    strokeWidth={Math.max(1, 1.5 / eff)}
+                    shapeRendering="geometricPrecision"
+                  />
+                </svg>
               )}
               {Array.from(new Set(snapGuides.yGuides.filter((y) => y !== preset.h / 2))).map((y, idx) => (
-                <div
+                <svg
                   key={`snap-y-${y}-${idx}`}
                   aria-hidden="true"
                   data-testid="snap-guide-horizontal"
                   data-snapped="true"
+                  className="pointer-events-none absolute overflow-visible"
                   style={{
-                    position: 'absolute',
                     left: -48 / eff,
                     top: y,
                     width: preset.w + 96 / eff,
-                    borderTop: `${Math.max(1, 1.5 / eff)}px solid #ff3b30`,
-                    pointerEvents: 'none',
+                    height: 1,
                     zIndex: 70,
                   }}
-                />
+                >
+                  <line
+                    x1={0}
+                    y1={0}
+                    x2={preset.w + 96 / eff}
+                    y2={0}
+                    stroke="#ff3b30"
+                    strokeWidth={Math.max(1, 1.5 / eff)}
+                    shapeRendering="geometricPrecision"
+                  />
+                </svg>
               ))}
             </>
           )}
@@ -2926,13 +2964,7 @@ export default function Canvas() {
                     ? `blur(${effectiveLayer.blur}px)`
                     : undefined,
                   willChange: (a.filter !== 'none' || Boolean(effectiveLayer.blur)) ? 'filter, opacity' : undefined,
-                  WebkitBackfaceVisibility: 'hidden',
-                  backfaceVisibility: 'hidden',
-                  outline: (isSel && !playing && l.type !== 'group')
-                    ? (imagePositioningId === l.id && l.type === 'image'
-                        ? `${2 / eff}px solid #38bdf8`
-                        : `${2 / eff}px solid ${(multiSelectMode || selectedIds.length > 1) && !pinchActive ? '#4B1D6B' : '#007AFF'}`)
-                    : 'none',
+                  outline: 'none',
                   outlineOffset: 0,
                   cursor: l.locked
                     ? 'default'
@@ -2944,6 +2976,30 @@ export default function Canvas() {
                   userSelect: 'none',
                 }}
               >
+                {/* Crisp Vector Border on Selected Layer */}
+                {isSel && !playing && l.type !== 'group' && (
+                  <svg
+                    data-testid={`layer-vector-border-${l.id}`}
+                    className="pointer-events-none absolute inset-0 overflow-visible"
+                    style={{ zIndex: 60, width: '100%', height: '100%' }}
+                  >
+                    <rect
+                      x={0}
+                      y={0}
+                      width="100%"
+                      height="100%"
+                      rx={effectiveLayer.type === 'shape'
+                        ? (effectiveLayer.shape === 'circle' ? 9999 : (effectiveLayer.radius || 0))
+                        : (effectiveLayer.type === 'text' && effectiveLayer.radius ? effectiveLayer.radius : 0)}
+                      fill="none"
+                      stroke={imagePositioningId === l.id && l.type === 'image'
+                        ? '#38bdf8'
+                        : ((multiSelectMode || selectedIds.length > 1) && !pinchActive ? '#4B1D6B' : '#007AFF')}
+                      strokeWidth={1.5 / eff}
+                      shapeRendering="geometricPrecision"
+                    />
+                  </svg>
+                )}
                 <LayerContent
                   layer={effectiveLayer}
                   editing={editingId === l.id}
@@ -3058,14 +3114,35 @@ export default function Canvas() {
                   top: bounds.top,
                   width: boxW,
                   height: boxH,
-                  border: (isGroup || multiSelectMode)
-                    ? `${2 / eff}px solid ${sel.isComponent ? '#9333ea' : '#4f46e5'}`
-                    : (isImagePositioning ? `${2 / eff}px solid #38bdf8` : 'none'),
+                  border: 'none',
                   pointerEvents: 'none',
                   zIndex: 60,
                   boxSizing: 'border-box',
                 }}
               >
+                {/* Crisp Vector Selection Frame Border */}
+                {((isGroup || multiSelectMode) || isImagePositioning) && (
+                  <svg
+                    data-testid="selection-vector-border"
+                    className="pointer-events-none absolute inset-0 overflow-visible"
+                    style={{ width: '100%', height: '100%', zIndex: 1 }}
+                  >
+                    <rect
+                      x={0}
+                      y={0}
+                      width={boxW}
+                      height={boxH}
+                      fill="none"
+                      stroke={
+                        isImagePositioning
+                          ? '#38bdf8'
+                          : (sel.isComponent ? '#9333ea' : '#4f46e5')
+                      }
+                      strokeWidth={1.5 / eff}
+                      shapeRendering="geometricPrecision"
+                    />
+                  </svg>
+                )}
                 {isImagePositioning && (
                   <div
                     data-testid="image-manual-position-badge"
@@ -3213,7 +3290,23 @@ export default function Canvas() {
                       touchAction: 'none',
                     }}
                   >
-                    <div style={{ width: dot, height: dot, borderRadius: '9999px', background: '#fff', border: `${Math.max(1.5, dot * 0.18)}px solid ${multiSelectMode || isGroup ? (sel.isComponent ? '#9333ea' : '#4f46e5') : '#007AFF'}` }} />
+                    {/* Vector Resize Handle */}
+                    <svg
+                      width={dot + 4 / eff}
+                      height={dot + 4 / eff}
+                      viewBox={`0 0 ${dot + 4 / eff} ${dot + 4 / eff}`}
+                      className="pointer-events-none overflow-visible"
+                    >
+                      <circle
+                        cx={(dot + 4 / eff) / 2}
+                        cy={(dot + 4 / eff) / 2}
+                        r={dot / 2}
+                        fill="#ffffff"
+                        stroke={multiSelectMode || isGroup ? (sel.isComponent ? '#9333ea' : '#4f46e5') : '#007AFF'}
+                        strokeWidth={1.5 / eff}
+                        shapeRendering="geometricPrecision"
+                      />
+                    </svg>
                   </div>
                 ))}
                 {!isImagePositioning && showSideHandles && sideHandles.map(({ h, cx, cy, cursor }) => (
@@ -3234,7 +3327,25 @@ export default function Canvas() {
                       touchAction: 'none',
                     }}
                   >
-                    <div style={{ width: dot, height: dot, borderRadius: '9999px', background: '#fff', border: `${Math.max(1.5, dot * 0.18)}px solid ${multiSelectMode || isGroup ? (sel.isComponent ? '#9333ea' : '#4f46e5') : '#007AFF'}` }} />
+                    {/* Vector Side Handle */}
+                    <svg
+                      width={dot + 4 / eff}
+                      height={dot + 4 / eff}
+                      viewBox={`0 0 ${dot + 4 / eff} ${dot + 4 / eff}`}
+                      className="pointer-events-none overflow-visible"
+                    >
+                      <rect
+                        x={2 / eff}
+                        y={2 / eff}
+                        width={dot}
+                        height={dot}
+                        rx={dot / 2}
+                        fill="#ffffff"
+                        stroke={multiSelectMode || isGroup ? (sel.isComponent ? '#9333ea' : '#4f46e5') : '#007AFF'}
+                        strokeWidth={1.5 / eff}
+                        shapeRendering="geometricPrecision"
+                      />
+                    </svg>
                   </div>
                 ))}
 
@@ -3245,8 +3356,8 @@ export default function Canvas() {
                     style={{ position: 'absolute', inset: 0, pointerEvents: 'none', zIndex: 70 }}
                   >
                     {sel.points.map((pt, pIdx) => {
-                      const pRadius = Math.max(5, 7 / eff)
-                      const cRadius = Math.max(3.5, 5 / eff)
+                      const pRadius = 7 / eff
+                      const cRadius = 5 / eff
                       const pts = sel.points!
                       const handlePointDrag = (e: React.PointerEvent) => {
                         e.stopPropagation()
@@ -3327,7 +3438,7 @@ export default function Canvas() {
 
                       return (
                         <div key={`vpt-group-${pIdx}`}>
-                          {/* Bézier Handle Lines */}
+                          {/* Vector Bézier Handle Lines */}
                           {pt.cp1 && (
                             <svg style={{ position: 'absolute', inset: 0, width: '100%', height: '100%', pointerEvents: 'none', overflow: 'visible' }}>
                               <line
@@ -3338,6 +3449,7 @@ export default function Canvas() {
                                 stroke="#ec4899"
                                 strokeWidth={1.5 / eff}
                                 strokeDasharray={`${3 / eff} ${3 / eff}`}
+                                shapeRendering="geometricPrecision"
                               />
                             </svg>
                           )}
@@ -3351,11 +3463,12 @@ export default function Canvas() {
                                 stroke="#ec4899"
                                 strokeWidth={1.5 / eff}
                                 strokeDasharray={`${3 / eff} ${3 / eff}`}
+                                shapeRendering="geometricPrecision"
                               />
                             </svg>
                           )}
 
-                          {/* Control Handle 1 Pip */}
+                          {/* Control Handle 1 Vector Pip */}
                           {pt.cp1 && (
                             <div
                               data-testid={`vector-cp1-${pIdx}`}
@@ -3366,19 +3479,35 @@ export default function Canvas() {
                                 top: pt.cp1.y - cRadius,
                                 width: cRadius * 2,
                                 height: cRadius * 2,
-                                borderRadius: '9999px',
-                                background: '#ec4899',
-                                border: `${1.5 / eff}px solid #fff`,
+                                display: 'grid',
+                                placeItems: 'center',
                                 cursor: 'crosshair',
                                 pointerEvents: 'auto',
                                 touchAction: 'none',
                                 zIndex: 72,
                               }}
                               title={`Control Point 1 (${Math.round(pt.cp1.x)}, ${Math.round(pt.cp1.y)})`}
-                            />
+                            >
+                              <svg
+                                width={cRadius * 2}
+                                height={cRadius * 2}
+                                viewBox={`0 0 ${cRadius * 2} ${cRadius * 2}`}
+                                className="pointer-events-none overflow-visible"
+                              >
+                                <circle
+                                  cx={cRadius}
+                                  cy={cRadius}
+                                  r={Math.max(1 / eff, cRadius - 1 / eff)}
+                                  fill="#ec4899"
+                                  stroke="#ffffff"
+                                  strokeWidth={1.5 / eff}
+                                  shapeRendering="geometricPrecision"
+                                />
+                              </svg>
+                            </div>
                           )}
 
-                          {/* Control Handle 2 Pip */}
+                          {/* Control Handle 2 Vector Pip */}
                           {pt.cp2 && (
                             <div
                               data-testid={`vector-cp2-${pIdx}`}
@@ -3389,19 +3518,35 @@ export default function Canvas() {
                                 top: pt.cp2.y - cRadius,
                                 width: cRadius * 2,
                                 height: cRadius * 2,
-                                borderRadius: '9999px',
-                                background: '#ec4899',
-                                border: `${1.5 / eff}px solid #fff`,
+                                display: 'grid',
+                                placeItems: 'center',
                                 cursor: 'crosshair',
                                 pointerEvents: 'auto',
                                 touchAction: 'none',
                                 zIndex: 72,
                               }}
                               title={`Control Point 2 (${Math.round(pt.cp2.x)}, ${Math.round(pt.cp2.y)})`}
-                            />
+                            >
+                              <svg
+                                width={cRadius * 2}
+                                height={cRadius * 2}
+                                viewBox={`0 0 ${cRadius * 2} ${cRadius * 2}`}
+                                className="pointer-events-none overflow-visible"
+                              >
+                                <circle
+                                  cx={cRadius}
+                                  cy={cRadius}
+                                  r={Math.max(1 / eff, cRadius - 1 / eff)}
+                                  fill="#ec4899"
+                                  stroke="#ffffff"
+                                  strokeWidth={1.5 / eff}
+                                  shapeRendering="geometricPrecision"
+                                />
+                              </svg>
+                            </div>
                           )}
 
-                          {/* Main Anchor Point Handle */}
+                          {/* Main Anchor Point Handle (Vector Shape) */}
                           <div
                             data-testid={`vector-anchor-${pIdx}`}
                             onPointerDown={handlePointDrag}
@@ -3432,17 +3577,66 @@ export default function Canvas() {
                               top: pt.y - pRadius,
                               width: pRadius * 2,
                               height: pRadius * 2,
-                              borderRadius: pt.cp1 || pt.cp2 ? '9999px' : '2px',
-                              background: '#007AFF',
-                              border: `${2 / eff}px solid #fff`,
-                              boxShadow: '0 2px 4px rgba(0,0,0,0.35)',
+                              display: 'grid',
+                              placeItems: 'center',
                               cursor: 'grab',
                               pointerEvents: 'auto',
                               touchAction: 'none',
                               zIndex: 75,
                             }}
                             title={`Anchor ${pIdx + 1}: (${Math.round(pt.x)}, ${Math.round(pt.y)}). Double-click to toggle curves.`}
-                          />
+                          >
+                            <svg
+                              width={pRadius * 2}
+                              height={pRadius * 2}
+                              viewBox={`0 0 ${pRadius * 2} ${pRadius * 2}`}
+                              className="pointer-events-none overflow-visible"
+                            >
+                              {pt.cp1 || pt.cp2 ? (
+                                <>
+                                  <circle
+                                    cx={pRadius}
+                                    cy={pRadius}
+                                    r={Math.max(1 / eff, pRadius - 1 / eff)}
+                                    fill="#007AFF"
+                                    stroke="#ffffff"
+                                    strokeWidth={1.5 / eff}
+                                    shapeRendering="geometricPrecision"
+                                  />
+                                  <circle
+                                    cx={pRadius}
+                                    cy={pRadius}
+                                    r={Math.max(1 / eff, pRadius * 0.4)}
+                                    fill="#ffffff"
+                                    shapeRendering="geometricPrecision"
+                                  />
+                                </>
+                              ) : (
+                                <>
+                                  <rect
+                                    x={1 / eff}
+                                    y={1 / eff}
+                                    width={Math.max(2 / eff, pRadius * 2 - 2 / eff)}
+                                    height={Math.max(2 / eff, pRadius * 2 - 2 / eff)}
+                                    rx={1.5 / eff}
+                                    fill="#007AFF"
+                                    stroke="#ffffff"
+                                    strokeWidth={1.5 / eff}
+                                    shapeRendering="geometricPrecision"
+                                  />
+                                  <rect
+                                    x={pRadius - pRadius * 0.4}
+                                    y={pRadius - pRadius * 0.4}
+                                    width={pRadius * 0.8}
+                                    height={pRadius * 0.8}
+                                    rx={1 / eff}
+                                    fill="#ffffff"
+                                    shapeRendering="geometricPrecision"
+                                  />
+                                </>
+                              )}
+                            </svg>
+                          </div>
                         </div>
                       )
                     })}
@@ -3470,13 +3664,43 @@ export default function Canvas() {
                       left: sizeMatch.widthMatch.resizingBox.x,
                       top: sizeMatch.widthMatch.resizingBox.y + sizeMatch.widthMatch.resizingBox.h + 8 / (scale * view.scale),
                       width: sizeMatch.widthMatch.resizingBox.w,
-                      height: 1.5 / (scale * view.scale),
-                      background: '#ec4899',
+                      height: 12 / (scale * view.scale),
                       zIndex: 75,
+                      transform: 'translateY(-50%)',
                     }}
                   >
-                    <div style={{ position: 'absolute', left: 0, top: -3.5 / (scale * view.scale), width: 1.5 / (scale * view.scale), height: 8.5 / (scale * view.scale), background: '#ec4899' }} />
-                    <div style={{ position: 'absolute', right: 0, top: -3.5 / (scale * view.scale), width: 1.5 / (scale * view.scale), height: 8.5 / (scale * view.scale), background: '#ec4899' }} />
+                    <svg
+                      className="absolute inset-0 overflow-visible pointer-events-none"
+                      style={{ width: '100%', height: '100%' }}
+                    >
+                      <line
+                        x1={0}
+                        y1="50%"
+                        x2={sizeMatch.widthMatch.resizingBox.w}
+                        y2="50%"
+                        stroke="#ec4899"
+                        strokeWidth={Math.max(1, 1.5 / (scale * view.scale))}
+                        shapeRendering="geometricPrecision"
+                      />
+                      <line
+                        x1={0}
+                        y1={0}
+                        x2={0}
+                        y2="100%"
+                        stroke="#ec4899"
+                        strokeWidth={Math.max(1, 1.5 / (scale * view.scale))}
+                        shapeRendering="geometricPrecision"
+                      />
+                      <line
+                        x1={sizeMatch.widthMatch.resizingBox.w}
+                        y1={0}
+                        x2={sizeMatch.widthMatch.resizingBox.w}
+                        y2="100%"
+                        stroke="#ec4899"
+                        strokeWidth={Math.max(1, 1.5 / (scale * view.scale))}
+                        shapeRendering="geometricPrecision"
+                      />
+                    </svg>
                     <div
                       style={{
                         position: 'absolute',
@@ -3507,13 +3731,43 @@ export default function Canvas() {
                         ? -12 / (scale * view.scale)
                         : sizeMatch.widthMatch.targetBox.y + sizeMatch.widthMatch.targetBox.h + 8 / (scale * view.scale),
                       width: sizeMatch.widthMatch.targetBox.w,
-                      height: 1.5 / (scale * view.scale),
-                      background: '#ec4899',
+                      height: 12 / (scale * view.scale),
                       zIndex: 75,
+                      transform: 'translateY(-50%)',
                     }}
                   >
-                    <div style={{ position: 'absolute', left: 0, top: -3.5 / (scale * view.scale), width: 1.5 / (scale * view.scale), height: 8.5 / (scale * view.scale), background: '#ec4899' }} />
-                    <div style={{ position: 'absolute', right: 0, top: -3.5 / (scale * view.scale), width: 1.5 / (scale * view.scale), height: 8.5 / (scale * view.scale), background: '#ec4899' }} />
+                    <svg
+                      className="absolute inset-0 overflow-visible pointer-events-none"
+                      style={{ width: '100%', height: '100%' }}
+                    >
+                      <line
+                        x1={0}
+                        y1="50%"
+                        x2={sizeMatch.widthMatch.targetBox.w}
+                        y2="50%"
+                        stroke="#ec4899"
+                        strokeWidth={Math.max(1, 1.5 / (scale * view.scale))}
+                        shapeRendering="geometricPrecision"
+                      />
+                      <line
+                        x1={0}
+                        y1={0}
+                        x2={0}
+                        y2="100%"
+                        stroke="#ec4899"
+                        strokeWidth={Math.max(1, 1.5 / (scale * view.scale))}
+                        shapeRendering="geometricPrecision"
+                      />
+                      <line
+                        x1={sizeMatch.widthMatch.targetBox.w}
+                        y1={0}
+                        x2={sizeMatch.widthMatch.targetBox.w}
+                        y2="100%"
+                        stroke="#ec4899"
+                        strokeWidth={Math.max(1, 1.5 / (scale * view.scale))}
+                        shapeRendering="geometricPrecision"
+                      />
+                    </svg>
                     <div
                       style={{
                         position: 'absolute',
@@ -3551,14 +3805,44 @@ export default function Canvas() {
                       position: 'absolute',
                       left: sizeMatch.heightMatch.resizingBox.x + sizeMatch.heightMatch.resizingBox.w + 8 / (scale * view.scale),
                       top: sizeMatch.heightMatch.resizingBox.y,
-                      width: 1.5 / (scale * view.scale),
+                      width: 12 / (scale * view.scale),
                       height: sizeMatch.heightMatch.resizingBox.h,
-                      background: '#ec4899',
                       zIndex: 75,
+                      transform: 'translateX(-50%)',
                     }}
                   >
-                    <div style={{ position: 'absolute', top: 0, left: -3.5 / (scale * view.scale), width: 8.5 / (scale * view.scale), height: 1.5 / (scale * view.scale), background: '#ec4899' }} />
-                    <div style={{ position: 'absolute', bottom: 0, left: -3.5 / (scale * view.scale), width: 8.5 / (scale * view.scale), height: 1.5 / (scale * view.scale), background: '#ec4899' }} />
+                    <svg
+                      className="absolute inset-0 overflow-visible pointer-events-none"
+                      style={{ width: '100%', height: '100%' }}
+                    >
+                      <line
+                        x1="50%"
+                        y1={0}
+                        x2="50%"
+                        y2={sizeMatch.heightMatch.resizingBox.h}
+                        stroke="#ec4899"
+                        strokeWidth={Math.max(1, 1.5 / (scale * view.scale))}
+                        shapeRendering="geometricPrecision"
+                      />
+                      <line
+                        x1={0}
+                        y1={0}
+                        x2="100%"
+                        y2={0}
+                        stroke="#ec4899"
+                        strokeWidth={Math.max(1, 1.5 / (scale * view.scale))}
+                        shapeRendering="geometricPrecision"
+                      />
+                      <line
+                        x1={0}
+                        y1={sizeMatch.heightMatch.resizingBox.h}
+                        x2="100%"
+                        y2={sizeMatch.heightMatch.resizingBox.h}
+                        stroke="#ec4899"
+                        strokeWidth={Math.max(1, 1.5 / (scale * view.scale))}
+                        shapeRendering="geometricPrecision"
+                      />
+                    </svg>
                     <div
                       style={{
                         position: 'absolute',
@@ -3588,14 +3872,44 @@ export default function Canvas() {
                         ? -12 / (scale * view.scale)
                         : sizeMatch.heightMatch.targetBox.x + sizeMatch.heightMatch.targetBox.w + 8 / (scale * view.scale),
                       top: sizeMatch.heightMatch.targetBox.y,
-                      width: 1.5 / (scale * view.scale),
+                      width: 12 / (scale * view.scale),
                       height: sizeMatch.heightMatch.targetBox.h,
-                      background: '#ec4899',
                       zIndex: 75,
+                      transform: 'translateX(-50%)',
                     }}
                   >
-                    <div style={{ position: 'absolute', top: 0, left: -3.5 / (scale * view.scale), width: 8.5 / (scale * view.scale), height: 1.5 / (scale * view.scale), background: '#ec4899' }} />
-                    <div style={{ position: 'absolute', bottom: 0, left: -3.5 / (scale * view.scale), width: 8.5 / (scale * view.scale), height: 1.5 / (scale * view.scale), background: '#ec4899' }} />
+                    <svg
+                      className="absolute inset-0 overflow-visible pointer-events-none"
+                      style={{ width: '100%', height: '100%' }}
+                    >
+                      <line
+                        x1="50%"
+                        y1={0}
+                        x2="50%"
+                        y2={sizeMatch.heightMatch.targetBox.h}
+                        stroke="#ec4899"
+                        strokeWidth={Math.max(1, 1.5 / (scale * view.scale))}
+                        shapeRendering="geometricPrecision"
+                      />
+                      <line
+                        x1={0}
+                        y1={0}
+                        x2="100%"
+                        y2={0}
+                        stroke="#ec4899"
+                        strokeWidth={Math.max(1, 1.5 / (scale * view.scale))}
+                        shapeRendering="geometricPrecision"
+                      />
+                      <line
+                        x1={0}
+                        y1={sizeMatch.heightMatch.targetBox.h}
+                        x2="100%"
+                        y2={sizeMatch.heightMatch.targetBox.h}
+                        stroke="#ec4899"
+                        strokeWidth={Math.max(1, 1.5 / (scale * view.scale))}
+                        shapeRendering="geometricPrecision"
+                      />
+                    </svg>
                     <div
                       style={{
                         position: 'absolute',
@@ -3628,6 +3942,7 @@ export default function Canvas() {
                 const eff = scale * view.scale
                 if (gap.axis === 'y') {
                   const lineH = Math.max(1, gap.y2 - gap.y1)
+                  const tickW = 8.5 / eff
                   return (
                     <div
                       key={`gap-y-${idx}`}
@@ -3637,37 +3952,44 @@ export default function Canvas() {
                         position: 'absolute',
                         left: gap.x1,
                         top: gap.y1,
-                        width: 1.5 / eff,
+                        width: Math.max(12, tickW),
                         height: lineH,
-                        background: '#ec4899',
                         zIndex: 75,
                         transform: 'translateX(-50%)',
                       }}
                     >
-                      {/* Top end tick */}
-                      <div
-                        style={{
-                          position: 'absolute',
-                          top: 0,
-                          left: '50%',
-                          transform: 'translateX(-50%)',
-                          width: 8.5 / eff,
-                          height: 1.5 / eff,
-                          background: '#ec4899',
-                        }}
-                      />
-                      {/* Bottom end tick */}
-                      <div
-                        style={{
-                          position: 'absolute',
-                          bottom: 0,
-                          left: '50%',
-                          transform: 'translateX(-50%)',
-                          width: 8.5 / eff,
-                          height: 1.5 / eff,
-                          background: '#ec4899',
-                        }}
-                      />
+                      <svg
+                        className="absolute inset-0 overflow-visible pointer-events-none"
+                        style={{ width: '100%', height: '100%' }}
+                      >
+                        <line
+                          x1="50%"
+                          y1={0}
+                          x2="50%"
+                          y2={lineH}
+                          stroke="#ec4899"
+                          strokeWidth={Math.max(1, 1.5 / eff)}
+                          shapeRendering="geometricPrecision"
+                        />
+                        <line
+                          x1={`calc(50% - ${tickW / 2}px)`}
+                          y1={0}
+                          x2={`calc(50% + ${tickW / 2}px)`}
+                          y2={0}
+                          stroke="#ec4899"
+                          strokeWidth={Math.max(1, 1.5 / eff)}
+                          shapeRendering="geometricPrecision"
+                        />
+                        <line
+                          x1={`calc(50% - ${tickW / 2}px)`}
+                          y1={lineH}
+                          x2={`calc(50% + ${tickW / 2}px)`}
+                          y2={lineH}
+                          stroke="#ec4899"
+                          strokeWidth={Math.max(1, 1.5 / eff)}
+                          shapeRendering="geometricPrecision"
+                        />
+                      </svg>
                       {/* Gap measurement badge */}
                       <div
                         style={{
@@ -3694,6 +4016,7 @@ export default function Canvas() {
 
                 // Horizontal gap
                 const lineW = Math.max(1, gap.x2 - gap.x1)
+                const tickH = 8.5 / eff
                 return (
                   <div
                     key={`gap-x-${idx}`}
@@ -3704,36 +4027,43 @@ export default function Canvas() {
                       left: gap.x1,
                       top: gap.y1,
                       width: lineW,
-                      height: 1.5 / eff,
-                      background: '#ec4899',
+                      height: Math.max(12, tickH),
                       zIndex: 75,
                       transform: 'translateY(-50%)',
                     }}
                   >
-                    {/* Left end tick */}
-                    <div
-                      style={{
-                        position: 'absolute',
-                        left: 0,
-                        top: '50%',
-                        transform: 'translateY(-50%)',
-                        width: 1.5 / eff,
-                        height: 8.5 / eff,
-                        background: '#ec4899',
-                      }}
-                    />
-                    {/* Right end tick */}
-                    <div
-                      style={{
-                        position: 'absolute',
-                        right: 0,
-                        top: '50%',
-                        transform: 'translateY(-50%)',
-                        width: 1.5 / eff,
-                        height: 8.5 / eff,
-                        background: '#ec4899',
-                      }}
-                    />
+                    <svg
+                      className="absolute inset-0 overflow-visible pointer-events-none"
+                      style={{ width: '100%', height: '100%' }}
+                    >
+                      <line
+                        x1={0}
+                        y1="50%"
+                        x2={lineW}
+                        y2="50%"
+                        stroke="#ec4899"
+                        strokeWidth={Math.max(1, 1.5 / eff)}
+                        shapeRendering="geometricPrecision"
+                      />
+                      <line
+                        x1={0}
+                        y1={`calc(50% - ${tickH / 2}px)`}
+                        x2={0}
+                        y2={`calc(50% + ${tickH / 2}px)`}
+                        stroke="#ec4899"
+                        strokeWidth={Math.max(1, 1.5 / eff)}
+                        shapeRendering="geometricPrecision"
+                      />
+                      <line
+                        x1={lineW}
+                        y1={`calc(50% - ${tickH / 2}px)`}
+                        x2={lineW}
+                        y2={`calc(50% + ${tickH / 2}px)`}
+                        stroke="#ec4899"
+                        strokeWidth={Math.max(1, 1.5 / eff)}
+                        shapeRendering="geometricPrecision"
+                      />
+                    </svg>
                     {/* Gap measurement badge */}
                     <div
                       style={{
@@ -3766,6 +4096,7 @@ export default function Canvas() {
               {elementAlign.xMatches.map((m, idx) => {
                 const eff = scale * view.scale
                 const lineH = Math.max(1, m.endCoord - m.startCoord)
+                const pipR = Math.max(2, 2.5 / eff)
                 return (
                   <div
                     key={`elem-align-x-${idx}`}
@@ -3776,45 +4107,49 @@ export default function Canvas() {
                       position: 'absolute',
                       left: m.guideCoord,
                       top: m.startCoord,
-                      width: 1.5 / eff,
+                      width: Math.max(6, 6 / eff),
                       height: lineH,
-                      background: '#06b6d4',
                       zIndex: 76,
                       transform: 'translateX(-50%)',
                     }}
                   >
-                    {/* Top indicator pip */}
-                    <div
-                      style={{
-                        position: 'absolute',
-                        top: 0,
-                        left: '50%',
-                        transform: 'translate(-50%, -50%)',
-                        width: 5 / eff,
-                        height: 5 / eff,
-                        borderRadius: '9999px',
-                        background: '#06b6d4',
-                      }}
-                    />
-                    {/* Bottom indicator pip */}
-                    <div
-                      style={{
-                        position: 'absolute',
-                        bottom: 0,
-                        left: '50%',
-                        transform: 'translate(-50%, 50%)',
-                        width: 5 / eff,
-                        height: 5 / eff,
-                        borderRadius: '9999px',
-                        background: '#06b6d4',
-                      }}
-                    />
+                    <svg
+                      className="absolute inset-0 overflow-visible pointer-events-none"
+                      style={{ width: '100%', height: '100%' }}
+                    >
+                      <line
+                        x1="50%"
+                        y1={0}
+                        x2="50%"
+                        y2={lineH}
+                        stroke="#06b6d4"
+                        strokeWidth={Math.max(1, 1.5 / eff)}
+                        shapeRendering="geometricPrecision"
+                      />
+                      {/* Top indicator pip */}
+                      <circle
+                        cx="50%"
+                        cy={0}
+                        r={pipR}
+                        fill="#06b6d4"
+                        shapeRendering="geometricPrecision"
+                      />
+                      {/* Bottom indicator pip */}
+                      <circle
+                        cx="50%"
+                        cy={lineH}
+                        r={pipR}
+                        fill="#06b6d4"
+                        shapeRendering="geometricPrecision"
+                      />
+                    </svg>
                   </div>
                 )
               })}
               {elementAlign.yMatches.map((m, idx) => {
                 const eff = scale * view.scale
                 const lineW = Math.max(1, m.endCoord - m.startCoord)
+                const pipR = Math.max(2, 2.5 / eff)
                 return (
                   <div
                     key={`elem-align-y-${idx}`}
@@ -3826,38 +4161,41 @@ export default function Canvas() {
                       left: m.startCoord,
                       top: m.guideCoord,
                       width: lineW,
-                      height: 1.5 / eff,
-                      background: '#06b6d4',
+                      height: Math.max(6, 6 / eff),
                       zIndex: 76,
                       transform: 'translateY(-50%)',
                     }}
                   >
-                    {/* Left indicator pip */}
-                    <div
-                      style={{
-                        position: 'absolute',
-                        left: 0,
-                        top: '50%',
-                        transform: 'translate(-50%, -50%)',
-                        width: 5 / eff,
-                        height: 5 / eff,
-                        borderRadius: '9999px',
-                        background: '#06b6d4',
-                      }}
-                    />
-                    {/* Right indicator pip */}
-                    <div
-                      style={{
-                        position: 'absolute',
-                        right: 0,
-                        top: '50%',
-                        transform: 'translate(50%, -50%)',
-                        width: 5 / eff,
-                        height: 5 / eff,
-                        borderRadius: '9999px',
-                        background: '#06b6d4',
-                      }}
-                    />
+                    <svg
+                      className="absolute inset-0 overflow-visible pointer-events-none"
+                      style={{ width: '100%', height: '100%' }}
+                    >
+                      <line
+                        x1={0}
+                        y1="50%"
+                        x2={lineW}
+                        y2="50%"
+                        stroke="#06b6d4"
+                        strokeWidth={Math.max(1, 1.5 / eff)}
+                        shapeRendering="geometricPrecision"
+                      />
+                      {/* Left indicator pip */}
+                      <circle
+                        cx={0}
+                        cy="50%"
+                        r={pipR}
+                        fill="#06b6d4"
+                        shapeRendering="geometricPrecision"
+                      />
+                      {/* Right indicator pip */}
+                      <circle
+                        cx={lineW}
+                        cy="50%"
+                        r={pipR}
+                        fill="#06b6d4"
+                        shapeRendering="geometricPrecision"
+                      />
+                    </svg>
                   </div>
                 )
               })}
@@ -3868,11 +4206,29 @@ export default function Canvas() {
       )}
 
       {marquee && (
-        <div
+        <svg
           aria-hidden="true"
           data-testid="marquee-selection"
-          style={{ position: 'absolute', left: marquee.x * scale * view.scale + view.x + (size.w - preset.w * scale * view.scale) / 2, top: marquee.y * scale * view.scale + view.y + (size.h - preset.h * scale * view.scale) / 2, width: marquee.w * scale * view.scale, height: marquee.h * scale * view.scale, border: '1.5px solid #4B1D6B', background: 'rgba(75, 29, 107, 0.12)', pointerEvents: 'none', zIndex: 80 }}
-        />
+          className="pointer-events-none absolute overflow-visible"
+          style={{
+            left: marquee.x * scale * view.scale + view.x + (size.w - preset.w * scale * view.scale) / 2,
+            top: marquee.y * scale * view.scale + view.y + (size.h - preset.h * scale * view.scale) / 2,
+            width: marquee.w * scale * view.scale,
+            height: marquee.h * scale * view.scale,
+            zIndex: 80,
+          }}
+        >
+          <rect
+            x={0}
+            y={0}
+            width="100%"
+            height="100%"
+            fill="rgba(75, 29, 107, 0.12)"
+            stroke="#4B1D6B"
+            strokeWidth={1.5}
+            shapeRendering="geometricPrecision"
+          />
+        </svg>
       )}
 
 
@@ -4138,18 +4494,41 @@ function LayerContent({
   }
 
   if (layer.type === 'shape') {
-    const common: React.CSSProperties = { width: '100%', height: '100%', background: layer.fill }
+    const fill = layer.fill || '#000000'
+    const stroke = layer.stroke || undefined
+    const strokeWidth = layer.strokeWidth || 0
+
     switch (layer.shape) {
       case 'circle':
-        return <div style={{ ...common, borderRadius: '9999px' }} />
+        return (
+          <svg viewBox={`0 0 ${layer.w} ${layer.h}`} width="100%" height="100%" style={{ display: 'block', overflow: 'visible' }} shapeRendering="geometricPrecision">
+            <ellipse cx={layer.w / 2} cy={layer.h / 2} rx={layer.w / 2} ry={layer.h / 2} fill={fill} stroke={stroke} strokeWidth={strokeWidth} shapeRendering="geometricPrecision" />
+          </svg>
+        )
       case 'triangle':
-        return <div style={{ width: 0, height: 0, borderLeft: `${layer.w / 2}px solid transparent`, borderRight: `${layer.w / 2}px solid transparent`, borderBottom: `${layer.h}px solid ${layer.fill}` }} />
+        return (
+          <svg viewBox={`0 0 ${layer.w} ${layer.h}`} width="100%" height="100%" style={{ display: 'block', overflow: 'visible' }} shapeRendering="geometricPrecision">
+            <polygon points={`${layer.w / 2},0 ${layer.w},${layer.h} 0,${layer.h}`} fill={fill} stroke={stroke} strokeWidth={strokeWidth} strokeLinejoin="round" shapeRendering="geometricPrecision" />
+          </svg>
+        )
       case 'star':
-        return <div style={{ ...common, clipPath: 'polygon(50% 0%, 61% 35%, 98% 35%, 68% 57%, 79% 91%, 50% 70%, 21% 91%, 32% 57%, 2% 35%, 39% 35%)' }} />
+        return (
+          <svg viewBox="0 0 100 100" width="100%" height="100%" style={{ display: 'block', overflow: 'visible' }} shapeRendering="geometricPrecision">
+            <polygon points="50,0 61,35 98,35 68,57 79,91 50,70 21,91 32,57 2,35 39,35" fill={fill} stroke={stroke} strokeWidth={strokeWidth} strokeLinejoin="round" shapeRendering="geometricPrecision" />
+          </svg>
+        )
       case 'line':
-        return <div style={{ width: '100%', height: Math.max(4, layer.h * 0.12), background: layer.fill, marginTop: layer.h / 2 }} />
+        return (
+          <svg viewBox={`0 0 ${layer.w} ${layer.h}`} width="100%" height="100%" style={{ display: 'block', overflow: 'visible' }} shapeRendering="geometricPrecision">
+            <line x1={0} y1={layer.h / 2} x2={layer.w} y2={layer.h / 2} stroke={fill} strokeWidth={Math.max(2, layer.h * 0.12)} strokeLinecap="round" shapeRendering="geometricPrecision" />
+          </svg>
+        )
       default:
-        return <div style={{ ...common, borderRadius: layer.radius }} />
+        return (
+          <svg viewBox={`0 0 ${layer.w} ${layer.h}`} width="100%" height="100%" style={{ display: 'block', overflow: 'visible' }} shapeRendering="geometricPrecision">
+            <rect x={0} y={0} width={layer.w} height={layer.h} rx={layer.radius || 0} fill={fill} stroke={stroke} strokeWidth={strokeWidth} shapeRendering="geometricPrecision" />
+          </svg>
+        )
     }
   }
 
@@ -4167,6 +4546,7 @@ function LayerContent({
         width="100%"
         height="100%"
         style={{ display: 'block', overflow: 'visible' }}
+        shapeRendering="geometricPrecision"
       >
         <path
           d={d}
@@ -4175,6 +4555,8 @@ function LayerContent({
           strokeWidth={strokeWidth}
           strokeLinecap={strokeLinecap}
           strokeLinejoin={strokeLinejoin}
+          fillRule={layer.fillRule}
+          shapeRendering="geometricPrecision"
         />
       </svg>
     )
