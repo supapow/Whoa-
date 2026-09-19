@@ -136,8 +136,10 @@ function EditorInner({ onExit }: { onExit: () => void }) {
         </div>
       </div>
 
-      <Canvas />
-      <VectorFloatingPanel />
+      <div className="relative min-h-0 flex-1">
+        <Canvas />
+        <VectorFloatingPanel />
+      </div>
       <Toolbar onExport={() => setExportOpen(true)} />
       <Timeline />
       <ToolSheet />

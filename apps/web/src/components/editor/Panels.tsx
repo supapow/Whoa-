@@ -1402,6 +1402,7 @@ function RadiusPanel() {
 
 export function VectorFloatingPanel() {
   const { selected, tool, updateLayer } = useEditor()
+  const [expanded, setExpanded] = useState(true)
   const l = selected
   const pts = l?.type === 'path' ? (l.points || []) : []
   const up = (patch: any) => l && updateLayer(l.id, patch)
@@ -1452,29 +1453,36 @@ export function VectorFloatingPanel() {
     <section
       aria-label="Vector point tools"
       data-testid="floating-vector-panel"
-      className="pointer-events-auto absolute right-3 top-1/2 z-30 -translate-y-1/2 rounded-full border border-white/10 bg-black/65 p-1.5 text-white shadow-2xl backdrop-blur-xl"
+      className="pointer-events-auto absolute right-3 top-1/2 z-30 -translate-y-1/2 rounded-full border border-white/10 bg-black/60 p-1.5 text-white shadow-lg backdrop-blur-md"
     >
       <div className="flex flex-col items-center gap-1">
-        <button type="button" data-testid="floating-vector-add" onClick={addPoint} aria-label="Add point" title="Add point" className="grid size-10 place-items-center rounded-full bg-accent transition-transform active:scale-95">
-          <Plus className="size-5" />
+        <button type="button" data-testid="floating-vector-toggle" onClick={() => setExpanded((value) => !value)} aria-label={expanded ? 'Collapse vector tools' : 'Expand vector tools'} title={expanded ? 'Collapse vector tools' : 'Expand vector tools'} className="grid size-9 place-items-center rounded-full text-white/80 transition-colors hover:bg-white/15 hover:text-white">
+          {expanded ? <ChevronRight className="size-4" /> : <ChevronLeft className="size-4" />}
         </button>
-        <div className="h-px w-5 bg-white/15" />
-        <button type="button" data-testid="floating-vector-toggle-closed" onClick={() => up({ closed: !l.closed })} aria-label={l.closed ? 'Open path' : 'Close path'} title={l.closed ? 'Open path' : 'Close path'} className={`grid size-10 place-items-center rounded-full transition-colors ${l.closed ? 'bg-white/20 text-white' : 'text-white/55 hover:bg-white/10 hover:text-white'}`}>
-          <PenTool className="size-4" />
-        </button>
-        {pts.map((point, idx) => {
-          const smooth = point.cp1 !== undefined || point.cp2 !== undefined
-          return (
-            <div key={idx} className="flex flex-col items-center gap-1">
-              <button type="button" aria-label={`Point ${idx + 1} ${smooth ? 'smooth' : 'sharp'}`} data-testid={`floating-vector-point-type-${idx}`} onClick={() => togglePointType(idx)} className={`grid size-10 place-items-center rounded-full transition-colors ${smooth ? 'bg-accent text-white' : 'text-white/55 hover:bg-white/10 hover:text-white'}`} title={smooth ? 'Smooth point' : 'Sharp point'}>
-                {smooth ? <Spline className="size-4" /> : <Diamond className="size-4" />}
-              </button>
-              <button type="button" aria-label={`Remove point ${idx + 1}`} data-testid={`floating-vector-remove-${idx}`} onClick={() => removePoint(idx)} disabled={pts.length <= 2} className="grid size-10 place-items-center rounded-full text-white/45 transition-colors hover:bg-danger/20 hover:text-danger disabled:pointer-events-none disabled:opacity-20" title="Remove point">
-                <Trash2 className="size-4" />
-              </button>
-            </div>
-          )
-        })}
+        {expanded && (
+          <>
+            <div className="h-px w-5 bg-white/15" />
+            <button type="button" data-testid="floating-vector-add" onClick={addPoint} aria-label="Add point" title="Add point" className="grid size-9 place-items-center rounded-full bg-accent transition-transform active:scale-95">
+              <Plus className="size-4" />
+            </button>
+            <button type="button" data-testid="floating-vector-toggle-closed" onClick={() => up({ closed: !l.closed })} aria-label={l.closed ? 'Open path' : 'Close path'} title={l.closed ? 'Open path' : 'Close path'} className={`grid size-9 place-items-center rounded-full transition-colors ${l.closed ? 'bg-white/20 text-white' : 'text-white/55 hover:bg-white/10 hover:text-white'}`}>
+              <PenTool className="size-4" />
+            </button>
+            {pts.map((point, idx) => {
+              const smooth = point.cp1 !== undefined || point.cp2 !== undefined
+              return (
+                <div key={idx} className="flex items-center gap-1">
+                  <button type="button" aria-label={`Point ${idx + 1} ${smooth ? 'smooth' : 'sharp'}`} data-testid={`floating-vector-point-type-${idx}`} onClick={() => togglePointType(idx)} className={`grid size-9 place-items-center rounded-full transition-colors ${smooth ? 'bg-accent text-white' : 'text-white/55 hover:bg-white/10 hover:text-white'}`} title={smooth ? 'Smooth point' : 'Sharp point'}>
+                    {smooth ? <Spline className="size-4" /> : <Diamond className="size-4" />}
+                  </button>
+                  <button type="button" aria-label={`Remove point ${idx + 1}`} data-testid={`floating-vector-remove-${idx}`} onClick={() => removePoint(idx)} disabled={pts.length <= 2} className="grid size-9 place-items-center rounded-full text-white/45 transition-colors hover:bg-danger/20 hover:text-danger disabled:pointer-events-none disabled:opacity-20" title="Remove point">
+                    <Trash2 className="size-4" />
+                  </button>
+                </div>
+              )
+            })}
+          </>
+        )}
       </div>
     </section>
   )
