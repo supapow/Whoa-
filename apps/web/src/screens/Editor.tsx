@@ -5,7 +5,7 @@ import { EditorProvider, useEditor } from '#/store/editor'
 import Canvas from '#/components/editor/Canvas'
 import Toolbar from '#/components/editor/Toolbar'
 import Timeline from '#/components/editor/Timeline'
-import ToolSheet from '#/components/editor/Panels'
+import ToolSheet, { VectorFloatingPanel } from '#/components/editor/Panels'
 import ExportSheet from '#/components/editor/ExportSheet'
 
 export default function Editor({ project, onExit }: { project: Project; onExit: () => void }) {
@@ -136,7 +136,10 @@ function EditorInner({ onExit }: { onExit: () => void }) {
         </div>
       </div>
 
-      <Canvas />
+      <div className="relative min-h-0 flex flex-1">
+        <Canvas />
+        <VectorFloatingPanel />
+      </div>
       <Toolbar onExport={() => setExportOpen(true)} />
       <Timeline />
       <ToolSheet />
