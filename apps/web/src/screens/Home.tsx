@@ -28,7 +28,7 @@ export default function Home({ onOpen }: { onOpen: (p: Project) => void }) {
           <div className="grid h-9 w-9 place-items-center rounded-xl bg-accent">
             <Sparkles className="h-5 w-5 text-white" strokeWidth={2.5} />
           </div>
-          <h1 className="text-2xl tracking-tight">Bannr</h1>
+          <h1 id="app-title" className="text-2xl tracking-tight">Woah!</h1>
         </div>
       </header>
 

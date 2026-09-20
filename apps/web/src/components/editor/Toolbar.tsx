@@ -20,6 +20,7 @@ export default function Toolbar({ onExport }: { onExport?: () => void }) {
     project, selected, selectedIds, alignSelected, openTool, deleteLayer, deleteLayers, duplicate, reorder,
     createGroup, ungroup, saveAsComponent, artboardSnap, setArtboardSnap,
     timelineOpen, toggleTimeline, updateLayer, imagePositioningId, setImagePositioningId,
+    vectorEditingId, setVectorEditingId,
   } = useEditor()
 
   const [isAlignExpanded, setIsAlignExpanded] = useState(false)
@@ -221,10 +222,10 @@ export default function Toolbar({ onExport }: { onExport?: () => void }) {
     setPositionMode('dynamic-crop')
   }
 
-  const isProportionsLocked = Boolean(selected?.type === 'image' && selected.lockProportions)
+  const isProportionsLocked = Boolean(selected && (selected.type === 'image' || selected.type === 'path') && selected.lockProportions)
 
   const handleToggleLockProportions = () => {
-    if (!selected || selected.type !== 'image') return
+    if (!selected || (selected.type !== 'image' && selected.type !== 'path')) return
     if (positionMode === 'original-aspect-ratio' || positionMode === 'dynamic-crop') {
       setPositionMode(null)
     }
@@ -232,7 +233,7 @@ export default function Toolbar({ onExport }: { onExport?: () => void }) {
     const nextLocked = !isProportionsLocked
     for (const id of ids) {
       const layer = project.layers.find((l) => l.id === id)
-      if (layer && layer.type === 'image') {
+      if (layer && (layer.type === 'image' || layer.type === 'path')) {
         const currentAspect = layer.h > 0 ? layer.w / layer.h : 1
         updateLayer(id, {
           lockProportions: nextLocked,
@@ -369,7 +370,15 @@ export default function Toolbar({ onExport }: { onExport?: () => void }) {
       ]
     } else if (selected.type === 'path') {
       items = [
-        { key: 'vector', label: 'Vector', icon: <PenTool /> },
+        {
+          key: 'lock-proportions',
+          label: isProportionsLocked ? 'Unlock proportions' : 'Lock proportions',
+          icon: isProportionsLocked ? <Lock className="h-3.5 w-3.5" /> : <Unlock className="h-3.5 w-3.5" />,
+          active: isProportionsLocked,
+          onClick: handleToggleLockProportions,
+        },
+        { key: 'shape', label: 'Shape', icon: <Square /> },
+        { key: 'mask', label: 'Mask', icon: <Scissors /> },
         { key: 'color', label: 'Color', icon: <PaintBucket /> },
         ...common,
       ]
@@ -693,6 +702,33 @@ export default function Toolbar({ onExport }: { onExport?: () => void }) {
                   <Expand className="h-4 w-4" />
                 </button>
               )}
+            </div>
+          )}
+
+          {/* Floating edit button for vector path element */}
+          {selected?.type === 'path' && (
+            <div
+              id="vector-edit-container"
+              data-testid="vector-edit-container"
+              className="pointer-events-auto relative flex flex-col items-end"
+              onPointerDown={(e) => e.stopPropagation()}
+              onClick={(e) => e.stopPropagation()}
+            >
+              <button
+                type="button"
+                id="vector-edit-btn"
+                data-testid="vector-edit-btn"
+                aria-label={vectorEditingId === selected.id ? 'Finish editing vector' : 'Edit vector path'}
+                title={vectorEditingId === selected.id ? 'Finish editing vector (Done)' : 'Edit vector path'}
+                onClick={() => setVectorEditingId(vectorEditingId === selected.id ? null : selected.id)}
+                className={`grid h-9 w-9 place-items-center rounded-full border border-white/10 bg-black/60 shadow-lg backdrop-blur-md transition-all active:scale-90 focus:outline-none ${
+                  vectorEditingId === selected.id
+                    ? 'bg-accent text-white ring-1 ring-accent/60'
+                    : 'text-white/90 hover:bg-white/20 hover:text-white'
+                }`}
+              >
+                <PenTool className="h-4 w-4" />
+              </button>
             </div>
           )}
 

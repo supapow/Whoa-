@@ -7,6 +7,7 @@ export interface VectorPoint {
   y: number
   cp1?: { x: number; y: number } // incoming control handle
   cp2?: { x: number; y: number } // outgoing control handle
+  mode?: 1 | 2 | 3 | 4 // Bézier Mode: 1 (Corner/independent), 2 (Mirrored), 3 (Asymmetric smooth), 4 (Disconnected/free)
 }
 
 export interface Background {

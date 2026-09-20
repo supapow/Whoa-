@@ -37,8 +37,12 @@ interface State {
   time: number
   playing: boolean
   artboardSnap: boolean
+  vectorSnap: boolean
+  selectedAnchorIndices: number[]
+  anchorMultiSelectMode: boolean
   timelineOpen: boolean
   imagePositioningId: string | null
+  vectorEditingId: string | null
   animationSide: 'in' | 'out'
   _lastHistoryTime?: number
   _lastHistoryKey?: string
@@ -75,12 +79,19 @@ type Action =
   | { t: 'setTime'; time: number }
   | { t: 'setPlaying'; playing: boolean }
   | { t: 'setArtboardSnap'; enabled: boolean }
+  | { t: 'setVectorSnap'; enabled: boolean }
+  | { t: 'toggleVectorSnap' }
+  | { t: 'setSelectedAnchors'; indices: number[] }
+  | { t: 'toggleSelectedAnchor'; index: number }
+  | { t: 'setAnchorMultiSelectMode'; enabled: boolean }
+  | { t: 'toggleAnchorMultiSelectMode' }
   | { t: 'setMode'; mode: 'static' | 'animated' }
   | { t: 'rename'; name: string }
   | { t: 'setDuration'; duration: number }
   | { t: 'toggleTimeline'; open?: boolean }
   | { t: 'setTimelineOpen'; open: boolean }
   | { t: 'setImagePositioningId'; id: string | null }
+  | { t: 'setVectorEditingId'; id: string | null }
   | { t: 'setAnimationSide'; side: 'in' | 'out' }
   | { t: 'nudge'; dx: number; dy: number; measured?: Record<string, { x: number; y: number; w: number; h: number }> }
   | { t: 'toggleKeyframe'; layerId?: string; time?: number }
@@ -138,6 +149,13 @@ function innerReducer(state: State, a: Action): State {
   switch (a.t) {
     case 'setImagePositioningId':
       return { ...state, imagePositioningId: a.id }
+    case 'setVectorEditingId':
+      return {
+        ...state,
+        vectorEditingId: a.id,
+        selectedAnchorIndices: a.id ? (state.selectedAnchorIndices?.length ? state.selectedAnchorIndices : [0]) : [],
+        anchorMultiSelectMode: a.id ? state.anchorMultiSelectMode : false,
+      }
     case 'setAnimationSide':
       return { ...state, animationSide: a.side }
     case 'select':
@@ -146,6 +164,8 @@ function innerReducer(state: State, a: Action): State {
         selectedId: a.id,
         selectedIds: a.id ? (a.ids ?? (a.additive ? Array.from(new Set([...state.selectedIds, a.id])) : [a.id])) : [],
         imagePositioningId: a.id && a.id === state.imagePositioningId ? state.imagePositioningId : null,
+        vectorEditingId: a.id && a.id === state.vectorEditingId ? state.vectorEditingId : null,
+        anchorMultiSelectMode: a.id && a.id === state.vectorEditingId ? state.anchorMultiSelectMode : false,
       }
     case 'toggleSelect': {
       const selectedIds = state.selectedIds.includes(a.id)
@@ -588,6 +608,7 @@ function innerReducer(state: State, a: Action): State {
         project: touch({ ...p, layers }),
         selectedId: layers.some((l) => l.id === state.selectedId) ? state.selectedId : remainingIds[0] || null,
         selectedIds: remainingIds,
+        vectorEditingId: state.vectorEditingId === a.id ? null : state.vectorEditingId,
       }
     }
     case 'deleteLayers': {
@@ -598,6 +619,7 @@ function innerReducer(state: State, a: Action): State {
         project: touch({ ...p, layers }),
         selectedId: remainingIds.at(-1) ?? null,
         selectedIds: remainingIds,
+        vectorEditingId: a.ids.includes(state.vectorEditingId || '') ? null : state.vectorEditingId,
         tool: null,
       }
     }
@@ -622,6 +644,23 @@ function innerReducer(state: State, a: Action): State {
       return { ...state, playing: a.playing }
     case 'setArtboardSnap':
       return { ...state, artboardSnap: a.enabled }
+    case 'setVectorSnap':
+      return { ...state, vectorSnap: a.enabled }
+    case 'toggleVectorSnap':
+      return { ...state, vectorSnap: !state.vectorSnap }
+    case 'setSelectedAnchors':
+      return { ...state, selectedAnchorIndices: a.indices }
+    case 'toggleSelectedAnchor': {
+      const exists = state.selectedAnchorIndices.includes(a.index)
+      const next = exists
+        ? state.selectedAnchorIndices.filter((i) => i !== a.index)
+        : [...state.selectedAnchorIndices, a.index]
+      return { ...state, selectedAnchorIndices: next }
+    }
+    case 'setAnchorMultiSelectMode':
+      return { ...state, anchorMultiSelectMode: a.enabled }
+    case 'toggleAnchorMultiSelectMode':
+      return { ...state, anchorMultiSelectMode: !state.anchorMultiSelectMode }
     case 'setMode':
       return { ...state, project: touch({ ...p, mode: a.mode }) }
     case 'rename':
@@ -912,6 +951,15 @@ interface Ctx extends State {
   setTime: (t: number) => void
   setPlaying: (v: boolean) => void
   setArtboardSnap: (v: boolean) => void
+  vectorSnap: boolean
+  setVectorSnap: (v: boolean) => void
+  toggleVectorSnap: () => void
+  selectedAnchorIndices: number[]
+  setSelectedAnchors: (indices: number[]) => void
+  toggleSelectedAnchor: (index: number) => void
+  anchorMultiSelectMode: boolean
+  setAnchorMultiSelectMode: (enabled: boolean) => void
+  toggleAnchorMultiSelectMode: () => void
   setMode: (m: 'static' | 'animated') => void
   rename: (n: string) => void
   setDuration: (d: number) => void
@@ -919,6 +967,8 @@ interface Ctx extends State {
   setTimelineOpen: (open: boolean) => void
   imagePositioningId: string | null
   setImagePositioningId: (id: string | null) => void
+  vectorEditingId: string | null
+  setVectorEditingId: (id: string | null) => void
   setAnimationSide: (side: 'in' | 'out') => void
   nudge: (dx: number, dy: number, measured?: Record<string, { x: number; y: number; w: number; h: number }>) => void
   toggleKeyframe: (layerId?: string, time?: number) => void
@@ -940,8 +990,12 @@ export function EditorProvider({ project, children }: { project: Project; childr
     time: 0,
     playing: false,
     artboardSnap: true,
+    vectorSnap: true,
+    selectedAnchorIndices: [0],
+    anchorMultiSelectMode: false,
     timelineOpen: false,
     imagePositioningId: null,
+    vectorEditingId: null,
     animationSide: 'in',
     _lastHistoryTime: 0,
     _lastHistoryKey: undefined,
@@ -994,12 +1048,19 @@ export function EditorProvider({ project, children }: { project: Project; childr
   const setTime = useCallback((t: number) => dispatch({ t: 'setTime', time: t }), [])
   const setPlaying = useCallback((v: boolean) => dispatch({ t: 'setPlaying', playing: v }), [])
   const setArtboardSnap = useCallback((v: boolean) => dispatch({ t: 'setArtboardSnap', enabled: v }), [])
+  const setVectorSnap = useCallback((enabled: boolean) => dispatch({ t: 'setVectorSnap', enabled }), [])
+  const toggleVectorSnap = useCallback(() => dispatch({ t: 'toggleVectorSnap' }), [])
+  const setSelectedAnchors = useCallback((indices: number[]) => dispatch({ t: 'setSelectedAnchors', indices }), [])
+  const toggleSelectedAnchor = useCallback((index: number) => dispatch({ t: 'toggleSelectedAnchor', index }), [])
+  const setAnchorMultiSelectMode = useCallback((enabled: boolean) => dispatch({ t: 'setAnchorMultiSelectMode', enabled }), [])
+  const toggleAnchorMultiSelectMode = useCallback(() => dispatch({ t: 'toggleAnchorMultiSelectMode' }), [])
   const setMode = useCallback((m: 'static' | 'animated') => dispatch({ t: 'setMode', mode: m }), [])
   const rename = useCallback((n: string) => dispatch({ t: 'rename', name: n }), [])
   const setDuration = useCallback((d: number) => dispatch({ t: 'setDuration', duration: d }), [])
   const toggleTimeline = useCallback((open?: boolean) => dispatch({ t: 'toggleTimeline', open }), [])
   const setTimelineOpen = useCallback((open: boolean) => dispatch({ t: 'setTimelineOpen', open }), [])
   const setImagePositioningId = useCallback((id: string | null) => dispatch({ t: 'setImagePositioningId', id }), [])
+  const setVectorEditingId = useCallback((id: string | null) => dispatch({ t: 'setVectorEditingId', id }), [])
   const nudge = useCallback(
     (dx: number, dy: number, measured?: Record<string, { x: number; y: number; w: number; h: number }>) =>
       dispatch({ t: 'nudge', dx, dy, measured }),
@@ -1050,12 +1111,23 @@ export function EditorProvider({ project, children }: { project: Project; childr
       setTime,
       setPlaying,
       setArtboardSnap,
+      vectorSnap: state.vectorSnap ?? true,
+      setVectorSnap,
+      toggleVectorSnap,
+      selectedAnchorIndices: state.selectedAnchorIndices ?? [0],
+      setSelectedAnchors,
+      toggleSelectedAnchor,
+      anchorMultiSelectMode: state.anchorMultiSelectMode ?? false,
+      setAnchorMultiSelectMode,
+      toggleAnchorMultiSelectMode,
       setMode,
       rename,
       setDuration,
       toggleTimeline,
       setTimelineOpen,
       setImagePositioningId,
+      vectorEditingId: state.vectorEditingId ?? null,
+      setVectorEditingId,
       setAnimationSide,
       nudge,
       toggleKeyframe,
@@ -1088,12 +1160,19 @@ export function EditorProvider({ project, children }: { project: Project; childr
       setTime,
       setPlaying,
       setArtboardSnap,
+      setVectorSnap,
+      toggleVectorSnap,
+      setSelectedAnchors,
+      toggleSelectedAnchor,
+      setAnchorMultiSelectMode,
+      toggleAnchorMultiSelectMode,
       setMode,
       rename,
       setDuration,
       toggleTimeline,
       setTimelineOpen,
       setImagePositioningId,
+      setVectorEditingId,
       setAnimationSide,
       nudge,
       toggleKeyframe,

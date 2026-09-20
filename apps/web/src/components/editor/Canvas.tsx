@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react'
-import { ArrowLeft, ArrowRight, ArrowUp, ArrowDown, Move } from 'lucide-react'
+import { ArrowLeft, ArrowRight, ArrowUp, ArrowDown, Move, RotateCw } from 'lucide-react'
 import type { Layer, LayerType, VectorPoint } from '#/types'
 import { useEditor } from '#/store/editor'
 import { getDescendantLayers, getTopmostGroup } from '#/lib/groups'
@@ -8,7 +8,10 @@ import { findGapMatch, type GapMatchResult } from '#/lib/gapMatch'
 import { findElementAlignMatch, type ElementAlignResult } from '#/lib/elementAlign'
 import { parseImagePosition, formatImagePosition, calcImagePositionDelta } from '#/lib/imagePosition'
 import { interpolateKeyframes } from '#/lib/keyframes'
-import { buildSvgPath, scaleVectorPoints, tightenVectorLayer } from '#/lib/vector'
+import {
+  buildSvgPath, scaleVectorPoints, tightenVectorLayer,
+  updateHandleWithMode, snapVectorAnchor, snapVectorHandle, switchPointBezierMode,
+} from '#/lib/vector'
 
 function useSize<T extends HTMLElement>() {
   const ref = useRef<T>(null)
@@ -265,12 +268,46 @@ function snapDelta(left: number, top: number, w: number, h: number, artW: number
 }
 
 type ResizeHandle = 'tl' | 'tr' | 'bl' | 'br' | 't' | 'r' | 'b' | 'l'
+
+interface RotationSnapState {
+  active: boolean
+  angle: number
+  cx: number
+  cy: number
+  isSnapped: boolean
+  snapDegree: number
+  isNormal: boolean
+  label: string
+  deltaAngle: number
+}
+
 type Gesture =
   | { id: string; mode: 'move'; sx: number; sy: number; ox: number; oy: number; ow: number; oh: number; fromCanvas: boolean; moved: boolean; deselectOnTap?: boolean; tapToggleId?: string; tapAddId?: string; group?: { id: string; x: number; y: number; w: number; h: number }[] }
   | {
       id: string
+      mode: 'vector-anchor'
+      sx: number
+      sy: number
+      startPoints: VectorPoint[]
+      activeSelected: number[]
+      snapAnchorIdx: number
+      layerW: number
+      layerH: number
+      moved: boolean
+      deselectOnTap?: boolean
+    }
+  | {
+      id: string
       mode: 'resize'
       handle: ResizeHandle
+      isCorner?: boolean
+      cornerMode?: 'pending' | 'resize' | 'rotate'
+      centerX: number
+      centerY: number
+      handleAngle: number
+      startPointerAngle: number
+      initialRotation: number
+      initialLayerStates?: { id: string; x: number; y: number; w: number; h: number; rotation: number; centerX: number; centerY: number }[]
       isText: boolean
       isImage?: boolean
       lockProportions?: boolean
@@ -359,7 +396,12 @@ type Pinch =
   | null
 
 export default function Canvas() {
-  const { project, selectedId, selectedIds, select, toggleSelect, updateLayer, time, mode, playing, artboardSnap, nudge, imagePositioningId, setImagePositioningId, timelineOpen, checkpoint } = useEditor()
+  const {
+    project, selectedId, selectedIds, select, toggleSelect, updateLayer, time, mode, playing,
+    artboardSnap, vectorSnap, selectedAnchorIndices, setSelectedAnchors, toggleSelectedAnchor,
+    anchorMultiSelectMode, setAnchorMultiSelectMode,
+    nudge, imagePositioningId, setImagePositioningId, vectorEditingId, setVectorEditingId, timelineOpen, checkpoint,
+  } = useEditor()
   const [nudgeIncrement, setNudgeIncrement] = useState<number>(1)
   const nudgeIncrementRef = useRef<number>(1)
   nudgeIncrementRef.current = nudgeIncrement
@@ -387,6 +429,7 @@ export default function Canvas() {
   const [sizeMatch, setSizeMatch] = useState<SizeMatch | null>(null)
   const [gapMatch, setGapMatch] = useState<GapMatchResult | null>(null)
   const [elementAlign, setElementAlign] = useState<ElementAlignResult | null>(null)
+  const [rotationSnap, setRotationSnap] = useState<RotationSnapState | null>(null)
   const marqueeSession = useRef<{ active: boolean; start: { x: number; y: number }; update?: (event: PointerEvent) => void; finish?: (event: PointerEvent) => void }>({ active: false, start: { x: 0, y: 0 } })
   const marqueeLongPress = useRef<number | null>(null)
   const [pinchActive, setPinchActive] = useState(false)
@@ -426,6 +469,18 @@ export default function Canvas() {
   selHRef.current = selH
   const artboardSnapRef = useRef(artboardSnap)
   artboardSnapRef.current = artboardSnap
+  const vectorSnapRef = useRef(vectorSnap)
+  vectorSnapRef.current = vectorSnap
+  const vectorEditingIdRef = useRef(vectorEditingId)
+  vectorEditingIdRef.current = vectorEditingId
+  const selectedAnchorIndicesRef = useRef(selectedAnchorIndices)
+  selectedAnchorIndicesRef.current = selectedAnchorIndices
+  const anchorMultiSelectModeRef = useRef(anchorMultiSelectMode)
+  anchorMultiSelectModeRef.current = anchorMultiSelectMode
+  const anchorHoldTimer = useRef<number | null>(null)
+  const anchorHoldTriggered = useRef(false)
+  const lastAnchorGestureMoved = useRef(false)
+  const [holdingAnchorIdx, setHoldingAnchorIdx] = useState<number | null>(null)
   const tapTrackerRef = useRef<{
     layerId: string
     time: number
@@ -523,6 +578,52 @@ export default function Canvas() {
         updateLayer(g.id, {
           imagePosition: formatImagePosition(next.x, next.y),
         })
+        return
+      }
+      if (g.mode === 'vector-anchor') {
+        const dist = Math.hypot(e.clientX - g.sx, e.clientY - g.sy)
+        if (dist > 3) {
+          if (longPress.current) {
+            window.clearTimeout(longPress.current)
+            longPress.current = null
+          }
+          if (marqueeLongPress.current) {
+            window.clearTimeout(marqueeLongPress.current)
+            marqueeLongPress.current = null
+          }
+          if (anchorHoldTimer.current) {
+            window.clearTimeout(anchorHoldTimer.current)
+            anchorHoldTimer.current = null
+            setHoldingAnchorIdx(null)
+          }
+          g.moved = true
+          lastAnchorGestureMoved.current = true
+        }
+        if (g.moved) {
+          let adx = dx
+          let ady = dy
+          const snapAnchorIdx = g.snapAnchorIdx
+          if (vectorSnapRef.current && g.startPoints[snapAnchorIdx]) {
+            const candX = Math.round(g.startPoints[snapAnchorIdx].x + dx)
+            const candY = Math.round(g.startPoints[snapAnchorIdx].y + dy)
+            const snapped = snapVectorAnchor(candX, candY, g.startPoints, snapAnchorIdx, g.layerW, g.layerH)
+            adx = snapped.x - g.startPoints[snapAnchorIdx].x
+            ady = snapped.y - g.startPoints[snapAnchorIdx].y
+          }
+          const updated = g.startPoints.map((p, idx) => {
+            if (!g.activeSelected.includes(idx)) return p
+            const nX = Math.round(p.x + adx)
+            const nY = Math.round(p.y + ady)
+            return {
+              ...p,
+              x: nX,
+              y: nY,
+              cp1: p.cp1 ? { x: Math.round(p.cp1.x + adx), y: Math.round(p.cp1.y + ady) } : undefined,
+              cp2: p.cp2 ? { x: Math.round(p.cp2.x + adx), y: Math.round(p.cp2.y + ady) } : undefined,
+            }
+          })
+          updateLayer(g.id, { points: updated })
+        }
         return
       }
       if (g.mode === 'move') {
@@ -660,19 +761,158 @@ export default function Canvas() {
       const isTop = handle === 'tl' || handle === 'tr' || handle === 't'
       const isBottom = handle === 'bl' || handle === 'br' || handle === 'b'
 
+      if (isCorner) {
+        const distFromStart = Math.hypot(e.clientX - g.sx, e.clientY - g.sy)
+        if (g.cornerMode === 'pending') {
+          if (distFromStart < 6) {
+            return
+          }
+          const moveAngle = (Math.atan2(e.clientY - g.sy, e.clientX - g.sx) * 180) / Math.PI
+          let diffToRadial = Math.abs((moveAngle - g.handleAngle) % 360)
+          if (diffToRadial > 180) diffToRadial = 360 - diffToRadial
+          const axialDiff = Math.min(diffToRadial, Math.abs(180 - diffToRadial))
+
+          // If moving outward or inward along the corner diagonal within 28° tolerance => resize
+          // Otherwise (circular / tangential movement) => rotate
+          if (axialDiff <= 28) {
+            g.cornerMode = 'resize'
+          } else {
+            g.cornerMode = 'rotate'
+          }
+        }
+
+        if (g.cornerMode === 'rotate') {
+          const artboardEl = document.querySelector('[data-testid="artboard"]')
+          const artboardRect = artboardEl?.getBoundingClientRect()
+          if (!artboardRect) return
+
+          const clientCenterX = artboardRect.left + g.centerX * eff
+          const clientCenterY = artboardRect.top + g.centerY * eff
+
+          const currentPointerAngle = (Math.atan2(e.clientY - clientCenterY, e.clientX - clientCenterX) * 180) / Math.PI
+          let deltaAngle = currentPointerAngle - g.startPointerAngle
+
+          while (deltaAngle <= -180) deltaAngle += 360
+          while (deltaAngle > 180) deltaAngle -= 360
+
+          const isMultiSelect = Boolean(g.group && g.group.length > 1)
+          const baseAngleToCheck = isMultiSelect ? deltaAngle : (g.initialRotation + deltaAngle)
+
+          let normalizedAngle = baseAngleToCheck % 360
+          while (normalizedAngle <= -180) normalizedAngle += 360
+          while (normalizedAngle > 180) normalizedAngle -= 360
+
+          // Important snap degrees: 0° (normal degree), 45°, 90°, 135°, 180°, etc.
+          const snapTargets = [
+            { deg: 0, label: '0°', tol: 6, isNormal: true },
+            { deg: 45, label: '45°', tol: 3.5 },
+            { deg: 90, label: '90°', tol: 4.5 },
+            { deg: 135, label: '135°', tol: 3.5 },
+            { deg: 180, label: '180°', tol: 4.5 },
+            { deg: -135, label: '-135°', tol: 3.5 },
+            { deg: -90, label: '-90°', tol: 4.5 },
+            { deg: -45, label: '-45°', tol: 3.5 },
+          ]
+
+          let bestSnap: typeof snapTargets[0] | null = null
+          let minDiff = Infinity
+
+          for (const target of snapTargets) {
+            let diff = Math.abs(normalizedAngle - target.deg)
+            if (diff > 180) diff = 360 - diff
+            if (diff <= target.tol && diff < minDiff) {
+              minDiff = diff
+              bestSnap = target
+            }
+          }
+
+          let finalAngle = normalizedAngle
+          let isSnapped = false
+          let snapLabel = `${Math.round(normalizedAngle)}°`
+          let isNormal = false
+
+          if (bestSnap) {
+            finalAngle = bestSnap.deg
+            isSnapped = true
+            snapLabel = bestSnap.label
+            isNormal = Boolean(bestSnap.isNormal)
+          } else {
+            finalAngle = Math.round(normalizedAngle * 10) / 10
+          }
+
+          const effectiveDelta = isMultiSelect ? finalAngle : (finalAngle - g.initialRotation)
+
+          if (isMultiSelect && g.initialLayerStates) {
+            const rad = (effectiveDelta * Math.PI) / 180
+            const cos = Math.cos(rad)
+            const sin = Math.sin(rad)
+
+            for (const item of g.initialLayerStates) {
+              const dxC = item.centerX - g.centerX
+              const dyC = item.centerY - g.centerY
+              const newCenterX = g.centerX + (dxC * cos - dyC * sin)
+              const newCenterY = g.centerY + (dxC * sin + dyC * cos)
+              const newX = Math.round(newCenterX - item.w / 2)
+              const newY = Math.round(newCenterY - item.h / 2)
+              let newRot = (item.rotation + effectiveDelta) % 360
+              while (newRot <= -180) newRot += 360
+              while (newRot > 180) newRot -= 360
+              if (isSnapped && effectiveDelta === 0) {
+                newRot = item.rotation
+              }
+              updateLayer(item.id, {
+                x: newX,
+                y: newY,
+                rotation: Math.round(newRot * 10) / 10,
+              })
+            }
+          } else {
+            updateLayer(g.id, {
+              rotation: finalAngle === 0 ? 0 : Math.round(finalAngle * 10) / 10,
+            })
+          }
+
+          setRotationSnap({
+            active: true,
+            angle: finalAngle,
+            cx: g.centerX,
+            cy: g.centerY,
+            isSnapped,
+            snapDegree: isSnapped ? bestSnap!.deg : finalAngle,
+            isNormal,
+            label: snapLabel,
+            deltaAngle: effectiveDelta,
+          })
+          setSnapGuides(null)
+          setSizeMatch(null)
+          setGapMatch(null)
+          setElementAlign(null)
+          return
+        }
+      }
+
+      let effDx = dx
+      let effDy = dy
+      if (isCorner && !g.group && g.initialRotation) {
+        const rot = g.initialRotation
+        const rotRad = (rot * Math.PI) / 180
+        effDx = dx * Math.cos(rotRad) + dy * Math.sin(rotRad)
+        effDy = -dx * Math.sin(rotRad) + dy * Math.cos(rotRad)
+      }
+
       let newW = g.ow
       let newH = g.oh
 
       if (isLeft) {
-        newW = Math.max(15, g.ow - dx)
+        newW = Math.max(15, g.ow - effDx)
       } else if (isRight) {
-        newW = Math.max(15, g.ow + dx)
+        newW = Math.max(15, g.ow + effDx)
       }
 
       if (isTop) {
-        newH = Math.max(15, g.oh - dy)
+        newH = Math.max(15, g.oh - effDy)
       } else if (isBottom) {
-        newH = Math.max(15, g.oh + dy)
+        newH = Math.max(15, g.oh + effDy)
       }
 
       const tol = SIZE_SNAP_TOLERANCE_PX
@@ -1059,7 +1299,12 @@ export default function Canvas() {
             updateLayer(g.id, patch)
           } else {
             const scaleFactor = g.ow > 0 ? matchRes.w / g.ow : 1
-            const patch: Partial<Layer> = { x: matchRes.x, y: matchRes.y, w: matchRes.w, h: matchRes.h }
+            const patch: Partial<Layer> = {
+              x: (!g.group && g.initialRotation) ? Math.round(g.centerX - matchRes.w / 2) : matchRes.x,
+              y: (!g.group && g.initialRotation) ? Math.round(g.centerY - matchRes.h / 2) : matchRes.y,
+              w: matchRes.w,
+              h: matchRes.h,
+            }
             if (g.isImage && g.origCrop) {
               patch.crop = {
                 x: Math.round(g.origCrop.x * scaleFactor),
@@ -1420,7 +1665,34 @@ export default function Canvas() {
         window.clearTimeout(longPress.current)
         longPress.current = null
       }
+      if (anchorHoldTimer.current) {
+        window.clearTimeout(anchorHoldTimer.current)
+        anchorHoldTimer.current = null
+        setHoldingAnchorIdx(null)
+      }
       const g = gesture.current
+      if (g?.mode === 'vector-anchor') {
+        if (g.moved) {
+          const l = layersRef.current.find((cand) => cand.id === g.id)
+          if (l && l.type === 'path' && l.points) {
+            const tight = tightenVectorLayer(l)
+            updateLayer(l.id, tight)
+          }
+          if (g.activeSelected && g.activeSelected.length > 0) {
+            setSelectedAnchors(g.activeSelected)
+          }
+          checkpoint()
+        } else if (g.deselectOnTap) {
+          setSelectedAnchors([])
+          if (anchorMultiSelectModeRef.current) {
+            setAnchorMultiSelectMode(false)
+            anchorMultiSelectModeRef.current = false
+          }
+        }
+        gesture.current = null
+        panGesture.current = null
+        return
+      }
       const moved = g?.mode === 'move' ? g.moved : false
       lastGestureMovedRef.current = moved
       if (moved) {
@@ -1464,6 +1736,7 @@ export default function Canvas() {
     setSizeMatch(null)
     setGapMatch(null)
     setElementAlign(null)
+    setRotationSnap(null)
   }
   window.addEventListener('pointermove', move)
     window.addEventListener('pointerup', up)
@@ -1552,6 +1825,44 @@ export default function Canvas() {
           }
         }
       }
+      if (vectorEditingId) {
+        if (e.key === 'Escape') {
+          e.preventDefault()
+          if (anchorMultiSelectModeRef.current) {
+            setAnchorMultiSelectMode(false)
+            return
+          }
+          setVectorEditingId(null)
+          return
+        }
+        const vLayer = layersRef.current.find((l) => l.id === vectorEditingId)
+        if (vLayer && vLayer.type === 'path' && vLayer.points && selectedAnchorIndicesRef.current.length > 0) {
+          const step = e.shiftKey ? 10 : (nudgeIncrementRef.current || 1)
+          let ndx = 0
+          let ndy = 0
+          if (e.key === 'ArrowLeft') ndx = -step
+          else if (e.key === 'ArrowRight') ndx = step
+          else if (e.key === 'ArrowUp') ndy = -step
+          else if (e.key === 'ArrowDown') ndy = step
+          if (ndx !== 0 || ndy !== 0) {
+            e.preventDefault()
+            const activeSel = selectedAnchorIndicesRef.current
+            const updated = vLayer.points.map((p, idx) => {
+              if (!activeSel.includes(idx)) return p
+              return {
+                ...p,
+                x: p.x + ndx,
+                y: p.y + ndy,
+                cp1: p.cp1 ? { x: p.cp1.x + ndx, y: p.cp1.y + ndy } : undefined,
+                cp2: p.cp2 ? { x: p.cp2.x + ndx, y: p.cp2.y + ndy } : undefined,
+              }
+            })
+            const tight = tightenVectorLayer({ ...vLayer, points: updated })
+            updateLayer(vLayer.id, tight)
+            return
+          }
+        }
+      }
       if (e.code === 'Space') {
         isSpacePressed.current = true
       } else if (e.key === 'ArrowLeft') {
@@ -1579,7 +1890,7 @@ export default function Canvas() {
       window.removeEventListener('keydown', down)
       window.removeEventListener('keyup', up)
     }
-  }, [editingId, handleNudge, imagePositioningId, setImagePositioningId, updateLayer])
+  }, [editingId, handleNudge, imagePositioningId, setImagePositioningId, updateLayer, vectorEditingId, setVectorEditingId])
 
   const getPinchTargetAndItems = (effId: string | null) => {
     const targetId = effId || selectedRef.current || selectedIdsRef.current[0] || null
@@ -2034,6 +2345,41 @@ export default function Canvas() {
       longPress.current = null
     }
 
+    const vectorEditLayer = vectorEditingIdRef.current
+      ? layersRef.current.find((ly) => ly.id === vectorEditingIdRef.current && ly.type === 'path' && ly.visible && !ly.locked)
+      : null
+    const isVectorEditingAnchors = Boolean(
+      vectorEditLayer &&
+      vectorEditLayer.points &&
+      vectorEditLayer.points.length > 0 &&
+      selectedAnchorIndicesRef.current.length > 0
+    )
+
+    if (isVectorEditingAnchors && vectorEditLayer && vectorEditLayer.points) {
+      if (e.pointerType === 'touch') {
+        e.currentTarget.setPointerCapture?.(e.pointerId)
+      }
+      const startPoints = vectorEditLayer.points.map((p) => ({
+        ...p,
+        cp1: p.cp1 ? { ...p.cp1 } : undefined,
+        cp2: p.cp2 ? { ...p.cp2 } : undefined,
+      }))
+      gesture.current = {
+        id: vectorEditLayer.id,
+        mode: 'vector-anchor',
+        sx: e.clientX,
+        sy: e.clientY,
+        startPoints,
+        activeSelected: [...selectedAnchorIndicesRef.current],
+        snapAnchorIdx: selectedAnchorIndicesRef.current[0] ?? 0,
+        layerW: vectorEditLayer.w,
+        layerH: vectorEditLayer.h,
+        moved: false,
+        deselectOnTap: l.id !== vectorEditLayer.id,
+      }
+      return
+    }
+
     const topGroup = getTopmostGroup(l.id, project.layers)
     const isChildOfSelectedGroup = topGroup && selectedIds.includes(topGroup.id)
     const isExternalToSelection = selectedIds.length > 0 && !selectedIds.includes(l.id) && !isChildOfSelectedGroup
@@ -2187,6 +2533,9 @@ export default function Canvas() {
       select(l.id)
     } else if (l.type === 'text') {
       setEditingId(l.id)
+    } else if (l.type === 'path') {
+      select(l.id)
+      setVectorEditingId(l.id)
     } else {
       select(l.id)
     }
@@ -2334,10 +2683,68 @@ export default function Canvas() {
       }
     }
 
+    const isCorner = handle === 'tl' || handle === 'tr' || handle === 'bl' || handle === 'br'
+    const centerX = originX + originW / 2
+    const centerY = originY + originH / 2
+    const initialRotation = (!group && l.rotation) ? l.rotation : 0
+    let handleAngle = 0
+
+    if (isCorner) {
+      const dx0 = (handle === 'tr' || handle === 'br' ? originW / 2 : -originW / 2)
+      const dy0 = (handle === 'bl' || handle === 'br' ? originH / 2 : -originH / 2)
+      const rad = (initialRotation * Math.PI) / 180
+      const dxRot = dx0 * Math.cos(rad) - dy0 * Math.sin(rad)
+      const dyRot = dx0 * Math.sin(rad) + dy0 * Math.cos(rad)
+      handleAngle = (Math.atan2(dyRot, dxRot) * 180) / Math.PI
+    }
+
+    const artboardEl = document.querySelector('[data-testid="artboard"]')
+    const artboardRect = artboardEl?.getBoundingClientRect()
+    const effNow = scale * viewRef.current.scale
+    const clientCenterX = (artboardRect?.left ?? 0) + centerX * effNow
+    const clientCenterY = (artboardRect?.top ?? 0) + centerY * effNow
+    const startPointerAngle = (Math.atan2(e.clientY - clientCenterY, e.clientX - clientCenterX) * 180) / Math.PI
+
+    let initialLayerStates: { id: string; x: number; y: number; w: number; h: number; rotation: number; centerX: number; centerY: number }[] | undefined
+    if (group && group.length > 0) {
+      initialLayerStates = group.map((item) => {
+        const lyr = layersRef.current.find((k) => k.id === item.id)
+        return {
+          id: item.id,
+          x: item.x,
+          y: item.y,
+          w: item.w,
+          h: item.h,
+          rotation: lyr?.rotation || 0,
+          centerX: item.x + item.w / 2,
+          centerY: item.y + item.h / 2,
+        }
+      })
+    } else {
+      initialLayerStates = [{
+        id: l.id,
+        x: originX,
+        y: originY,
+        w: originW,
+        h: originH,
+        rotation: l.rotation || 0,
+        centerX,
+        centerY,
+      }]
+    }
+
     gesture.current = {
       id: l.id,
       mode: 'resize',
       handle,
+      isCorner,
+      cornerMode: isCorner ? 'pending' : 'resize',
+      centerX,
+      centerY,
+      handleAngle,
+      startPointerAngle,
+      initialRotation,
+      initialLayerStates,
       isText: l.type === 'text',
       isImage,
       lockProportions,
@@ -2588,7 +2995,40 @@ export default function Canvas() {
           marqueeLongPress.current = null
         }
 
-        if (selectedLayers.length > 0) {
+        // If in vector editing mode and anchor points are selected, dragging anywhere on the canvas moves them
+        const vectorEditLayer = vectorEditingIdRef.current
+          ? project.layers.find((ly) => ly.id === vectorEditingIdRef.current && ly.type === 'path' && ly.visible && !ly.locked)
+          : null
+        const isVectorEditingAnchors = Boolean(
+          vectorEditLayer &&
+          vectorEditLayer.points &&
+          vectorEditLayer.points.length > 0 &&
+          selectedAnchorIndicesRef.current.length > 0
+        )
+
+        if (isVectorEditingAnchors && vectorEditLayer && vectorEditLayer.points) {
+          const startPoints = vectorEditLayer.points.map((p) => ({
+            ...p,
+            cp1: p.cp1 ? { ...p.cp1 } : undefined,
+            cp2: p.cp2 ? { ...p.cp2 } : undefined,
+          }))
+          gesture.current = {
+            id: vectorEditLayer.id,
+            mode: 'vector-anchor',
+            sx: e.clientX,
+            sy: e.clientY,
+            startPoints,
+            activeSelected: [...selectedAnchorIndicesRef.current],
+            snapAnchorIdx: selectedAnchorIndicesRef.current[0] ?? 0,
+            layerW: vectorEditLayer.w,
+            layerH: vectorEditLayer.h,
+            moved: false,
+            deselectOnTap: true,
+          }
+          if (e.pointerType === 'touch') {
+            e.currentTarget.setPointerCapture?.(e.pointerId)
+          }
+        } else if (selectedLayers.length > 0) {
           const primary = selectedLayers[0]
           const pNode = layerRefs.current.get(primary.id)
           const pW = (primary.type === 'text' && pNode ? pNode.offsetWidth : pNode?.offsetWidth) || primary.w
@@ -2859,6 +3299,105 @@ export default function Canvas() {
               ))}
             </>
           )}
+          {rotationSnap && rotationSnap.active && (
+            <div
+              key="rotation-snap-overlay"
+              className="pointer-events-none absolute inset-0 overflow-visible"
+              style={{ zIndex: 75 }}
+              data-testid="rotation-snap-overlay"
+            >
+              {/* Axis snap line */}
+              {rotationSnap.isSnapped && (
+                <svg
+                  className="pointer-events-none absolute overflow-visible"
+                  style={{
+                    left: rotationSnap.cx,
+                    top: rotationSnap.cy,
+                    width: 1,
+                    height: 1,
+                  }}
+                >
+                  {rotationSnap.isNormal ? (
+                    <>
+                      <line
+                        x1={-preset.w * 2}
+                        y1={0}
+                        x2={preset.w * 2}
+                        y2={0}
+                        stroke="#3b82f6"
+                        strokeWidth={Math.max(1.5, 2 / eff)}
+                        strokeDasharray={`${6 / eff} ${4 / eff}`}
+                      />
+                      <line
+                        x1={0}
+                        y1={-preset.h * 2}
+                        x2={0}
+                        y2={preset.h * 2}
+                        stroke="#3b82f6"
+                        strokeWidth={Math.max(1.5, 2 / eff)}
+                        strokeDasharray={`${6 / eff} ${4 / eff}`}
+                      />
+                    </>
+                  ) : (
+                    <line
+                      x1={-Math.cos((rotationSnap.snapDegree * Math.PI) / 180) * 1600}
+                      y1={-Math.sin((rotationSnap.snapDegree * Math.PI) / 180) * 1600}
+                      x2={Math.cos((rotationSnap.snapDegree * Math.PI) / 180) * 1600}
+                      y2={Math.sin((rotationSnap.snapDegree * Math.PI) / 180) * 1600}
+                      stroke="#3b82f6"
+                      strokeWidth={Math.max(1.5, 2 / eff)}
+                      strokeDasharray={`${6 / eff} ${4 / eff}`}
+                    />
+                  )}
+                </svg>
+              )}
+
+              {/* Center pivot point indicator */}
+              <div
+                style={{
+                  position: 'absolute',
+                  left: rotationSnap.cx - 5 / eff,
+                  top: rotationSnap.cy - 5 / eff,
+                  width: 10 / eff,
+                  height: 10 / eff,
+                  borderRadius: '50%',
+                  backgroundColor: rotationSnap.isNormal ? '#3b82f6' : '#22c55e',
+                  boxShadow: '0 0 0 2px white',
+                }}
+              />
+
+              {/* Degree badge */}
+              <div
+                style={{
+                  position: 'absolute',
+                  left: rotationSnap.cx,
+                  top: rotationSnap.cy - 36 / eff,
+                  transform: 'translate(-50%, -100%)',
+                  backgroundColor: rotationSnap.isNormal
+                    ? '#1d4ed8'
+                    : rotationSnap.isSnapped
+                      ? '#15803d'
+                      : 'rgba(15, 23, 42, 0.92)',
+                  color: '#ffffff',
+                  padding: `${4 / eff}px ${10 / eff}px`,
+                  borderRadius: `${6 / eff}px`,
+                  fontSize: `${Math.max(11, 13 / eff)}px`,
+                  fontWeight: 600,
+                  whiteSpace: 'nowrap',
+                  boxShadow: '0 4px 12px rgba(0,0,0,0.25)',
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: `${4 / eff}px`,
+                  border: '1px solid rgba(255,255,255,0.2)',
+                }}
+              >
+                <RotateCw style={{ width: 12 / eff, height: 12 / eff }} />
+                <span>
+                  {rotationSnap.isNormal ? '0° (Normal)' : rotationSnap.label}
+                </span>
+              </div>
+            </div>
+          )}
           {project.layers.map((l) => {
             const effectiveLayer = l.keyframes && l.keyframes.length > 0 ? interpolateKeyframes(l, time) : l
             const a = anim(effectiveLayer, time, active, project.layers)
@@ -2977,7 +3516,7 @@ export default function Canvas() {
                 }}
               >
                 {/* Crisp Vector Border on Selected Layer */}
-                {isSel && !playing && l.type !== 'group' && (
+                {isSel && !playing && l.type !== 'group' && !(vectorEditingId === l.id && l.type === 'path') && (
                   <svg
                     data-testid={`layer-vector-border-${l.id}`}
                     className="pointer-events-none absolute inset-0 overflow-visible"
@@ -3003,6 +3542,8 @@ export default function Canvas() {
                 <LayerContent
                   layer={effectiveLayer}
                   editing={editingId === l.id}
+                  isVectorEditing={vectorEditingId === l.id && l.type === 'path'}
+                  eff={eff}
                   onEdit={(t) => updateLayer(l.id, { text: t })}
                   onEndEdit={() => setEditingId(null)}
                 />
@@ -3106,6 +3647,7 @@ export default function Canvas() {
               }
             }) : undefined
             const isImagePositioning = Boolean(imagePositioningId && imagePositioningId === sel.id && sel.type === 'image')
+            const isVectorEditing = Boolean(vectorEditingId && vectorEditingId === sel.id && sel.type === 'path')
             return (
               <div
                 style={{
@@ -3114,6 +3656,12 @@ export default function Canvas() {
                   top: bounds.top,
                   width: boxW,
                   height: boxH,
+                  transform: (selected.length === 1 && !isGroup && sel.rotation)
+                    ? `rotate(${sel.rotation}deg)`
+                    : (rotationSnap?.active && rotationSnap.deltaAngle)
+                      ? `rotate(${rotationSnap.deltaAngle}deg)`
+                      : undefined,
+                  transformOrigin: '50% 50%',
                   border: 'none',
                   pointerEvents: 'none',
                   zIndex: 60,
@@ -3121,7 +3669,7 @@ export default function Canvas() {
                 }}
               >
                 {/* Crisp Vector Selection Frame Border */}
-                {((isGroup || multiSelectMode) || isImagePositioning) && (
+                {!isVectorEditing && ((isGroup || multiSelectMode) || isImagePositioning) && (
                   <svg
                     data-testid="selection-vector-border"
                     className="pointer-events-none absolute inset-0 overflow-visible"
@@ -3143,6 +3691,7 @@ export default function Canvas() {
                     />
                   </svg>
                 )}
+
                 {isImagePositioning && (
                   <div
                     data-testid="image-manual-position-badge"
@@ -3188,6 +3737,68 @@ export default function Canvas() {
                         cursor: 'pointer',
                         border: 'none',
                         fontWeight: 600,
+                      }}
+                    >
+                      Done
+                    </button>
+                  </div>
+                )}
+                {isVectorEditing && anchorMultiSelectMode && (
+                  <div
+                    data-testid="vector-anchor-multiselect-badge"
+                    onPointerDown={(e) => e.stopPropagation()}
+                    onClick={(e) => e.stopPropagation()}
+                    style={{
+                      position: 'absolute',
+                      top: -38 / eff,
+                      left: '50%',
+                      transform: 'translateX(-50%)',
+                      backgroundColor: '#090d16',
+                      color: '#ffffff',
+                      fontSize: Math.max(11, 12 / eff),
+                      fontWeight: 600,
+                      padding: `${3 / eff}px ${10 / eff}px`,
+                      borderRadius: 9999,
+                      boxShadow: '0 4px 16px rgba(0,0,0,0.5)',
+                      display: 'flex',
+                      alignItems: 'center',
+                      gap: 8 / eff,
+                      whiteSpace: 'nowrap',
+                      pointerEvents: 'auto',
+                      border: '1px solid rgba(59,130,246,0.5)',
+                      zIndex: 90,
+                    }}
+                  >
+                    <span
+                      style={{
+                        width: 7 / eff,
+                        height: 7 / eff,
+                        borderRadius: '50%',
+                        backgroundColor: '#3b82f6',
+                        display: 'inline-block',
+                      }}
+                    />
+                    <span>
+                      {selectedAnchorIndices.length} {selectedAnchorIndices.length === 1 ? 'anchor' : 'anchors'} selected
+                    </span>
+                    <span style={{ opacity: 0.6, fontSize: Math.max(10, 11 / eff) }}>Tap points to toggle</span>
+                    <button
+                      type="button"
+                      data-testid="vector-anchor-multiselect-done-btn"
+                      onClick={(e) => {
+                        e.stopPropagation()
+                        setAnchorMultiSelectMode(false)
+                      }}
+                      style={{
+                        backgroundColor: '#2563eb',
+                        color: '#ffffff',
+                        border: 'none',
+                        borderRadius: 9999,
+                        padding: `${2 / eff}px ${8 / eff}px`,
+                        fontSize: Math.max(10, 11 / eff),
+                        fontWeight: 600,
+                        cursor: 'pointer',
+                        marginLeft: 4 / eff,
                       }}
                     >
                       Done
@@ -3272,7 +3883,7 @@ export default function Canvas() {
                     )}
                   </div>
                 )}
-                {!isImagePositioning && corners.map(({ c, cx, cy }) => (
+                {!isImagePositioning && !isVectorEditing && corners.map(({ c, cx, cy }) => (
                   <div
                     key={c}
                     data-testid={`resize-${c}-${isGroup ? 'group' : sel.id}`}
@@ -3309,7 +3920,7 @@ export default function Canvas() {
                     </svg>
                   </div>
                 ))}
-                {!isImagePositioning && showSideHandles && sideHandles.map(({ h, cx, cy, cursor }) => (
+                {!isImagePositioning && !isVectorEditing && showSideHandles && sideHandles.map(({ h, cx, cy, cursor }) => (
                   <div
                     key={h}
                     data-testid={`resize-${h}-${isGroup ? 'group' : sel.id}`}
@@ -3350,53 +3961,81 @@ export default function Canvas() {
                 ))}
 
                 {/* ON-CANVAS VECTOR ANCHOR POINTS & BÉZIER CONTROLS */}
-                {sel.type === 'path' && sel.points && sel.points.length > 0 && !multiSelectMode && (
+                {isVectorEditing && sel.points && sel.points.length > 0 && !multiSelectMode && (
                   <div
                     data-testid="vector-canvas-points-overlay"
                     style={{ position: 'absolute', inset: 0, pointerEvents: 'none', zIndex: 70 }}
                   >
                     {sel.points.map((pt, pIdx) => {
-                      const pRadius = 7 / eff
-                      const cRadius = 5 / eff
+                      const isAnchorSelected = selectedAnchorIndices.includes(pIdx)
+                      const pRadius = 5.5 / eff
+                      const cRadius = 4.5 / eff
                       const pts = sel.points!
+
                       const handlePointDrag = (e: React.PointerEvent) => {
                         e.stopPropagation()
                         e.preventDefault()
+
+                        if (anchorHoldTimer.current) {
+                          window.clearTimeout(anchorHoldTimer.current)
+                          anchorHoldTimer.current = null
+                        }
+                        anchorHoldTriggered.current = false
+                        lastAnchorGestureMoved.current = false
+                        setHoldingAnchorIdx(pIdx)
+
+                        // Holding down on any anchor point triggers multi-select mode
+                        anchorHoldTimer.current = window.setTimeout(() => {
+                          anchorHoldTriggered.current = true
+                          anchorHoldTimer.current = null
+                          setHoldingAnchorIdx(null)
+                          setAnchorMultiSelectMode(true)
+                          anchorMultiSelectModeRef.current = true
+
+                          // Ensure the held anchor point is in the multi-selection
+                          const curr = selectedAnchorIndicesRef.current
+                          if (!curr.includes(pIdx)) {
+                            setSelectedAnchors([...curr, pIdx])
+                          }
+                          try {
+                            navigator.vibrate?.(45)
+                          } catch {}
+                          if (gesture.current && gesture.current.mode === 'vector-anchor') {
+                            gesture.current.moved = false
+                          }
+                        }, 400)
+
                         const target = e.currentTarget as HTMLElement
                         target.setPointerCapture?.(e.pointerId)
-                        const startPt = { ...pts[pIdx] }
-                        const startX = e.clientX
-                        const startY = e.clientY
 
-                        const onPointerMove = (ev: PointerEvent) => {
-                          const dx = (ev.clientX - startX) / (scale * view.scale)
-                          const dy = (ev.clientY - startY) / (scale * view.scale)
-                          const updated = [...pts]
-                          const newX = Math.round(startPt.x + dx)
-                          const newY = Math.round(startPt.y + dy)
-                          const pointPatch: any = { ...startPt, x: newX, y: newY }
-                          if (startPt.cp1) {
-                            pointPatch.cp1 = { x: Math.round(startPt.cp1.x + dx), y: Math.round(startPt.cp1.y + dy) }
-                          }
-                          if (startPt.cp2) {
-                            pointPatch.cp2 = { x: Math.round(startPt.cp2.x + dx), y: Math.round(startPt.cp2.y + dy) }
-                          }
-                          updated[pIdx] = pointPatch
-                          updateLayer(sel.id, { points: updated })
+                        const isMulti = anchorMultiSelectModeRef.current || e.shiftKey
+                        const currentIndices = selectedAnchorIndicesRef.current
+                        let activeSelected: number[]
+                        if (currentIndices.includes(pIdx)) {
+                          activeSelected = currentIndices.length > 0 ? [...currentIndices] : [pIdx]
+                        } else {
+                          activeSelected = isMulti ? [...currentIndices, pIdx] : [pIdx]
                         }
 
-                        const onPointerUp = () => {
-                          window.removeEventListener('pointermove', onPointerMove)
-                          window.removeEventListener('pointerup', onPointerUp)
-                          const current = layersRef.current.find((cand) => cand.id === sel.id)
-                          if (current && current.type === 'path' && current.points) {
-                            const tight = tightenVectorLayer(current)
-                            updateLayer(sel.id, tight)
-                          }
-                        }
+                        const startPoints = pts.map((p) => ({
+                          ...p,
+                          cp1: p.cp1 ? { ...p.cp1 } : undefined,
+                          cp2: p.cp2 ? { ...p.cp2 } : undefined,
+                        }))
 
-                        window.addEventListener('pointermove', onPointerMove)
-                        window.addEventListener('pointerup', onPointerUp)
+                        gesture.current = {
+                          id: sel.id,
+                          mode: 'vector-anchor',
+                          sx: e.clientX,
+                          sy: e.clientY,
+                          startPoints,
+                          activeSelected: [...activeSelected],
+                          snapAnchorIdx: pIdx,
+                          layerW: sel.w,
+                          layerH: sel.h,
+                          moved: false,
+                          deselectOnTap: false,
+                        }
                       }
 
                       const handleCpDrag = (cpKey: 'cp1' | 'cp2', e: React.PointerEvent) => {
@@ -3404,6 +4043,7 @@ export default function Canvas() {
                         e.preventDefault()
                         const target = e.currentTarget as HTMLElement
                         target.setPointerCapture?.(e.pointerId)
+                        const origPoint = { ...pts[pIdx] }
                         const origCp = pts[pIdx][cpKey] || { x: pt.x, y: pt.y }
                         const startX = e.clientX
                         const startY = e.clientY
@@ -3411,13 +4051,20 @@ export default function Canvas() {
                         const onPointerMove = (ev: PointerEvent) => {
                           const dx = (ev.clientX - startX) / (scale * view.scale)
                           const dy = (ev.clientY - startY) / (scale * view.scale)
+                          let newCpX = Math.round(origCp.x + dx)
+                          let newCpY = Math.round(origCp.y + dy)
+
+                          if (vectorSnap) {
+                            const snapped = snapVectorHandle(newCpX, newCpY, pt.x, pt.y)
+                            newCpX = snapped.x
+                            newCpY = snapped.y
+                          }
+
+                          const handlePatch = updateHandleWithMode(origPoint, cpKey, { x: newCpX, y: newCpY })
                           const updated = [...pts]
                           updated[pIdx] = {
                             ...pts[pIdx],
-                            [cpKey]: {
-                              x: Math.round(origCp.x + dx),
-                              y: Math.round(origCp.y + dy),
-                            },
+                            ...handlePatch,
                           }
                           updateLayer(sel.id, { points: updated })
                         }
@@ -3550,24 +4197,43 @@ export default function Canvas() {
                           <div
                             data-testid={`vector-anchor-${pIdx}`}
                             onPointerDown={handlePointDrag}
+                            onPointerUp={() => {
+                              if (anchorHoldTimer.current) {
+                                window.clearTimeout(anchorHoldTimer.current)
+                                anchorHoldTimer.current = null
+                                setHoldingAnchorIdx(null)
+                              }
+                            }}
+                            onPointerCancel={() => {
+                              if (anchorHoldTimer.current) {
+                                window.clearTimeout(anchorHoldTimer.current)
+                                anchorHoldTimer.current = null
+                                setHoldingAnchorIdx(null)
+                              }
+                            }}
+                            onClick={(e) => {
+                              e.stopPropagation()
+                              if (lastAnchorGestureMoved.current) {
+                                lastAnchorGestureMoved.current = false
+                                return
+                              }
+                              if (anchorHoldTriggered.current) {
+                                anchorHoldTriggered.current = false
+                                return
+                              }
+                              if (anchorMultiSelectModeRef.current || e.shiftKey) {
+                                toggleSelectedAnchor(pIdx)
+                              } else {
+                                setSelectedAnchors([pIdx])
+                              }
+                            }}
                             onDoubleClick={(e) => {
                               e.stopPropagation()
                               const hasCp = pt.cp1 !== undefined || pt.cp2 !== undefined
                               const updated = [...pts]
-                              if (hasCp) {
-                                updated[pIdx] = { x: pt.x, y: pt.y }
-                              } else {
-                                const prev = pts[(pIdx - 1 + pts.length) % pts.length]
-                                const next = pts[(pIdx + 1) % pts.length]
-                                const dx = (next.x - prev.x) * 0.2
-                                const dy = (next.y - prev.y) * 0.2
-                                updated[pIdx] = {
-                                  x: pt.x,
-                                  y: pt.y,
-                                  cp1: { x: Math.round(pt.x - dx), y: Math.round(pt.y - dy) },
-                                  cp2: { x: Math.round(pt.x + dx), y: Math.round(pt.y + dy) },
-                                }
-                              }
+                              const prev = pts[(pIdx - 1 + pts.length) % pts.length]
+                              const next = pts[(pIdx + 1) % pts.length]
+                              updated[pIdx] = switchPointBezierMode(pt, hasCp ? 1 : 2, prev, next)
                               const tight = tightenVectorLayer({ ...sel, points: updated })
                               updateLayer(sel.id, tight)
                             }}
@@ -3579,61 +4245,68 @@ export default function Canvas() {
                               height: pRadius * 2,
                               display: 'grid',
                               placeItems: 'center',
-                              cursor: 'grab',
+                              cursor: isAnchorSelected ? 'grab' : (anchorMultiSelectMode ? 'pointer' : 'grab'),
                               pointerEvents: 'auto',
                               touchAction: 'none',
                               zIndex: 75,
+                              padding: `${7 / eff}px`,
+                              margin: `-${7 / eff}px`,
+                              boxSizing: 'content-box',
                             }}
-                            title={`Anchor ${pIdx + 1}: (${Math.round(pt.x)}, ${Math.round(pt.y)}). Double-click to toggle curves.`}
+                            title={
+                              anchorMultiSelectMode
+                                ? `Anchor ${pIdx + 1}: ${isAnchorSelected ? 'Selected (Tap to remove)' : 'Tap to add to selection'}`
+                                : `Anchor ${pIdx + 1}: (${Math.round(pt.x)}, ${Math.round(pt.y)}). Hold to multi-select.`
+                            }
                           >
                             <svg
-                              width={pRadius * 2}
-                              height={pRadius * 2}
-                              viewBox={`0 0 ${pRadius * 2} ${pRadius * 2}`}
+                              width={pRadius * 2 + 10}
+                              height={pRadius * 2 + 10}
+                              viewBox={`0 0 ${pRadius * 2 + 10} ${pRadius * 2 + 10}`}
                               className="pointer-events-none overflow-visible"
                             >
-                              {pt.cp1 || pt.cp2 ? (
-                                <>
-                                  <circle
-                                    cx={pRadius}
-                                    cy={pRadius}
-                                    r={Math.max(1 / eff, pRadius - 1 / eff)}
-                                    fill="#007AFF"
-                                    stroke="#ffffff"
-                                    strokeWidth={1.5 / eff}
-                                    shapeRendering="geometricPrecision"
-                                  />
-                                  <circle
-                                    cx={pRadius}
-                                    cy={pRadius}
-                                    r={Math.max(1 / eff, pRadius * 0.4)}
-                                    fill="#ffffff"
-                                    shapeRendering="geometricPrecision"
-                                  />
-                                </>
-                              ) : (
-                                <>
-                                  <rect
-                                    x={1 / eff}
-                                    y={1 / eff}
-                                    width={Math.max(2 / eff, pRadius * 2 - 2 / eff)}
-                                    height={Math.max(2 / eff, pRadius * 2 - 2 / eff)}
-                                    rx={1.5 / eff}
-                                    fill="#007AFF"
-                                    stroke="#ffffff"
-                                    strokeWidth={1.5 / eff}
-                                    shapeRendering="geometricPrecision"
-                                  />
-                                  <rect
-                                    x={pRadius - pRadius * 0.4}
-                                    y={pRadius - pRadius * 0.4}
-                                    width={pRadius * 0.8}
-                                    height={pRadius * 0.8}
-                                    rx={1 / eff}
-                                    fill="#ffffff"
-                                    shapeRendering="geometricPrecision"
-                                  />
-                                </>
+                              {/* Pulse ring when user is holding down this anchor */}
+                              {holdingAnchorIdx === pIdx && (
+                                <circle
+                                  cx={pRadius + 5}
+                                  cy={pRadius + 5}
+                                  r={pRadius + 3.5 / eff}
+                                  fill="none"
+                                  stroke="#3b82f6"
+                                  strokeWidth={2 / eff}
+                                  className="animate-pulse"
+                                />
+                              )}
+                              {/* Multi-select halo for selected anchors in multi-select mode */}
+                              {anchorMultiSelectMode && isAnchorSelected && (
+                                <circle
+                                  cx={pRadius + 5}
+                                  cy={pRadius + 5}
+                                  r={pRadius + 2.5 / eff}
+                                  fill="none"
+                                  stroke="#2563eb"
+                                  strokeWidth={1.5 / eff}
+                                  strokeDasharray={`${3 / eff} ${2 / eff}`}
+                                />
+                              )}
+                              {/* Anchor point circle: thin border matching fill (#007AFF) when selected, filled white with thin border when inactive */}
+                              <circle
+                                cx={pRadius + 5}
+                                cy={pRadius + 5}
+                                r={pRadius}
+                                fill={isAnchorSelected ? '#007AFF' : '#ffffff'}
+                                stroke={isAnchorSelected ? '#007AFF' : (anchorMultiSelectMode ? '#3b82f6' : '#007AFF')}
+                                strokeWidth={(isAnchorSelected ? 1.5 : (anchorMultiSelectMode ? 1.5 : 1)) / eff}
+                                shapeRendering="geometricPrecision"
+                              />
+                              {/* Inner white dot when selected in multi-select mode */}
+                              {anchorMultiSelectMode && isAnchorSelected && (
+                                <circle
+                                  cx={pRadius + 5}
+                                  cy={pRadius + 5}
+                                  r={Math.max(1.2, pRadius * 0.4)}
+                                  fill="#ffffff"
+                                />
                               )}
                             </svg>
                           </div>
@@ -4457,11 +5130,15 @@ function EditableText({ initial, style, onCommit, onDone }: { initial: string; s
 function LayerContent({
   layer,
   editing,
+  isVectorEditing = false,
+  eff = 1,
   onEdit,
   onEndEdit,
 }: {
   layer: Layer
   editing: boolean
+  isVectorEditing?: boolean
+  eff?: number
   onEdit: (t: string) => void
   onEndEdit: () => void
 }) {
@@ -4495,6 +5172,7 @@ function LayerContent({
 
   if (layer.type === 'shape') {
     const fill = layer.fill || '#000000'
+    const fillOpacity = isVectorEditing ? 0.65 : undefined
     const stroke = layer.stroke || undefined
     const strokeWidth = layer.strokeWidth || 0
 
@@ -4502,19 +5180,28 @@ function LayerContent({
       case 'circle':
         return (
           <svg viewBox={`0 0 ${layer.w} ${layer.h}`} width="100%" height="100%" style={{ display: 'block', overflow: 'visible' }} shapeRendering="geometricPrecision">
-            <ellipse cx={layer.w / 2} cy={layer.h / 2} rx={layer.w / 2} ry={layer.h / 2} fill={fill} stroke={stroke} strokeWidth={strokeWidth} shapeRendering="geometricPrecision" />
+            <ellipse cx={layer.w / 2} cy={layer.h / 2} rx={layer.w / 2} ry={layer.h / 2} fill={fill} fillOpacity={fillOpacity} stroke={stroke} strokeWidth={strokeWidth} shapeRendering="geometricPrecision" style={{ transition: 'fill-opacity 0.2s ease' }} />
+            {isVectorEditing && (
+              <ellipse cx={layer.w / 2} cy={layer.h / 2} rx={layer.w / 2} ry={layer.h / 2} fill="none" stroke="#d1d5db" strokeWidth={1 / eff} shapeRendering="geometricPrecision" />
+            )}
           </svg>
         )
       case 'triangle':
         return (
           <svg viewBox={`0 0 ${layer.w} ${layer.h}`} width="100%" height="100%" style={{ display: 'block', overflow: 'visible' }} shapeRendering="geometricPrecision">
-            <polygon points={`${layer.w / 2},0 ${layer.w},${layer.h} 0,${layer.h}`} fill={fill} stroke={stroke} strokeWidth={strokeWidth} strokeLinejoin="round" shapeRendering="geometricPrecision" />
+            <polygon points={`${layer.w / 2},0 ${layer.w},${layer.h} 0,${layer.h}`} fill={fill} fillOpacity={fillOpacity} stroke={stroke} strokeWidth={strokeWidth} strokeLinejoin="round" shapeRendering="geometricPrecision" style={{ transition: 'fill-opacity 0.2s ease' }} />
+            {isVectorEditing && (
+              <polygon points={`${layer.w / 2},0 ${layer.w},${layer.h} 0,${layer.h}`} fill="none" stroke="#d1d5db" strokeWidth={1 / eff} strokeLinejoin="round" shapeRendering="geometricPrecision" />
+            )}
           </svg>
         )
       case 'star':
         return (
           <svg viewBox="0 0 100 100" width="100%" height="100%" style={{ display: 'block', overflow: 'visible' }} shapeRendering="geometricPrecision">
-            <polygon points="50,0 61,35 98,35 68,57 79,91 50,70 21,91 32,57 2,35 39,35" fill={fill} stroke={stroke} strokeWidth={strokeWidth} strokeLinejoin="round" shapeRendering="geometricPrecision" />
+            <polygon points="50,0 61,35 98,35 68,57 79,91 50,70 21,91 32,57 2,35 39,35" fill={fill} fillOpacity={fillOpacity} stroke={stroke} strokeWidth={strokeWidth} strokeLinejoin="round" shapeRendering="geometricPrecision" style={{ transition: 'fill-opacity 0.2s ease' }} />
+            {isVectorEditing && (
+              <polygon points="50,0 61,35 98,35 68,57 79,91 50,70 21,91 32,57 2,35 39,35" fill="none" stroke="#d1d5db" strokeWidth={1 / eff} strokeLinejoin="round" shapeRendering="geometricPrecision" />
+            )}
           </svg>
         )
       case 'line':
@@ -4526,7 +5213,10 @@ function LayerContent({
       default:
         return (
           <svg viewBox={`0 0 ${layer.w} ${layer.h}`} width="100%" height="100%" style={{ display: 'block', overflow: 'visible' }} shapeRendering="geometricPrecision">
-            <rect x={0} y={0} width={layer.w} height={layer.h} rx={layer.radius || 0} fill={fill} stroke={stroke} strokeWidth={strokeWidth} shapeRendering="geometricPrecision" />
+            <rect x={0} y={0} width={layer.w} height={layer.h} rx={layer.radius || 0} fill={fill} fillOpacity={fillOpacity} stroke={stroke} strokeWidth={strokeWidth} shapeRendering="geometricPrecision" style={{ transition: 'fill-opacity 0.2s ease' }} />
+            {isVectorEditing && (
+              <rect x={0} y={0} width={layer.w} height={layer.h} rx={layer.radius || 0} fill="none" stroke="#d1d5db" strokeWidth={1 / eff} shapeRendering="geometricPrecision" />
+            )}
           </svg>
         )
     }
@@ -4535,6 +5225,7 @@ function LayerContent({
   if (layer.type === 'path') {
     const d = layer.pathData || (layer.points ? buildSvgPath(layer.points, layer.closed !== false, layer.w, layer.h) : '')
     const fill = layer.fill || 'none'
+    const fillOpacity = isVectorEditing && fill !== 'none' ? 0.65 : undefined
     const stroke = layer.stroke || (layer.strokeWidth ? '#007AFF' : undefined)
     const strokeWidth = layer.strokeWidth ?? (stroke ? 2 : 0)
     const strokeLinecap = layer.strokeLinecap || 'round'
@@ -4551,13 +5242,28 @@ function LayerContent({
         <path
           d={d}
           fill={fill}
+          fillOpacity={fillOpacity}
           stroke={stroke}
           strokeWidth={strokeWidth}
           strokeLinecap={strokeLinecap}
           strokeLinejoin={strokeLinejoin}
           fillRule={layer.fillRule}
           shapeRendering="geometricPrecision"
+          style={{ transition: 'fill-opacity 0.2s ease' }}
         />
+        {isVectorEditing && (
+          <path
+            data-testid={`vector-shape-border-${layer.id}`}
+            d={d}
+            fill="none"
+            stroke="#d1d5db"
+            strokeWidth={1 / eff}
+            strokeLinecap={strokeLinecap}
+            strokeLinejoin={strokeLinejoin}
+            shapeRendering="geometricPrecision"
+            style={{ pointerEvents: 'none' }}
+          />
+        )}
       </svg>
     )
   }

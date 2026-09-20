@@ -2,16 +2,19 @@ import { useRef, useState, useEffect } from 'react'
 import {
   X, Upload, Type as TypeIcon, Folder, FolderPlus,
   Component as ComponentIcon, ChevronRight, ChevronLeft, ChevronDown, Plus, Trash2,
-  Lock, Unlock, CircleDot, Diamond, Droplet, PenTool, Spline,
+  Lock, Unlock, CircleDot, Diamond, Droplet, PenTool, Spline, Magnet, Check, CheckSquare,
 } from 'lucide-react'
 import { useEditor } from '#/store/editor'
-import type { ShapeKind, Layer } from '#/types'
+import type { ShapeKind, Layer, VectorPoint } from '#/types'
 import { hasKeyframeAt, getAdjacentKeyframes, interpolateKeyframes } from '#/lib/keyframes'
 import {
   FONTS, PALETTE, GRADIENTS, BG_IMAGES, STOCK_IMAGES, STICKERS, SHAPES,
 } from '#/lib/data'
 import { getLibraryComponents, deleteComponentFromLibrary, type ComponentItem } from '#/lib/groups'
-import { VECTOR_PRESETS, convertShapeToVector, buildSvgPath, tightenVectorLayer } from '#/lib/vector'
+import {
+  VECTOR_PRESETS, convertShapeToVector, buildSvgPath, tightenVectorLayer,
+  createShapeVectorPoints, fitVectorPointsToBounds, getPointBezierMode, switchPointBezierMode,
+} from '#/lib/vector'
 
 const TITLES: Record<string, string> = {
   text: 'Add Text', elements: 'Elements', stickers: 'Stickers', image: 'Image',
@@ -1030,42 +1033,75 @@ function AlignPanel() {
 function ShapePanel() {
   const { l, up } = useSel()
   const { updateLayer, openTool } = useEditor()
+  const isPath = l.type === 'path'
   return (
     <div className="space-y-4 pb-4">
       <Grid cols={3}>
         {SHAPES.map((s) => (
-          <button key={s} data-testid={`swap-shape-${s}`} onClick={() => up({ shape: s })}
+          <button key={s} data-testid={`swap-shape-${s}`} onClick={() => {
+            if (isPath) {
+              const rawPts = createShapeVectorPoints(s, l.w, l.h, l.radius || 0)
+              const pts = fitVectorPointsToBounds(rawPts, s !== 'line', l.w, l.h)
+              up({ points: pts, closed: s !== 'line', shape: s })
+            } else {
+              up({ shape: s })
+            }
+          }}
             className={`flex aspect-square items-center justify-center rounded-2xl border ${l.shape === s ? 'border-accent bg-accent/10' : 'border-line bg-surface2'}`}>
             <ShapeGlyph kind={s} />
           </button>
         ))}
       </Grid>
 
-      <div className="rounded-2xl border border-line bg-surface2/60 p-3.5">
-        <div className="flex items-center justify-between gap-2 mb-2">
-          <div className="flex items-center gap-2">
-            <PenTool className="h-4 w-4 text-accent" />
-            <span className="text-xs font-semibold text-txt1">Convert to Vector Path</span>
+      {!isPath ? (
+        <div className="rounded-2xl border border-line bg-surface2/60 p-3.5">
+          <div className="flex items-center justify-between gap-2 mb-2">
+            <div className="flex items-center gap-2">
+              <PenTool className="h-4 w-4 text-accent" />
+              <span className="text-xs font-semibold text-txt1">Convert to Vector Path</span>
+            </div>
+            <span className="text-[10px] text-txt3 uppercase tracking-wider font-semibold">SVG / Bézier</span>
           </div>
-          <span className="text-[10px] text-txt3 uppercase tracking-wider font-semibold">SVG / Bézier</span>
+          <p className="text-[11px] text-txt3 mb-3 leading-relaxed">
+            Transforms this basic shape into an editable vector element with anchor points and Bézier curve control handles.
+          </p>
+          <button
+            type="button"
+            data-testid="convert-shape-to-vector-btn"
+            onClick={() => {
+              const patch = convertShapeToVector(l)
+              updateLayer(l.id, patch)
+              openTool('vector')
+            }}
+            className="flex w-full items-center justify-center gap-2 rounded-xl bg-accent py-2.5 px-3 text-xs font-semibold text-white shadow-sm transition-all hover:bg-accent/90 active:scale-[0.99]"
+          >
+            <Spline className="h-3.5 w-3.5" />
+            <span>Convert Shape to Vector</span>
+          </button>
         </div>
-        <p className="text-[11px] text-txt3 mb-3 leading-relaxed">
-          Transforms this basic shape into an editable vector element with anchor points and Bézier curve control handles.
-        </p>
-        <button
-          type="button"
-          data-testid="convert-shape-to-vector-btn"
-          onClick={() => {
-            const patch = convertShapeToVector(l)
-            updateLayer(l.id, patch)
-            openTool('vector')
-          }}
-          className="flex w-full items-center justify-center gap-2 rounded-xl bg-accent py-2.5 px-3 text-xs font-semibold text-white shadow-sm transition-all hover:bg-accent/90 active:scale-[0.99]"
-        >
-          <Spline className="h-3.5 w-3.5" />
-          <span>Convert Shape to Vector</span>
-        </button>
-      </div>
+      ) : (
+        <div className="rounded-2xl border border-line bg-surface2/60 p-3.5">
+          <div className="flex items-center justify-between gap-2 mb-2">
+            <div className="flex items-center gap-2">
+              <PenTool className="h-4 w-4 text-accent" />
+              <span className="text-xs font-semibold text-txt1">Vector Point Tools</span>
+            </div>
+            <span className="text-[10px] text-indigo-400 uppercase tracking-wider font-semibold">Vector</span>
+          </div>
+          <p className="text-[11px] text-txt3 mb-3 leading-relaxed">
+            Directly edit anchor points, handles, and curvature using the vector toolbar.
+          </p>
+          <button
+            type="button"
+            data-testid="edit-vector-points-btn"
+            onClick={() => openTool('vector')}
+            className="flex w-full items-center justify-center gap-2 rounded-xl bg-accent py-2.5 px-3 text-xs font-semibold text-white shadow-sm transition-all hover:bg-accent/90 active:scale-[0.99]"
+          >
+            <Spline className="h-3.5 w-3.5" />
+            <span>Edit Anchor Points</span>
+          </button>
+        </div>
+      )}
     </div>
   )
 }
@@ -1400,102 +1436,313 @@ function RadiusPanel() {
   }
 
 
+function BezierMode1Icon() {
+  return (
+    <svg viewBox="0 0 20 20" className="size-4" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+      <line x1="4" y1="15" x2="10" y2="10" strokeDasharray="1.5 1.5" />
+      <line x1="10" y1="10" x2="16" y2="6" strokeDasharray="1.5 1.5" />
+      <circle cx="4" cy="15" r="1.5" fill="currentColor" />
+      <circle cx="16" cy="6" r="1.5" fill="currentColor" />
+      <rect x="8.25" y="8.25" width="3.5" height="3.5" fill="currentColor" />
+    </svg>
+  )
+}
+
+function BezierMode2Icon() {
+  return (
+    <svg viewBox="0 0 20 20" className="size-4" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+      <line x1="3" y1="10" x2="17" y2="10" />
+      <circle cx="3" cy="10" r="1.5" fill="currentColor" />
+      <circle cx="10" cy="10" r="2.25" fill="currentColor" />
+      <circle cx="17" cy="10" r="1.5" fill="currentColor" />
+    </svg>
+  )
+}
+
+function BezierMode3Icon() {
+  return (
+    <svg viewBox="0 0 20 20" className="size-4" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+      <line x1="6" y1="10" x2="17.5" y2="10" />
+      <circle cx="6" cy="10" r="1.5" fill="currentColor" />
+      <circle cx="10" cy="10" r="2.25" fill="currentColor" />
+      <circle cx="17.5" cy="10" r="1.5" fill="currentColor" />
+    </svg>
+  )
+}
+
+function BezierMode4Icon() {
+  return (
+    <svg viewBox="0 0 20 20" className="size-4" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+      <line x1="10" y1="10" x2="4.5" y2="4.5" />
+      <line x1="10" y1="10" x2="15.5" y2="4.5" />
+      <circle cx="4.5" cy="4.5" r="1.5" fill="currentColor" />
+      <circle cx="10" cy="10" r="2.25" fill="currentColor" />
+      <circle cx="15.5" cy="4.5" r="1.5" fill="currentColor" />
+    </svg>
+  )
+}
+
 export function VectorFloatingPanel() {
-  const { selected, tool, updateLayer } = useEditor()
+  const {
+    selected,
+    tool,
+    updateLayer,
+    vectorSnap,
+    toggleVectorSnap,
+    selectedAnchorIndices,
+    setSelectedAnchors,
+    anchorMultiSelectMode,
+    toggleAnchorMultiSelectMode,
+    vectorEditingId,
+    setVectorEditingId,
+  } = useEditor()
   const [expanded, setExpanded] = useState(true)
   const l = selected
   const pts = l?.type === 'path' ? (l.points || []) : []
   const up = (patch: any) => l && updateLayer(l.id, patch)
 
-  if (!l || l.type !== 'path' || tool) return null
-
-  const updatePoint = (idx: number, patch: Partial<NonNullable<typeof pts>[number]>) => {
-    const next = pts.map((point, pointIndex) => pointIndex === idx ? { ...point, ...patch } : point)
-    up({ points: next })
-  }
-
-  const togglePointType = (idx: number) => {
-    const point = pts[idx]
-    if (!point) return
-    const isSmooth = point.cp1 !== undefined || point.cp2 !== undefined
-    if (!isSmooth) {
-      const previous = pts[(idx - 1 + pts.length) % pts.length] || point
-      const next = pts[(idx + 1) % pts.length] || point
-      const dx = (next.x - previous.x) * 0.2
-      const dy = (next.y - previous.y) * 0.2
-      updatePoint(idx, {
-        cp1: { x: Math.round(point.x - dx), y: Math.round(point.y - dy) },
-        cp2: { x: Math.round(point.x + dx), y: Math.round(point.y + dy) },
-      })
-    } else {
-      up({ points: pts.map((item, pointIndex) => pointIndex === idx ? { x: item.x, y: item.y } : item) })
+  useEffect(() => {
+    if (l && vectorEditingId === l.id) {
+      setExpanded(true)
     }
+  }, [vectorEditingId, l?.id])
+
+  if (!l || l.type !== 'path' || tool || vectorEditingId !== l.id) return null
+
+  const validSelected = selectedAnchorIndices.filter((idx) => idx >= 0 && idx < pts.length)
+  const activeAnchorIdx = validSelected.length > 0 ? validSelected[0] : 0
+  const activePoint = pts[activeAnchorIdx]
+  const currentMode = activePoint ? getPointBezierMode(activePoint) : 1
+
+  const handleSetBezierMode = (targetMode: 1 | 2 | 3 | 4) => {
+    if (!pts.length) return
+    const targets = validSelected.length > 0 ? validSelected : [0]
+    const updated = pts.map((pt, i) => {
+      if (!targets.includes(i)) return pt
+      const prev = pts[(i - 1 + pts.length) % pts.length]
+      const next = pts[(i + 1) % pts.length]
+      return switchPointBezierMode(pt, targetMode, prev, next)
+    })
+    const tight = tightenVectorLayer({ ...l, points: updated })
+    up(tight)
   }
 
-  const addPoint = () => {
+  const handleAddAnchor = () => {
     if (pts.length === 0) {
-      up({ points: [{ x: l.w / 2, y: l.h / 2 }] })
+      const tight = tightenVectorLayer({ ...l, points: [{ x: Math.round(l.w / 2), y: Math.round(l.h / 2), mode: 1 }] })
+      up(tight)
+      setSelectedAnchors([0])
       return
     }
-    const last = pts[pts.length - 1]
-    const previous = pts[pts.length - 2] || { x: 0, y: 0 }
-    const x = Math.round(Math.min(l.w, Math.max(0, last.x + (last.x - previous.x || 30))))
-    const y = Math.round(Math.min(l.h, Math.max(0, last.y + (last.y - previous.y || 30))))
-    up({ points: [...pts, { x, y }] })
+
+    const selIdx = validSelected.length > 0 ? validSelected[validSelected.length - 1] : pts.length - 1
+    const currPt = pts[selIdx]
+    const nextIdx = (selIdx + 1) % pts.length
+    const nextPt = pts[nextIdx]
+
+    let newX: number
+    let newY: number
+
+    if (!l.closed && selIdx === pts.length - 1) {
+      const prevPt = pts.length > 1 ? pts[pts.length - 2] : { x: 0, y: 0 }
+      const dx = currPt.x - prevPt.x || 30
+      const dy = currPt.y - prevPt.y || 0
+      newX = Math.round(Math.min(l.w + 60, Math.max(0, currPt.x + dx)))
+      newY = Math.round(Math.min(l.h + 60, Math.max(0, currPt.y + dy)))
+    } else {
+      newX = Math.round((currPt.x + nextPt.x) / 2)
+      newY = Math.round((currPt.y + nextPt.y) / 2)
+    }
+
+    const insertIdx = selIdx + 1
+    const newPt: VectorPoint = { x: newX, y: newY, mode: 1 }
+    const newPoints = [...pts.slice(0, insertIdx), newPt, ...pts.slice(insertIdx)]
+    const tight = tightenVectorLayer({ ...l, points: newPoints })
+    up(tight)
+    setSelectedAnchors([insertIdx])
   }
 
-  const removePoint = (idx: number) => {
-    if (pts.length <= 2) return
-    up({ points: pts.filter((_, pointIndex) => pointIndex !== idx) })
+  const handleDeleteAnchors = () => {
+    const targets = validSelected.length > 0 ? validSelected : [pts.length - 1]
+    if (pts.length - targets.length < 2) return
+
+    const newPoints = pts.filter((_, idx) => !targets.includes(idx))
+    const tight = tightenVectorLayer({ ...l, points: newPoints })
+    up(tight)
+    const nextSel = Math.min(targets[0] ?? 0, newPoints.length - 1)
+    setSelectedAnchors([Math.max(0, nextSel)])
   }
+
+  const canDelete = pts.length - (validSelected.length > 0 ? validSelected.length : 1) >= 2
+
+  const btnClass = 'grid h-8 w-8 place-items-center rounded-full transition-all active:scale-90 focus:outline-none'
+  const inactiveBtnClass = `${btnClass} text-white/70 hover:bg-white/20 hover:text-white`
+  const activeBtnClass = `${btnClass} bg-accent text-white shadow-sm ring-1 ring-accent/60`
 
   return (
     <section
-      aria-label="Vector point tools"
+      role="toolbar"
+      aria-label="Vector toolbar"
       data-testid="floating-vector-panel"
-      className="pointer-events-auto absolute right-3 top-1/2 z-30 -translate-y-1/2 rounded-full border border-white/10 bg-black/60 p-1.5 text-white shadow-lg backdrop-blur-md"
+      className="pointer-events-auto absolute right-3 top-1/2 z-30 -translate-y-1/2 flex w-9 flex-col items-center gap-1 rounded-full border border-white/10 bg-black/60 p-1 text-xs font-semibold text-white shadow-2xl backdrop-blur-md transition-all duration-200"
     >
-      <div className="flex flex-col items-center gap-1">
-        <button type="button" data-testid="floating-vector-toggle" onClick={() => setExpanded((value) => !value)} aria-label={expanded ? 'Collapse vector tools' : 'Expand vector tools'} title={expanded ? 'Collapse vector tools' : 'Expand vector tools'} className="grid size-9 place-items-center rounded-full text-white/80 transition-colors hover:bg-white/15 hover:text-white">
-          {expanded ? <ChevronRight className="size-4" /> : <ChevronLeft className="size-4" />}
-        </button>
-        {expanded && (
-          <>
-            <div className="h-px w-5 bg-white/15" />
-            <button type="button" data-testid="floating-vector-add" onClick={addPoint} aria-label="Add point" title="Add point" className="grid size-9 place-items-center rounded-full bg-accent transition-transform active:scale-95">
-              <Plus className="size-4" />
-            </button>
-            <button type="button" data-testid="floating-vector-toggle-closed" onClick={() => up({ closed: !l.closed })} aria-label={l.closed ? 'Open path' : 'Close path'} title={l.closed ? 'Open path' : 'Close path'} className={`grid size-9 place-items-center rounded-full transition-colors ${l.closed ? 'bg-white/20 text-white' : 'text-white/55 hover:bg-white/10 hover:text-white'}`}>
-              <PenTool className="size-4" />
-            </button>
-            {pts.map((point, idx) => {
-              const smooth = point.cp1 !== undefined || point.cp2 !== undefined
-              return (
-                <div key={idx} className="flex items-center gap-1">
-                  <button type="button" aria-label={`Point ${idx + 1} ${smooth ? 'smooth' : 'sharp'}`} data-testid={`floating-vector-point-type-${idx}`} onClick={() => togglePointType(idx)} className={`grid size-9 place-items-center rounded-full transition-colors ${smooth ? 'bg-accent text-white' : 'text-white/55 hover:bg-white/10 hover:text-white'}`} title={smooth ? 'Smooth point' : 'Sharp point'}>
-                    {smooth ? <Spline className="size-4" /> : <Diamond className="size-4" />}
-                  </button>
-                  <button type="button" aria-label={`Remove point ${idx + 1}`} data-testid={`floating-vector-remove-${idx}`} onClick={() => removePoint(idx)} disabled={pts.length <= 2} className="grid size-9 place-items-center rounded-full text-white/45 transition-colors hover:bg-danger/20 hover:text-danger disabled:pointer-events-none disabled:opacity-20" title="Remove point">
-                    <Trash2 className="size-4" />
-                  </button>
-                </div>
-              )
-            })}
-          </>
-        )}
-      </div>
+      {expanded ? (
+        <div className="flex w-full flex-col items-center gap-1">
+          {/* 1. Bézier mode 1 — Corner / independent handles */}
+          <button
+            type="button"
+            data-testid="vector-bezier-mode-1"
+            onClick={() => handleSetBezierMode(1)}
+            aria-label="Mode 1: Corner / independent handles"
+            title="Mode 1 — Corner / independent handles: incoming and outgoing handles are completely independent."
+            className={currentMode === 1 ? activeBtnClass : inactiveBtnClass}
+          >
+            <BezierMode1Icon />
+          </button>
+
+          {/* 2. Bézier mode 2 — Mirrored */}
+          <button
+            type="button"
+            data-testid="vector-bezier-mode-2"
+            onClick={() => handleSetBezierMode(2)}
+            aria-label="Mode 2: Mirrored handles"
+            title="Mode 2 — Mirrored: collinear, opposite directions, and equal length."
+            className={currentMode === 2 ? activeBtnClass : inactiveBtnClass}
+          >
+            <BezierMode2Icon />
+          </button>
+
+          {/* 3. Bézier mode 3 — Asymmetric smooth */}
+          <button
+            type="button"
+            data-testid="vector-bezier-mode-3"
+            onClick={() => handleSetBezierMode(3)}
+            aria-label="Mode 3: Asymmetric smooth handles"
+            title="Mode 3 — Asymmetric smooth: collinear and opposite directions, independent lengths."
+            className={currentMode === 3 ? activeBtnClass : inactiveBtnClass}
+          >
+            <BezierMode3Icon />
+          </button>
+
+          {/* 4. Bézier mode 4 — Disconnected / free handles */}
+          <button
+            type="button"
+            data-testid="vector-bezier-mode-4"
+            onClick={() => handleSetBezierMode(4)}
+            aria-label="Mode 4: Disconnected / free handles"
+            title="Mode 4 — Disconnected / free handles: independent directions and lengths (cusp)."
+            className={currentMode === 4 ? activeBtnClass : inactiveBtnClass}
+          >
+            <BezierMode4Icon />
+          </button>
+
+          <div className="my-0.5 h-px w-4 bg-white/20" />
+
+          {/* 5. Snap on/off (default on) */}
+          <button
+            type="button"
+            data-testid="vector-snap-toggle"
+            onClick={toggleVectorSnap}
+            aria-label={vectorSnap ? 'Disable snapping' : 'Enable snapping'}
+            title={vectorSnap ? 'Snap: ON (Click to disable)' : 'Snap: OFF (Click to enable)'}
+            className={vectorSnap ? activeBtnClass : inactiveBtnClass}
+          >
+            <Magnet className="size-4" />
+          </button>
+
+          {/* 5b. Multi-select anchor points toggle */}
+          <button
+            type="button"
+            data-testid="vector-multiselect-toggle"
+            onClick={toggleAnchorMultiSelectMode}
+            aria-label={anchorMultiSelectMode ? 'Exit anchor multi-select' : 'Multi-select anchors'}
+            title={anchorMultiSelectMode ? 'Anchor Multi-select: ON (Tap points to add/remove, or hold any point on canvas)' : 'Anchor Multi-select: OFF (Click or hold any anchor point on canvas to activate)'}
+            className={anchorMultiSelectMode ? activeBtnClass : inactiveBtnClass}
+          >
+            <CheckSquare className="size-4" />
+          </button>
+
+          {/* 6. Add new anchor point */}
+          <button
+            type="button"
+            data-testid="vector-add-anchor"
+            onClick={handleAddAnchor}
+            aria-label="Add new anchor point"
+            title="Add new anchor point"
+            className={inactiveBtnClass}
+          >
+            <Plus className="size-4" />
+          </button>
+
+          {/* 7. Delete (deletes selected anchors) */}
+          <button
+            type="button"
+            data-testid="vector-delete-anchor"
+            onClick={handleDeleteAnchors}
+            disabled={!canDelete}
+            aria-label="Delete selected anchors"
+            title={canDelete ? 'Delete selected anchors' : 'Cannot delete (path requires at least 2 points)'}
+            className={`${inactiveBtnClass} disabled:opacity-30 disabled:pointer-events-none hover:text-red-400`}
+          >
+            <Trash2 className="size-4" />
+          </button>
+
+          <div className="my-0.5 h-px w-4 bg-white/20" />
+
+          {/* 8. Open/collapse panel */}
+          <button
+            type="button"
+            data-testid="vector-panel-toggle"
+            onClick={() => setExpanded(false)}
+            aria-label="Collapse panel"
+            title="Collapse panel"
+            className={inactiveBtnClass}
+          >
+            <ChevronRight className="size-4" />
+          </button>
+        </div>
+      ) : (
+        /* Collapsed: tool 8 reopens the panel */
+        <div className="flex flex-col items-center gap-1">
+          <button
+            type="button"
+            data-testid="vector-panel-toggle"
+            onClick={() => setExpanded(true)}
+            aria-label="Open panel"
+            title="Open vector tools panel"
+            className={inactiveBtnClass}
+          >
+            <ChevronLeft className="size-4" />
+          </button>
+          <button
+            type="button"
+            data-testid="vector-panel-done"
+            onClick={() => setVectorEditingId(null)}
+            aria-label="Finish editing vector"
+            title="Done (finish vector editing)"
+            className={`${inactiveBtnClass} text-emerald-400 hover:text-emerald-300`}
+          >
+            <Check className="size-4" />
+          </button>
+        </div>
+      )}
     </section>
   )
 }
 
 function VectorToolPanel() {
-  const { openTool, selected } = useEditor()
+  const { openTool, selected, setVectorEditingId } = useEditor()
+  useEffect(() => {
+    if (selected && selected.type === 'path') {
+      setVectorEditingId(selected.id)
+    }
+  }, [selected?.id, setVectorEditingId])
   if (!selected || selected.type !== 'path') return null
   return (
     <div className="absolute right-3 top-1/2 z-60 -translate-y-1/2" data-testid="vector-tool-panel">
-      <div className="flex flex-col items-center gap-1.5 rounded-full border border-line bg-surface/95 p-1.5 shadow-2xl backdrop-blur-md">
+      <div className="flex w-9 flex-col items-center gap-1 rounded-full border border-white/10 bg-black/60 p-1 text-white shadow-2xl backdrop-blur-md">
         <PanelBody tool="vector" />
-        <button type="button" onClick={() => openTool(null)} aria-label="Close vector tools" title="Close vector tools" className="grid size-9 place-items-center rounded-full text-txt3 transition-colors hover:bg-surface2 hover:text-txt1">
+        <button type="button" onClick={() => openTool(null)} aria-label="Close vector tools" title="Close vector tools" className="grid h-8 w-8 place-items-center rounded-full text-white/70 transition-colors hover:bg-white/20 hover:text-white active:scale-90">
           <X className="size-4" />
         </button>
       </div>
@@ -1505,7 +1752,32 @@ function VectorToolPanel() {
 
 function VectorPanel() {
   const { l, up } = useSel()
+  const { vectorSnap, toggleVectorSnap, selectedAnchorIndices, setSelectedAnchors, vectorEditingId, setVectorEditingId } = useEditor()
   const pts = l.points || []
+
+  useEffect(() => {
+    if (l && l.type === 'path' && vectorEditingId !== l.id) {
+      setVectorEditingId(l.id)
+    }
+  }, [l?.id, vectorEditingId, setVectorEditingId])
+
+  const validSelected = selectedAnchorIndices.filter((idx) => idx >= 0 && idx < pts.length)
+  const activeAnchorIdx = validSelected.length > 0 ? validSelected[0] : 0
+  const activePoint = pts[activeAnchorIdx]
+  const currentMode = activePoint ? getPointBezierMode(activePoint) : 1
+
+  const handleSetBezierMode = (targetMode: 1 | 2 | 3 | 4) => {
+    if (!pts.length) return
+    const targets = validSelected.length > 0 ? validSelected : [0]
+    const updated = pts.map((pt, i) => {
+      if (!targets.includes(i)) return pt
+      const prev = pts[(i - 1 + pts.length) % pts.length]
+      const next = pts[(i + 1) % pts.length]
+      return switchPointBezierMode(pt, targetMode, prev, next)
+    })
+    const tight = tightenVectorLayer({ ...l, points: updated })
+    up(tight)
+  }
 
   const toggleClosed = () => {
     up({ closed: !l.closed })
@@ -1513,72 +1785,156 @@ function VectorPanel() {
 
   const addPoint = () => {
     if (pts.length === 0) {
-      const tight = tightenVectorLayer({ ...l, points: [{ x: l.w * 0.5, y: l.h * 0.5 }] })
+      const tight = tightenVectorLayer({ ...l, points: [{ x: l.w * 0.5, y: l.h * 0.5, mode: 1 }] })
       up(tight)
+      setSelectedAnchors([0])
       return
     }
-    const last = pts[pts.length - 1]
-    const prev = pts.length > 1 ? pts[pts.length - 2] : { x: 0, y: 0 }
-    const nx = Math.round(Math.min(l.w, Math.max(0, last.x + (last.x - prev.x || 30))))
-    const ny = Math.round(Math.min(l.h, Math.max(0, last.y + (last.y - prev.y || 30))))
-    const tight = tightenVectorLayer({ ...l, points: [...pts, { x: nx, y: ny }] })
-    up(tight)
-  }
+    const selIdx = validSelected.length > 0 ? validSelected[validSelected.length - 1] : pts.length - 1
+    const currPt = pts[selIdx]
+    const nextIdx = (selIdx + 1) % pts.length
+    const nextPt = pts[nextIdx]
 
-  const removePoint = (idx: number) => {
-    if (pts.length <= 2) return
-    const updated = pts.filter((_, i) => i !== idx)
-    const tight = tightenVectorLayer({ ...l, points: updated })
-    up(tight)
-  }
+    let newX: number
+    let newY: number
 
-  const toggleSmooth = (idx: number) => {
-    const pt = pts[idx]
-    const isCurved = pt.cp1 !== undefined || pt.cp2 !== undefined
-    const updated = [...pts]
-    if (isCurved) {
-      // Make sharp / linear
-      updated[idx] = { x: pt.x, y: pt.y }
+    if (!l.closed && selIdx === pts.length - 1) {
+      const prevPt = pts.length > 1 ? pts[pts.length - 2] : { x: 0, y: 0 }
+      const dx = currPt.x - prevPt.x || 30
+      const dy = currPt.y - prevPt.y || 0
+      newX = Math.round(Math.min(l.w + 60, Math.max(0, currPt.x + dx)))
+      newY = Math.round(Math.min(l.h + 60, Math.max(0, currPt.y + dy)))
     } else {
-      // Add smooth control handles
-      const prev = pts[(idx - 1 + pts.length) % pts.length]
-      const next = pts[(idx + 1) % pts.length]
-      const dx = (next.x - prev.x) * 0.2
-      const dy = (next.y - prev.y) * 0.2
-      updated[idx] = {
-        x: pt.x,
-        y: pt.y,
-        cp1: { x: Math.round(pt.x - dx), y: Math.round(pt.y - dy) },
-        cp2: { x: Math.round(pt.x + dx), y: Math.round(pt.y + dy) },
-      }
+      newX = Math.round((currPt.x + nextPt.x) / 2)
+      newY = Math.round((currPt.y + nextPt.y) / 2)
     }
+
+    const insertIdx = selIdx + 1
+    const newPt: VectorPoint = { x: newX, y: newY, mode: 1 }
+    const updated = [...pts.slice(0, insertIdx), newPt, ...pts.slice(insertIdx)]
     const tight = tightenVectorLayer({ ...l, points: updated })
     up(tight)
+    setSelectedAnchors([insertIdx])
   }
 
-  const [activePoint, setActivePoint] = useState(0)
-  const point = pts[Math.min(activePoint, Math.max(pts.length - 1, 0))]
-  const hasHandles = point ? point.cp1 !== undefined || point.cp2 !== undefined : false
+  const removePoint = () => {
+    const targets = validSelected.length > 0 ? validSelected : [pts.length - 1]
+    if (pts.length - targets.length < 2) return
+    const updated = pts.filter((_, i) => !targets.includes(i))
+    const tight = tightenVectorLayer({ ...l, points: updated })
+    up(tight)
+    const nextSel = Math.min(targets[0] ?? 0, updated.length - 1)
+    setSelectedAnchors([Math.max(0, nextSel)])
+  }
 
-  const actionClass = 'grid size-9 place-items-center rounded-full text-txt2 transition-colors hover:bg-surface2 hover:text-txt1 active:scale-95 disabled:pointer-events-none disabled:opacity-35'
+  const canDelete = pts.length - (validSelected.length > 0 ? validSelected.length : 1) >= 2
+  const actionClass = 'grid h-8 w-8 place-items-center rounded-full text-white/80 transition-colors hover:bg-white/20 hover:text-white active:scale-90 disabled:pointer-events-none disabled:opacity-30 focus:outline-none'
+  const activeClass = `${actionClass} bg-accent text-white shadow-sm ring-1 ring-accent/60`
+
   return (
     <div className="flex flex-col items-center gap-1">
-      <button type="button" data-testid="add-anchor-point-btn" onClick={addPoint} aria-label="Add anchor point" title="Add anchor point" className={actionClass}>
+      {/* 1. Bézier mode 1 */}
+      <button
+        type="button"
+        data-testid="vector-panel-mode-1"
+        onClick={() => handleSetBezierMode(1)}
+        aria-label="Mode 1: Corner / independent handles"
+        title="Mode 1 — Corner / independent handles"
+        className={currentMode === 1 ? activeClass : actionClass}
+      >
+        <BezierMode1Icon />
+      </button>
+      {/* 2. Bézier mode 2 */}
+      <button
+        type="button"
+        data-testid="vector-panel-mode-2"
+        onClick={() => handleSetBezierMode(2)}
+        aria-label="Mode 2: Mirrored handles"
+        title="Mode 2 — Mirrored handles"
+        className={currentMode === 2 ? activeClass : actionClass}
+      >
+        <BezierMode2Icon />
+      </button>
+      {/* 3. Bézier mode 3 */}
+      <button
+        type="button"
+        data-testid="vector-panel-mode-3"
+        onClick={() => handleSetBezierMode(3)}
+        aria-label="Mode 3: Asymmetric smooth handles"
+        title="Mode 3 — Asymmetric smooth handles"
+        className={currentMode === 3 ? activeClass : actionClass}
+      >
+        <BezierMode3Icon />
+      </button>
+      {/* 4. Bézier mode 4 */}
+      <button
+        type="button"
+        data-testid="vector-panel-mode-4"
+        onClick={() => handleSetBezierMode(4)}
+        aria-label="Mode 4: Disconnected / free handles"
+        title="Mode 4 — Disconnected / free handles (cusp)"
+        className={currentMode === 4 ? activeClass : actionClass}
+      >
+        <BezierMode4Icon />
+      </button>
+      <div className="my-0.5 h-px w-4 bg-white/20" />
+      {/* 5. Snap toggle */}
+      <button
+        type="button"
+        data-testid="vector-panel-snap-toggle"
+        onClick={toggleVectorSnap}
+        aria-label={vectorSnap ? 'Disable snapping' : 'Enable snapping'}
+        title={vectorSnap ? 'Snap: ON' : 'Snap: OFF'}
+        className={vectorSnap ? activeClass : actionClass}
+      >
+        <Magnet className="size-4" />
+      </button>
+      {/* 6. Add anchor point */}
+      <button
+        type="button"
+        data-testid="add-anchor-point-btn"
+        onClick={addPoint}
+        aria-label="Add anchor point"
+        title="Add anchor point"
+        className={actionClass}
+      >
         <Plus className="size-4" />
       </button>
-      <button type="button" data-testid="remove-anchor-point-btn" onClick={() => removePoint(activePoint)} disabled={pts.length <= 2} aria-label="Remove selected anchor point" title="Remove selected anchor point" className={actionClass}>
+      {/* 7. Remove selected anchor point */}
+      <button
+        type="button"
+        data-testid="remove-anchor-point-btn"
+        onClick={removePoint}
+        disabled={!canDelete}
+        aria-label="Remove selected anchor point"
+        title="Remove selected anchor point"
+        className={`${actionClass} hover:text-red-400`}
+      >
         <Trash2 className="size-4" />
       </button>
-      <button type="button" data-testid="toggle-point-type-btn" onClick={() => point && toggleSmooth(activePoint)} disabled={!point} aria-label={hasHandles ? 'Make point sharp' : 'Make point smooth'} title={hasHandles ? 'Sharp point' : 'Smooth point'} className={`${actionClass} ${hasHandles ? 'bg-accent/20 text-accent' : ''}`}>
-        {hasHandles ? <CircleDot className="size-4" /> : <PenTool className="size-4" />}
-      </button>
-      <button type="button" data-testid="vector-toggle-closed" onClick={toggleClosed} disabled={pts.length < 2} aria-label={l.closed ? 'Open path' : 'Close path'} title={l.closed ? 'Open path' : 'Close path'} className={`${actionClass} ${l.closed ? 'bg-accent text-white' : ''}`}>
+      {/* Closed path toggle */}
+      <button
+        type="button"
+        data-testid="vector-toggle-closed"
+        onClick={toggleClosed}
+        disabled={pts.length < 2}
+        aria-label={l.closed ? 'Open path' : 'Close path'}
+        title={l.closed ? 'Open path' : 'Close path'}
+        className={`${actionClass} ${l.closed ? 'bg-accent/40 text-accent' : ''}`}
+      >
         <Spline className="size-4" />
       </button>
-      <div className="my-0.5 h-px w-5 bg-line" />
+      <div className="my-0.5 h-px w-4 bg-white/20" />
       <div className="flex flex-col items-center gap-0.5" aria-label="Select anchor point">
         {pts.map((_, i) => (
-          <button key={i} type="button" onClick={() => setActivePoint(i)} aria-label={`Select anchor point ${i + 1}`} title={`Point ${i + 1}`} className={`size-2 rounded-full transition-colors ${i === activePoint ? 'bg-accent' : 'bg-txt3/50 hover:bg-txt2'}`} />
+          <button
+            key={i}
+            type="button"
+            onClick={() => setSelectedAnchors([i])}
+            aria-label={`Select anchor point ${i + 1}`}
+            title={`Point ${i + 1}`}
+            className={`size-2 rounded-full transition-colors ${validSelected.includes(i) ? 'bg-accent' : 'bg-white/30 hover:bg-white/60'}`}
+          />
         ))}
       </div>
     </div>

@@ -70,6 +70,7 @@ export function scaleVectorPoints(points: VectorPoint[], sx: number, sy: number)
     y: round(p.y * sy),
     cp1: p.cp1 ? { x: round(p.cp1.x * sx), y: round(p.cp1.y * sy) } : undefined,
     cp2: p.cp2 ? { x: round(p.cp2.x * sx), y: round(p.cp2.y * sy) } : undefined,
+    mode: p.mode,
   }))
 }
 
@@ -239,6 +240,7 @@ export function fitVectorPointsToBounds(
           y: round((pt.cp2.y - bbox.minY) * scaleY),
         }
       : undefined,
+    mode: pt.mode,
   }))
 }
 
@@ -280,6 +282,7 @@ export function tightenVectorLayer(layer: Layer): {
     y: round(pt.y - minY),
     cp1: pt.cp1 ? { x: round(pt.cp1.x - minX), y: round(pt.cp1.y - minY) } : undefined,
     cp2: pt.cp2 ? { x: round(pt.cp2.x - minX), y: round(pt.cp2.y - minY) } : undefined,
+    mode: pt.mode,
   }))
 
   return {
@@ -1039,4 +1042,317 @@ export function convertShapeToVector(shapeLayer: Layer): Partial<Layer> {
     strokeWidth: shapeLayer.shape === 'line' ? Math.max(3, shapeLayer.h * 0.12) : 0,
     fillRule: 'nonzero',
   }
+}
+
+/**
+ * Determines the active Bézier mode for a vector point:
+ * 1: Corner / independent handles
+ * 2: Mirrored (collinear, opposite, equal length)
+ * 3: Asymmetric smooth (collinear, opposite, independent lengths)
+ * 4: Disconnected / free handles (cusp)
+ */
+export function getPointBezierMode(pt: VectorPoint): 1 | 2 | 3 | 4 {
+  if (pt.mode) return pt.mode
+  if (!pt.cp1 && !pt.cp2) return 1
+  if (pt.cp1 && pt.cp2) {
+    const v1 = { x: pt.cp1.x - pt.x, y: pt.cp1.y - pt.y }
+    const v2 = { x: pt.cp2.x - pt.x, y: pt.cp2.y - pt.y }
+    const l1 = Math.hypot(v1.x, v1.y)
+    const l2 = Math.hypot(v2.x, v2.y)
+    if (l1 > 0 && l2 > 0) {
+      const dot = (v1.x * v2.x + v1.y * v2.y) / (l1 * l2)
+      // If collinear and opposite directions (dot product close to -1)
+      if (dot < -0.96) {
+        return Math.abs(l1 - l2) <= 3 ? 2 : 3
+      }
+      return 4
+    }
+  }
+  return 1
+}
+
+/**
+ * Switches a point's Bézier mode while preserving the existing handle direction
+ * and length as much as possible.
+ */
+export function switchPointBezierMode(
+  pt: VectorPoint,
+  targetMode: 1 | 2 | 3 | 4,
+  prevPt?: VectorPoint,
+  nextPt?: VectorPoint
+): VectorPoint {
+  const result: VectorPoint = { ...pt, mode: targetMode }
+  const hasCp1 = Boolean(pt.cp1)
+  const hasCp2 = Boolean(pt.cp2)
+
+  // Default tangent computation if no handles exist
+  const getDefaultHandles = () => {
+    const pX = prevPt ? prevPt.x : pt.x - 40
+    const pY = prevPt ? prevPt.y : pt.y
+    const nX = nextPt ? nextPt.x : pt.x + 40
+    const nY = nextPt ? nextPt.y : pt.y
+    const tanX = nX - pX
+    const tanY = nY - pY
+    const tanLen = Math.hypot(tanX, tanY) || 1
+    const defLen = Math.min(80, Math.max(24, Math.round(tanLen * 0.25)))
+    const ux = tanX / tanLen
+    const uy = tanY / tanLen
+    return {
+      cp1: { x: Math.round(pt.x - ux * defLen), y: Math.round(pt.y - uy * defLen) },
+      cp2: { x: Math.round(pt.x + ux * defLen), y: Math.round(pt.y + uy * defLen) },
+      len: defLen,
+      ux,
+      uy,
+    }
+  }
+
+  if (targetMode === 1) {
+    // Mode 1 — Corner / independent handles
+    // Preserves existing handles without altering directions or lengths
+    return result
+  }
+
+  if (targetMode === 2) {
+    // Mode 2 — Mirrored: collinear, exactly opposite, equal length
+    if (!hasCp1 && !hasCp2) {
+      const def = getDefaultHandles()
+      result.cp1 = def.cp1
+      result.cp2 = def.cp2
+      return result
+    }
+
+    if (hasCp1 && hasCp2) {
+      const v1 = { x: pt.cp1!.x - pt.x, y: pt.cp1!.y - pt.y }
+      const v2 = { x: pt.cp2!.x - pt.x, y: pt.cp2!.y - pt.y }
+      const l1 = Math.hypot(v1.x, v1.y)
+      const l2 = Math.hypot(v2.x, v2.y)
+      const avgLen = Math.round((l1 + l2) / 2) || 28
+      // Tangent vector along curve (v2 - v1 points from cp1 through anchor towards cp2)
+      const tX = v2.x - v1.x
+      const tY = v2.y - v1.y
+      const tLen = Math.hypot(tX, tY) || 1
+      const ux = tX / tLen
+      const uy = tY / tLen
+      result.cp2 = { x: Math.round(pt.x + ux * avgLen), y: Math.round(pt.y + uy * avgLen) }
+      result.cp1 = { x: Math.round(pt.x - ux * avgLen), y: Math.round(pt.y - uy * avgLen) }
+    } else if (hasCp2) {
+      const v2 = { x: pt.cp2!.x - pt.x, y: pt.cp2!.y - pt.y }
+      result.cp1 = { x: Math.round(pt.x - v2.x), y: Math.round(pt.y - v2.y) }
+      result.cp2 = { ...pt.cp2! }
+    } else if (hasCp1) {
+      const v1 = { x: pt.cp1!.x - pt.x, y: pt.cp1!.y - pt.y }
+      result.cp2 = { x: Math.round(pt.x - v1.x), y: Math.round(pt.y - v1.y) }
+      result.cp1 = { ...pt.cp1! }
+    }
+    return result
+  }
+
+  if (targetMode === 3) {
+    // Mode 3 — Asymmetric smooth: collinear, opposite, independent lengths
+    if (!hasCp1 && !hasCp2) {
+      const def = getDefaultHandles()
+      result.cp1 = def.cp1
+      result.cp2 = def.cp2
+      return result
+    }
+
+    if (hasCp1 && hasCp2) {
+      const v1 = { x: pt.cp1!.x - pt.x, y: pt.cp1!.y - pt.y }
+      const v2 = { x: pt.cp2!.x - pt.x, y: pt.cp2!.y - pt.y }
+      const l1 = Math.hypot(v1.x, v1.y) || 25
+      const l2 = Math.hypot(v2.x, v2.y) || 25
+      const tX = v2.x - v1.x
+      const tY = v2.y - v1.y
+      const tLen = Math.hypot(tX, tY) || 1
+      const ux = tX / tLen
+      const uy = tY / tLen
+      result.cp2 = { x: Math.round(pt.x + ux * l2), y: Math.round(pt.y + uy * l2) }
+      result.cp1 = { x: Math.round(pt.x - ux * l1), y: Math.round(pt.y - uy * l1) }
+    } else if (hasCp2) {
+      const v2 = { x: pt.cp2!.x - pt.x, y: pt.cp2!.y - pt.y }
+      const l2 = Math.hypot(v2.x, v2.y) || 25
+      const l1 = Math.round(l2 * 0.7) || 20
+      const ux = v2.x / l2
+      const uy = v2.y / l2
+      result.cp1 = { x: Math.round(pt.x - ux * l1), y: Math.round(pt.y - uy * l1) }
+      result.cp2 = { ...pt.cp2! }
+    } else if (hasCp1) {
+      const v1 = { x: pt.cp1!.x - pt.x, y: pt.cp1!.y - pt.y }
+      const l1 = Math.hypot(v1.x, v1.y) || 25
+      const l2 = Math.round(l1 * 0.7) || 20
+      const ux = v1.x / l1
+      const uy = v1.y / l1
+      result.cp2 = { x: Math.round(pt.x - ux * l2), y: Math.round(pt.y - uy * l2) }
+      result.cp1 = { ...pt.cp1! }
+    }
+    return result
+  }
+
+  if (targetMode === 4) {
+    // Mode 4 — Disconnected / free handles: independent directions and lengths
+    if (!hasCp1 && !hasCp2) {
+      const def = getDefaultHandles()
+      result.cp1 = def.cp1
+      result.cp2 = def.cp2
+    }
+    return result
+  }
+
+  return result
+}
+
+/**
+ * Computes updated control handles when one handle is moved, respecting the point's Bézier mode:
+ * - Mode 1 (Corner) or Mode 4 (Disconnected): independent, opposite handle unchanged
+ * - Mode 2 (Mirrored): opposite handle is collinear, opposite direction, equal length
+ * - Mode 3 (Asymmetric): opposite handle is collinear, opposite direction, existing length preserved
+ */
+export function updateHandleWithMode(
+  pt: VectorPoint,
+  cpKey: 'cp1' | 'cp2',
+  newCp: { x: number; y: number }
+): { cp1?: { x: number; y: number }; cp2?: { x: number; y: number } } {
+  const mode = getPointBezierMode(pt)
+  const isCp1 = cpKey === 'cp1'
+  const otherKey = isCp1 ? 'cp2' : 'cp1'
+
+  if (mode === 1 || mode === 4) {
+    return {
+      [cpKey]: newCp,
+      [otherKey]: pt[otherKey],
+    }
+  }
+
+  const deltaX = newCp.x - pt.x
+  const deltaY = newCp.y - pt.y
+  const newLen = Math.hypot(deltaX, deltaY)
+
+  if (mode === 2) {
+    // Mirrored: opposite direction and equal length
+    const opp = {
+      x: Math.round(pt.x - deltaX),
+      y: Math.round(pt.y - deltaY),
+    }
+    return {
+      [cpKey]: newCp,
+      [otherKey]: opp,
+    }
+  }
+
+  if (mode === 3) {
+    // Asymmetric smooth: opposite direction, preserved opposite length
+    if (newLen === 0) {
+      return {
+        [cpKey]: newCp,
+        [otherKey]: pt[otherKey],
+      }
+    }
+    const ux = deltaX / newLen
+    const uy = deltaY / newLen
+    const currentOpp = pt[otherKey]
+    const oppLen = currentOpp ? Math.hypot(currentOpp.x - pt.x, currentOpp.y - pt.y) : newLen
+    const opp = {
+      x: Math.round(pt.x - ux * oppLen),
+      y: Math.round(pt.y - uy * oppLen),
+    }
+    return {
+      [cpKey]: newCp,
+      [otherKey]: opp,
+    }
+  }
+
+  return { [cpKey]: newCp, [otherKey]: pt[otherKey] }
+}
+
+/**
+ * Snaps an anchor point coordinate against other points, layer bounds, and center.
+ */
+export function snapVectorAnchor(
+  x: number,
+  y: number,
+  allPoints: VectorPoint[],
+  currentIdx: number,
+  layerW: number,
+  layerH: number,
+  tolerance = 6
+): { x: number; y: number; snappedX: boolean; snappedY: boolean } {
+  let resX = x
+  let resY = y
+  let snappedX = false
+  let snappedY = false
+
+  // Snap to other anchor points
+  for (let i = 0; i < allPoints.length; i++) {
+    if (i === currentIdx) continue
+    const other = allPoints[i]
+    if (!snappedX && Math.abs(x - other.x) <= tolerance) {
+      resX = other.x
+      snappedX = true
+    }
+    if (!snappedY && Math.abs(y - other.y) <= tolerance) {
+      resY = other.y
+      snappedY = true
+    }
+    if (snappedX && snappedY) break
+  }
+
+  // Snap to layer bounds and center if not already snapped
+  const keyX = [0, Math.round(layerW / 2), layerW]
+  if (!snappedX) {
+    for (const kx of keyX) {
+      if (Math.abs(x - kx) <= tolerance) {
+        resX = kx
+        snappedX = true
+        break
+      }
+    }
+  }
+
+  const keyY = [0, Math.round(layerH / 2), layerH]
+  if (!snappedY) {
+    for (const ky of keyY) {
+      if (Math.abs(y - ky) <= tolerance) {
+        resY = ky
+        snappedY = true
+        break
+      }
+    }
+  }
+
+  return { x: resX, y: resY, snappedX, snappedY }
+}
+
+/**
+ * Snaps a handle point to horizontal, vertical, or 45-degree angle relative to anchor point.
+ */
+export function snapVectorHandle(
+  hx: number,
+  hy: number,
+  anchorX: number,
+  anchorY: number,
+  tolerance = 6
+): { x: number; y: number } {
+  const dx = hx - anchorX
+  const dy = hy - anchorY
+
+  // Horizontal snap
+  if (Math.abs(dy) <= tolerance) {
+    return { x: hx, y: anchorY }
+  }
+  // Vertical snap
+  if (Math.abs(dx) <= tolerance) {
+    return { x: anchorX, y: hy }
+  }
+  // 45-degree diagonal snap
+  const absDx = Math.abs(dx)
+  const absDy = Math.abs(dy)
+  if (Math.abs(absDx - absDy) <= tolerance) {
+    const avg = (absDx + absDy) / 2
+    return {
+      x: Math.round(anchorX + Math.sign(dx) * avg),
+      y: Math.round(anchorY + Math.sign(dy) * avg),
+    }
+  }
+
+  return { x: hx, y: hy }
 }

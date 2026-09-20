@@ -173,7 +173,7 @@ export function newProject(preset: Preset, name?: string): Project {
     id: uid(),
     name: name || 'Untitled Banner',
     preset,
-    background: { type: 'gradient', value: GRADIENTS[0] },
+    background: { type: 'color', value: '#000000' },
     layers: [],
     duration: 5000,
     mode: 'static',
