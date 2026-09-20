@@ -3984,6 +3984,8 @@ export default function Canvas() {
                       const isAnchorSelected = selectedAnchorIndices.includes(pIdx)
                       const pRadius = 5.5 / eff
                       const cRadius = 4.5 / eff
+                      const overlayX = sel.x
+                      const overlayY = sel.y
                       const pts = sel.points!
 
                       const handlePointDrag = (e: React.PointerEvent) => {
@@ -4103,10 +4105,10 @@ export default function Canvas() {
                           {pt.cp1 && (
                             <svg style={{ position: 'absolute', inset: 0, width: '100%', height: '100%', pointerEvents: 'none', overflow: 'visible' }}>
                               <line
-                                x1={pt.x}
-                                y1={pt.y}
-                                x2={pt.cp1.x}
-                                y2={pt.cp1.y}
+                                x1={overlayX + pt.x}
+                                y1={overlayY + pt.y}
+                                x2={overlayX + pt.cp1.x}
+                                y2={overlayY + pt.cp1.y}
                                 stroke="#ec4899"
                                 strokeWidth={1.5 / eff}
                                 strokeDasharray={`${3 / eff} ${3 / eff}`}
@@ -4117,10 +4119,10 @@ export default function Canvas() {
                           {pt.cp2 && (
                             <svg style={{ position: 'absolute', inset: 0, width: '100%', height: '100%', pointerEvents: 'none', overflow: 'visible' }}>
                               <line
-                                x1={pt.x}
-                                y1={pt.y}
-                                x2={pt.cp2.x}
-                                y2={pt.cp2.y}
+                                x1={overlayX + pt.x}
+                                y1={overlayY + pt.y}
+                                x2={overlayX + pt.cp2.x}
+                                y2={overlayY + pt.cp2.y}
                                 stroke="#ec4899"
                                 strokeWidth={1.5 / eff}
                                 strokeDasharray={`${3 / eff} ${3 / eff}`}
@@ -4136,8 +4138,8 @@ export default function Canvas() {
                               onPointerDown={(e) => handleCpDrag('cp1', e)}
                               style={{
                                 position: 'absolute',
-                                left: pt.cp1.x - cRadius,
-                                top: pt.cp1.y - cRadius,
+                                left: overlayX + pt.cp1.x - cRadius,
+                                top: overlayY + pt.cp1.y - cRadius,
                                 width: cRadius * 2,
                                 height: cRadius * 2,
                                 display: 'grid',
@@ -4175,8 +4177,8 @@ export default function Canvas() {
                               onPointerDown={(e) => handleCpDrag('cp2', e)}
                               style={{
                                 position: 'absolute',
-                                left: pt.cp2.x - cRadius,
-                                top: pt.cp2.y - cRadius,
+                                left: overlayX + pt.cp2.x - cRadius,
+                                top: overlayY + pt.cp2.y - cRadius,
                                 width: cRadius * 2,
                                 height: cRadius * 2,
                                 display: 'grid',
@@ -4253,8 +4255,8 @@ export default function Canvas() {
                             }}
                             style={{
                               position: 'absolute',
-                              left: pt.x - pRadius,
-                              top: pt.y - pRadius,
+                              left: overlayX + pt.x - pRadius,
+                              top: overlayY + pt.y - pRadius,
                               width: pRadius * 2,
                               height: pRadius * 2,
                               display: 'grid',
