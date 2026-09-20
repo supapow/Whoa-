@@ -272,10 +272,12 @@ export function tightenVectorLayer(layer: Layer): {
     return { x: layer.x, y: layer.y, w: layer.w, h: layer.h, points: pts }
   }
 
-  const newW = Math.max(10, Math.round(rawW))
-  const newH = Math.max(10, Math.round(rawH))
-  const newX = Math.round(layer.x + minX)
-  const newY = Math.round(layer.y + minY)
+  // Keep sub-pixel geometry here. Rounding the layer origin to whole pixels makes
+  // anchors drift away from the rendered path, especially while zoomed in.
+  const newW = Math.max(10, round(rawW))
+  const newH = Math.max(10, round(rawH))
+  const newX = round(layer.x + minX)
+  const newY = round(layer.y + minY)
 
   const shiftedPoints = pts.map((pt) => ({
     x: round(pt.x - minX),
