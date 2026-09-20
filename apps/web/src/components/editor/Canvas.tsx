@@ -3985,6 +3985,12 @@ export default function Canvas() {
                       const pRadius = 5.5 / eff
                       const cRadius = 4.5 / eff
                       const pts = sel.points!
+                      // Keep the HTML overlay in the same coordinate space as the
+                      // SVG viewBox, even when the measured layer box differs slightly.
+                      const pointScaleX = sel.w > 0 ? boxW / sel.w : 1
+                      const pointScaleY = sel.h > 0 ? boxH / sel.h : 1
+                      const px = (value: number) => value * pointScaleX
+                      const py = (value: number) => value * pointScaleY
 
                       const handlePointDrag = (e: React.PointerEvent) => {
                         e.stopPropagation()
@@ -4103,10 +4109,10 @@ export default function Canvas() {
                           {pt.cp1 && (
                             <svg style={{ position: 'absolute', inset: 0, width: '100%', height: '100%', pointerEvents: 'none', overflow: 'visible' }}>
                               <line
-                                x1={pt.x}
-                                y1={pt.y}
-                                x2={pt.cp1.x}
-                                y2={pt.cp1.y}
+                                x1={px(pt.x)}
+                                y1={py(pt.y)}
+                                x2={px(pt.cp1.x)}
+                                y2={py(pt.cp1.y)}
                                 stroke="#ec4899"
                                 strokeWidth={1.5 / eff}
                                 strokeDasharray={`${3 / eff} ${3 / eff}`}
@@ -4117,10 +4123,10 @@ export default function Canvas() {
                           {pt.cp2 && (
                             <svg style={{ position: 'absolute', inset: 0, width: '100%', height: '100%', pointerEvents: 'none', overflow: 'visible' }}>
                               <line
-                                x1={pt.x}
-                                y1={pt.y}
-                                x2={pt.cp2.x}
-                                y2={pt.cp2.y}
+                                x1={px(pt.x)}
+                                y1={py(pt.y)}
+                                x2={px(pt.cp2.x)}
+                                y2={py(pt.cp2.y)}
                                 stroke="#ec4899"
                                 strokeWidth={1.5 / eff}
                                 strokeDasharray={`${3 / eff} ${3 / eff}`}
@@ -4136,8 +4142,8 @@ export default function Canvas() {
                               onPointerDown={(e) => handleCpDrag('cp1', e)}
                               style={{
                                 position: 'absolute',
-                                left: pt.cp1.x - cRadius,
-                                top: pt.cp1.y - cRadius,
+                                left: px(pt.cp1.x) - cRadius,
+                                top: py(pt.cp1.y) - cRadius,
                                 width: cRadius * 2,
                                 height: cRadius * 2,
                                 display: 'grid',
@@ -4175,8 +4181,8 @@ export default function Canvas() {
                               onPointerDown={(e) => handleCpDrag('cp2', e)}
                               style={{
                                 position: 'absolute',
-                                left: pt.cp2.x - cRadius,
-                                top: pt.cp2.y - cRadius,
+                                left: px(pt.cp2.x) - cRadius,
+                                top: py(pt.cp2.y) - cRadius,
                                 width: cRadius * 2,
                                 height: cRadius * 2,
                                 display: 'grid',
@@ -4253,8 +4259,8 @@ export default function Canvas() {
                             }}
                             style={{
                               position: 'absolute',
-                              left: pt.x - pRadius,
-                              top: pt.y - pRadius,
+                              left: px(pt.x) - pRadius,
+                              top: py(pt.y) - pRadius,
                               width: pRadius * 2,
                               height: pRadius * 2,
                               display: 'grid',
