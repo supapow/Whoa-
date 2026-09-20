@@ -328,7 +328,7 @@ export default function Toolbar({ onExport }: { onExport?: () => void }) {
         active: Boolean(selected.blur && selected.blur > 0),
       },
       { key: 'animate', label: 'Animate', icon: <Wand2 /> },
-      { key: 'dup', label: 'Duplicate', icon: <Copy />, onClick: () => duplicate(selected.id) },
+      { key: 'dup', label: 'Duplicate', icon: <Copy />, onClick: () => duplicate(selected.id, isMulti ? selectedIds : undefined) },
       { key: 'del', label: 'Delete', icon: <Trash2 />, onClick: () => (isMulti ? deleteLayers(selectedIds) : deleteLayer(selected.id)), danger: true },
     ]
 

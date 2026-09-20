@@ -69,7 +69,7 @@ type Action =
   | { t: 'deleteLayer'; id: string }
   | { t: 'deleteLayers'; ids: string[] }
   | { t: 'reorder'; id: string; dir: number }
-  | { t: 'duplicate'; id: string }
+  | { t: 'duplicate'; id?: string; ids?: string[] }
   | { t: 'createGroup'; ids?: string[]; name?: string; isComponent?: boolean }
   | { t: 'ungroup'; groupId: string }
   | { t: 'toggleGroupCollapse'; groupId: string }
@@ -623,15 +623,25 @@ function innerReducer(state: State, a: Action): State {
         tool: null,
       }
     }
-    case 'duplicate': {
-      const { newLayers, newSelectedId } = duplicateLayerOrGroup(p.layers, a.id)
-      return {
-        ...state,
-        project: touch({ ...p, layers: newLayers }),
-        selectedId: newSelectedId,
-        selectedIds: [newSelectedId],
-      }
-    }
+  case 'duplicate': {
+  const targetIds = a.ids?.length ? a.ids : a.id ? [a.id] : []
+  if (targetIds.length === 0) return state
+
+  let layers = p.layers
+  const newSelectedIds: string[] = []
+  for (const targetId of targetIds) {
+  const result = duplicateLayerOrGroup(layers, targetId)
+  layers = result.newLayers
+  newSelectedIds.push(result.newSelectedId)
+  }
+
+  return {
+  ...state,
+  project: touch({ ...p, layers }),
+  selectedId: newSelectedIds.at(-1) ?? null,
+  selectedIds: newSelectedIds,
+  }
+  }
     case 'reorder': {
       const layers = reorderSibling(p.layers, a.id, a.dir)
       return { ...state, project: touch({ ...p, layers }) }
@@ -940,7 +950,7 @@ interface Ctx extends State {
   updateLayers: (ids: string[], patch: Partial<Layer>) => void
   deleteLayer: (id: string) => void
   deleteLayers: (ids: string[]) => void
-  duplicate: (id: string) => void
+  duplicate: (id: string, ids?: string[]) => void
   reorder: (id: string, dir: number) => void
   createGroup: (ids?: string[], name?: string, isComponent?: boolean) => void
   ungroup: (groupId: string) => void
@@ -1014,7 +1024,7 @@ export function EditorProvider({ project, children }: { project: Project; childr
   const updateLayers = useCallback((ids: string[], patch: Partial<Layer>) => dispatch({ t: 'updateLayers', ids, patch }), [])
   const deleteLayer = useCallback((id: string) => dispatch({ t: 'deleteLayer', id }), [])
   const deleteLayers = useCallback((ids: string[]) => dispatch({ t: 'deleteLayers', ids }), [])
-  const duplicate = useCallback((id: string) => dispatch({ t: 'duplicate', id }), [])
+  const duplicate = useCallback((id: string, ids?: string[]) => dispatch({ t: 'duplicate', id, ids }), [])
   const reorder = useCallback((id: string, dir: number) => dispatch({ t: 'reorder', id, dir }), [])
   const createGroup = useCallback((ids?: string[], name?: string, isComponent = false) => dispatch({ t: 'createGroup', ids, name, isComponent }), [])
   const ungroup = useCallback((groupId: string) => dispatch({ t: 'ungroup', groupId }), [])

@@ -2152,52 +2152,66 @@ export default function Canvas() {
         e.preventDefault()
         const [t1, t2] = [e.touches[0], e.touches[1]]
         const startDist = tdist(t1, t2)
-        const targetId = touchSelectionLock.current || gestureStartSelectionRef.current
-        const info = targetId ? getPinchTargetAndItems(targetId) : null
-        if (info) {
-          const targetL = layersRef.current.find((l) => l.id === info.primaryId)
-          const isCroppedImage = targetL?.type === 'image' && Boolean(targetL.crop)
-          if (isCroppedImage && targetL) {
-            updateLayer(targetL.id, {
-              lockProportions: true,
-              aspectRatio: targetL.h > 0 ? targetL.w / targetL.h : 1,
-            })
-          }
-          if (info.measured) {
-            for (const m of info.measured) {
-              const l = layersRef.current.find((candidate) => candidate.id === m.id)
-              if (l?.type === 'image' && l.crop) {
-                updateLayer(l.id, {
-                  lockProportions: true,
-                  aspectRatio: l.h > 0 ? l.w / l.h : 1,
-                })
-              }
-            }
-          }
-          pinch.current = {
-            mode: 'resize',
-            id: info.primaryId,
-            startDist,
-            w0: Math.max(20, info.maxX - info.minX),
-            h0: Math.max(20, info.maxY - info.minY),
-            x0: info.minX,
-            y0: info.minY,
-            fontSize: info.targetLayer.fontSize || 40,
-            group: info.measured,
-            crop0: isCroppedImage && targetL?.crop ? { ...targetL.crop } : undefined,
-            isCroppedImage,
-          }
-        } else {
-          select(null)
-          const m = tmid(t1, t2)
-          const v = viewRef.current
-          const { cx, cy } = center()
+        const m = tmid(t1, t2)
+        const v = viewRef.current
+        const { cx, cy } = center()
+
+        // Vector editing uses the pinch gesture exclusively for viewport navigation.
+        // Resizing the layer here would move the shape instead of helping the user
+        // reach anchors that are currently outside the viewport.
+        if (vectorEditingIdRef.current) {
           pinch.current = {
             mode: 'zoom',
             startDist,
             s0: v.scale,
             lx: (m.x - cx - v.x) / v.scale,
             ly: (m.y - cy - v.y) / v.scale,
+          }
+        } else {
+          const targetId = touchSelectionLock.current || gestureStartSelectionRef.current
+          const info = targetId ? getPinchTargetAndItems(targetId) : null
+          if (info) {
+            const targetL = layersRef.current.find((l) => l.id === info.primaryId)
+            const isCroppedImage = targetL?.type === 'image' && Boolean(targetL.crop)
+            if (isCroppedImage && targetL) {
+              updateLayer(targetL.id, {
+                lockProportions: true,
+                aspectRatio: targetL.h > 0 ? targetL.w / targetL.h : 1,
+              })
+            }
+            if (info.measured) {
+              for (const m of info.measured) {
+                const l = layersRef.current.find((candidate) => candidate.id === m.id)
+                if (l?.type === 'image' && l.crop) {
+                  updateLayer(l.id, {
+                    lockProportions: true,
+                    aspectRatio: l.h > 0 ? l.w / l.h : 1,
+                  })
+                }
+              }
+            }
+            pinch.current = {
+              mode: 'resize',
+              id: info.primaryId,
+              startDist,
+              w0: Math.max(20, info.maxX - info.minX),
+              h0: Math.max(20, info.maxY - info.minY),
+              x0: info.minX,
+              y0: info.minY,
+              fontSize: info.targetLayer.fontSize || 40,
+              group: info.measured,
+              crop0: isCroppedImage && targetL?.crop ? { ...targetL.crop } : undefined,
+              isCroppedImage,
+            }
+          } else {
+            select(null)
+            pinch.current = {
+              mode: 'zoom',
+              startDist,
+              s0: v.scale,
+              lx: (m.x - cx - v.x) / v.scale,
+              ly: (m.y - cy - v.y) / v.scale,
+            }
           }
         }
         pinching.current = true
@@ -3971,6 +3985,12 @@ export default function Canvas() {
                       const pRadius = 5.5 / eff
                       const cRadius = 4.5 / eff
                       const pts = sel.points!
+                      // Keep the HTML overlay in the same coordinate space as the
+                      // SVG viewBox, even when the measured layer box differs slightly.
+                      const pointScaleX = sel.w > 0 ? boxW / sel.w : 1
+                      const pointScaleY = sel.h > 0 ? boxH / sel.h : 1
+                      const px = (value: number) => value * pointScaleX
+                      const py = (value: number) => value * pointScaleY
 
                       const handlePointDrag = (e: React.PointerEvent) => {
                         e.stopPropagation()
@@ -4089,10 +4109,10 @@ export default function Canvas() {
                           {pt.cp1 && (
                             <svg style={{ position: 'absolute', inset: 0, width: '100%', height: '100%', pointerEvents: 'none', overflow: 'visible' }}>
                               <line
-                                x1={pt.x}
-                                y1={pt.y}
-                                x2={pt.cp1.x}
-                                y2={pt.cp1.y}
+                                x1={px(pt.x)}
+                                y1={py(pt.y)}
+                                x2={px(pt.cp1.x)}
+                                y2={py(pt.cp1.y)}
                                 stroke="#ec4899"
                                 strokeWidth={1.5 / eff}
                                 strokeDasharray={`${3 / eff} ${3 / eff}`}
@@ -4103,10 +4123,10 @@ export default function Canvas() {
                           {pt.cp2 && (
                             <svg style={{ position: 'absolute', inset: 0, width: '100%', height: '100%', pointerEvents: 'none', overflow: 'visible' }}>
                               <line
-                                x1={pt.x}
-                                y1={pt.y}
-                                x2={pt.cp2.x}
-                                y2={pt.cp2.y}
+                                x1={px(pt.x)}
+                                y1={py(pt.y)}
+                                x2={px(pt.cp2.x)}
+                                y2={py(pt.cp2.y)}
                                 stroke="#ec4899"
                                 strokeWidth={1.5 / eff}
                                 strokeDasharray={`${3 / eff} ${3 / eff}`}
@@ -4122,8 +4142,8 @@ export default function Canvas() {
                               onPointerDown={(e) => handleCpDrag('cp1', e)}
                               style={{
                                 position: 'absolute',
-                                left: pt.cp1.x - cRadius,
-                                top: pt.cp1.y - cRadius,
+                                left: px(pt.cp1.x) - cRadius,
+                                top: py(pt.cp1.y) - cRadius,
                                 width: cRadius * 2,
                                 height: cRadius * 2,
                                 display: 'grid',
@@ -4161,8 +4181,8 @@ export default function Canvas() {
                               onPointerDown={(e) => handleCpDrag('cp2', e)}
                               style={{
                                 position: 'absolute',
-                                left: pt.cp2.x - cRadius,
-                                top: pt.cp2.y - cRadius,
+                                left: px(pt.cp2.x) - cRadius,
+                                top: py(pt.cp2.y) - cRadius,
                                 width: cRadius * 2,
                                 height: cRadius * 2,
                                 display: 'grid',
@@ -4239,8 +4259,8 @@ export default function Canvas() {
                             }}
                             style={{
                               position: 'absolute',
-                              left: pt.x - pRadius,
-                              top: pt.y - pRadius,
+                              left: px(pt.x) - pRadius,
+                              top: py(pt.y) - pRadius,
                               width: pRadius * 2,
                               height: pRadius * 2,
                               display: 'grid',
@@ -5223,7 +5243,9 @@ function LayerContent({
   }
 
   if (layer.type === 'path') {
-    const d = layer.pathData || (layer.points ? buildSvgPath(layer.points, layer.closed !== false, layer.w, layer.h) : '')
+    // Editable points are the source of truth. Keeping stale pathData first makes
+    // the rendered shape drift away from its anchor handles after vector edits.
+    const d = layer.points ? buildSvgPath(layer.points, layer.closed !== false, layer.w, layer.h) : (layer.pathData || '')
     const fill = layer.fill || 'none'
     const fillOpacity = isVectorEditing && fill !== 'none' ? 0.65 : undefined
     const stroke = layer.stroke || (layer.strokeWidth ? '#007AFF' : undefined)
