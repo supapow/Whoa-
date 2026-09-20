@@ -5237,7 +5237,9 @@ function LayerContent({
   }
 
   if (layer.type === 'path') {
-    const d = layer.pathData || (layer.points ? buildSvgPath(layer.points, layer.closed !== false, layer.w, layer.h) : '')
+    // Editable points are the source of truth. Keeping stale pathData first makes
+    // the rendered shape drift away from its anchor handles after vector edits.
+    const d = layer.points ? buildSvgPath(layer.points, layer.closed !== false, layer.w, layer.h) : (layer.pathData || '')
     const fill = layer.fill || 'none'
     const fillOpacity = isVectorEditing && fill !== 'none' ? 0.65 : undefined
     const stroke = layer.stroke || (layer.strokeWidth ? '#007AFF' : undefined)
