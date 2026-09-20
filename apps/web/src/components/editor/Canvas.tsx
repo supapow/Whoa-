@@ -2152,52 +2152,66 @@ export default function Canvas() {
         e.preventDefault()
         const [t1, t2] = [e.touches[0], e.touches[1]]
         const startDist = tdist(t1, t2)
-        const targetId = touchSelectionLock.current || gestureStartSelectionRef.current
-        const info = targetId ? getPinchTargetAndItems(targetId) : null
-        if (info) {
-          const targetL = layersRef.current.find((l) => l.id === info.primaryId)
-          const isCroppedImage = targetL?.type === 'image' && Boolean(targetL.crop)
-          if (isCroppedImage && targetL) {
-            updateLayer(targetL.id, {
-              lockProportions: true,
-              aspectRatio: targetL.h > 0 ? targetL.w / targetL.h : 1,
-            })
-          }
-          if (info.measured) {
-            for (const m of info.measured) {
-              const l = layersRef.current.find((candidate) => candidate.id === m.id)
-              if (l?.type === 'image' && l.crop) {
-                updateLayer(l.id, {
-                  lockProportions: true,
-                  aspectRatio: l.h > 0 ? l.w / l.h : 1,
-                })
-              }
-            }
-          }
-          pinch.current = {
-            mode: 'resize',
-            id: info.primaryId,
-            startDist,
-            w0: Math.max(20, info.maxX - info.minX),
-            h0: Math.max(20, info.maxY - info.minY),
-            x0: info.minX,
-            y0: info.minY,
-            fontSize: info.targetLayer.fontSize || 40,
-            group: info.measured,
-            crop0: isCroppedImage && targetL?.crop ? { ...targetL.crop } : undefined,
-            isCroppedImage,
-          }
-        } else {
-          select(null)
-          const m = tmid(t1, t2)
-          const v = viewRef.current
-          const { cx, cy } = center()
+        const m = tmid(t1, t2)
+        const v = viewRef.current
+        const { cx, cy } = center()
+
+        // Vector editing uses the pinch gesture exclusively for viewport navigation.
+        // Resizing the layer here would move the shape instead of helping the user
+        // reach anchors that are currently outside the viewport.
+        if (vectorEditingIdRef.current) {
           pinch.current = {
             mode: 'zoom',
             startDist,
             s0: v.scale,
             lx: (m.x - cx - v.x) / v.scale,
             ly: (m.y - cy - v.y) / v.scale,
+          }
+        } else {
+          const targetId = touchSelectionLock.current || gestureStartSelectionRef.current
+          const info = targetId ? getPinchTargetAndItems(targetId) : null
+          if (info) {
+            const targetL = layersRef.current.find((l) => l.id === info.primaryId)
+            const isCroppedImage = targetL?.type === 'image' && Boolean(targetL.crop)
+            if (isCroppedImage && targetL) {
+              updateLayer(targetL.id, {
+                lockProportions: true,
+                aspectRatio: targetL.h > 0 ? targetL.w / targetL.h : 1,
+              })
+            }
+            if (info.measured) {
+              for (const m of info.measured) {
+                const l = layersRef.current.find((candidate) => candidate.id === m.id)
+                if (l?.type === 'image' && l.crop) {
+                  updateLayer(l.id, {
+                    lockProportions: true,
+                    aspectRatio: l.h > 0 ? l.w / l.h : 1,
+                  })
+                }
+              }
+            }
+            pinch.current = {
+              mode: 'resize',
+              id: info.primaryId,
+              startDist,
+              w0: Math.max(20, info.maxX - info.minX),
+              h0: Math.max(20, info.maxY - info.minY),
+              x0: info.minX,
+              y0: info.minY,
+              fontSize: info.targetLayer.fontSize || 40,
+              group: info.measured,
+              crop0: isCroppedImage && targetL?.crop ? { ...targetL.crop } : undefined,
+              isCroppedImage,
+            }
+          } else {
+            select(null)
+            pinch.current = {
+              mode: 'zoom',
+              startDist,
+              s0: v.scale,
+              lx: (m.x - cx - v.x) / v.scale,
+              ly: (m.y - cy - v.y) / v.scale,
+            }
           }
         }
         pinching.current = true
