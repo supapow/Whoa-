@@ -1266,62 +1266,315 @@ export function updateHandleWithMode(
   return { [cpKey]: newCp, [otherKey]: pt[otherKey] }
 }
 
+export type VectorAlignTargetType = 'anchor' | 'center' | 'edge'
+
+export interface VectorAlignMatch {
+  axis: 'x' | 'y'
+  targetType: VectorAlignTargetType
+  coord: number
+  label: string
+  targetIndex?: number
+  targetPoints?: { x: number; y: number }[]
+  startCoord: number
+  endCoord: number
+}
+
+export interface VectorAlignResult {
+  x: number
+  y: number
+  snappedX: boolean
+  snappedY: boolean
+  xMatches: VectorAlignMatch[]
+  yMatches: VectorAlignMatch[]
+}
+
 /**
- * Snaps an anchor point coordinate against other points, layer bounds, and center.
+ * Snaps an anchor point coordinate against other anchor points, layer center lines, and layer edges,
+ * and returns rich visual alignment guide metadata.
  */
 export function snapVectorAnchor(
   x: number,
   y: number,
   allPoints: VectorPoint[],
-  currentIdx: number,
+  currentIdx: number | number[],
   layerW: number,
   layerH: number,
-  tolerance = 6
-): { x: number; y: number; snappedX: boolean; snappedY: boolean } {
-  let resX = x
-  let resY = y
-  let snappedX = false
-  let snappedY = false
+  tolerance = 7
+): VectorAlignResult {
+  const movingIndices = Array.isArray(currentIdx) ? currentIdx : [currentIdx]
 
-  // Snap to other anchor points
+  // Gather stationary points (excluding any points currently moving)
+  const stationaryPoints: { p: VectorPoint; idx: number }[] = []
   for (let i = 0; i < allPoints.length; i++) {
-    if (i === currentIdx) continue
-    const other = allPoints[i]
-    if (!snappedX && Math.abs(x - other.x) <= tolerance) {
-      resX = other.x
-      snappedX = true
+    if (!movingIndices.includes(i)) {
+      stationaryPoints.push({ p: allPoints[i], idx: i })
     }
-    if (!snappedY && Math.abs(y - other.y) <= tolerance) {
-      resY = other.y
-      snappedY = true
-    }
-    if (snappedX && snappedY) break
   }
 
-  // Snap to layer bounds and center if not already snapped
-  const keyX = [0, Math.round(layerW / 2), layerW]
-  if (!snappedX) {
-    for (const kx of keyX) {
-      if (Math.abs(x - kx) <= tolerance) {
-        resX = kx
-        snappedX = true
-        break
+  const centerX = round(layerW / 2)
+  const centerY = round(layerH / 2)
+
+  // Calculate extent for guide lines so they span much longer across the canvas
+  const allXCoords = allPoints.map((pt) => pt.x).concat([x, 0, layerW])
+  const allYCoords = allPoints.map((pt) => pt.y).concat([y, 0, layerH])
+  const minX = Math.min(...allXCoords, 0) - 5000
+  const maxX = Math.max(...allXCoords, layerW) + 5000
+  const minY = Math.min(...allYCoords, 0) - 5000
+  const maxY = Math.max(...allYCoords, layerH) + 5000
+
+  // --------------------------------------------------------------------------
+  // X Candidates (Vertical alignment lines)
+  // --------------------------------------------------------------------------
+  interface Candidate {
+    targetType: VectorAlignTargetType
+    coord: number
+    delta: number
+    distance: number
+    label: string
+    targetIndex?: number
+    targetPoint?: { x: number; y: number }
+  }
+
+  const xCandidates: Candidate[] = []
+
+  // 1. Other anchor points
+  for (const item of stationaryPoints) {
+    const delta = item.p.x - x
+    xCandidates.push({
+      targetType: 'anchor',
+      coord: item.p.x,
+      delta,
+      distance: Math.abs(delta),
+      label: 'Anchor',
+      targetIndex: item.idx,
+      targetPoint: { x: item.p.x, y: item.p.y },
+    })
+  }
+
+  // 2. Shape vertical center line
+  const dCenterX = centerX - x
+  xCandidates.push({
+    targetType: 'center',
+    coord: centerX,
+    delta: dCenterX,
+    distance: Math.abs(dCenterX),
+    label: 'Center',
+  })
+
+  // 3. Shape edges: Left & Right
+  const dLeft = 0 - x
+  xCandidates.push({
+    targetType: 'edge',
+    coord: 0,
+    delta: dLeft,
+    distance: Math.abs(dLeft),
+    label: 'Left Edge',
+  })
+
+  const dRight = layerW - x
+  xCandidates.push({
+    targetType: 'edge',
+    coord: layerW,
+    delta: dRight,
+    distance: Math.abs(dRight),
+    label: 'Right Edge',
+  })
+
+  // --------------------------------------------------------------------------
+  // Y Candidates (Horizontal alignment lines)
+  // --------------------------------------------------------------------------
+  const yCandidates: Candidate[] = []
+
+  // 1. Other anchor points
+  for (const item of stationaryPoints) {
+    const delta = item.p.y - y
+    yCandidates.push({
+      targetType: 'anchor',
+      coord: item.p.y,
+      delta,
+      distance: Math.abs(delta),
+      label: 'Anchor',
+      targetIndex: item.idx,
+      targetPoint: { x: item.p.x, y: item.p.y },
+    })
+  }
+
+  // 2. Shape horizontal center line
+  const dCenterY = centerY - y
+  yCandidates.push({
+    targetType: 'center',
+    coord: centerY,
+    delta: dCenterY,
+    distance: Math.abs(dCenterY),
+    label: 'Center',
+  })
+
+  // 3. Shape edges: Top & Bottom
+  const dTop = 0 - y
+  yCandidates.push({
+    targetType: 'edge',
+    coord: 0,
+    delta: dTop,
+    distance: Math.abs(dTop),
+    label: 'Top Edge',
+  })
+
+  const dBottom = layerH - y
+  yCandidates.push({
+    targetType: 'edge',
+    coord: layerH,
+    delta: dBottom,
+    distance: Math.abs(dBottom),
+    label: 'Bottom Edge',
+  })
+
+  // --------------------------------------------------------------------------
+  // Resolve X Match
+  // --------------------------------------------------------------------------
+  const validX = xCandidates.filter((c) => c.distance <= tolerance).sort((a, b) => a.distance - b.distance)
+  let resX = x
+  let snappedX = false
+  let xMatches: VectorAlignMatch[] = []
+
+  if (validX.length > 0) {
+    const bestX = validX[0]
+    resX = bestX.coord
+    snappedX = true
+
+    // Gather co-located matches within 0.5px
+    const coMatched = validX.filter((c) => Math.abs(c.coord - bestX.coord) < 0.5)
+    const hasCenter = coMatched.some((c) => c.targetType === 'center')
+    const hasEdge = coMatched.some((c) => c.targetType === 'edge')
+    const hasAnchor = coMatched.some((c) => c.targetType === 'anchor')
+
+    let targetType: VectorAlignTargetType = bestX.targetType
+    let label = bestX.label
+
+    if (hasCenter && hasAnchor) {
+      label = 'Center & Anchor'
+      targetType = 'center'
+    } else if (hasEdge && hasAnchor) {
+      const edgeCand = coMatched.find((c) => c.targetType === 'edge')
+      label = `${edgeCand?.label || 'Edge'} & Anchor`
+      targetType = 'edge'
+    } else if (hasCenter) {
+      label = 'Vertical Center'
+      targetType = 'center'
+    } else if (hasEdge) {
+      const edgeCand = coMatched.find((c) => c.targetType === 'edge')
+      label = edgeCand?.label || 'Edge'
+      targetType = 'edge'
+    }
+
+    const tPoints: { x: number; y: number }[] = []
+    for (const c of coMatched) {
+      if (c.targetPoint) {
+        if (!tPoints.some((tp) => Math.abs(tp.x - c.targetPoint!.x) < 0.5 && Math.abs(tp.y - c.targetPoint!.y) < 0.5)) {
+          tPoints.push(c.targetPoint)
+        }
       }
     }
+
+    xMatches = [
+      {
+        axis: 'x',
+        targetType,
+        coord: bestX.coord,
+        label,
+        targetIndex: bestX.targetIndex,
+        targetPoints: tPoints,
+        startCoord: minY,
+        endCoord: maxY,
+      },
+    ]
   }
 
-  const keyY = [0, Math.round(layerH / 2), layerH]
-  if (!snappedY) {
-    for (const ky of keyY) {
-      if (Math.abs(y - ky) <= tolerance) {
-        resY = ky
-        snappedY = true
-        break
+  // --------------------------------------------------------------------------
+  // Resolve Y Match
+  // --------------------------------------------------------------------------
+  const validY = yCandidates.filter((c) => c.distance <= tolerance).sort((a, b) => a.distance - b.distance)
+  let resY = y
+  let snappedY = false
+  let yMatches: VectorAlignMatch[] = []
+
+  if (validY.length > 0) {
+    const bestY = validY[0]
+    resY = bestY.coord
+    snappedY = true
+
+    const coMatched = validY.filter((c) => Math.abs(c.coord - bestY.coord) < 0.5)
+    const hasCenter = coMatched.some((c) => c.targetType === 'center')
+    const hasEdge = coMatched.some((c) => c.targetType === 'edge')
+    const hasAnchor = coMatched.some((c) => c.targetType === 'anchor')
+
+    let targetType: VectorAlignTargetType = bestY.targetType
+    let label = bestY.label
+
+    if (hasCenter && hasAnchor) {
+      label = 'Center & Anchor'
+      targetType = 'center'
+    } else if (hasEdge && hasAnchor) {
+      const edgeCand = coMatched.find((c) => c.targetType === 'edge')
+      label = `${edgeCand?.label || 'Edge'} & Anchor`
+      targetType = 'edge'
+    } else if (hasCenter) {
+      label = 'Horizontal Center'
+      targetType = 'center'
+    } else if (hasEdge) {
+      const edgeCand = coMatched.find((c) => c.targetType === 'edge')
+      label = edgeCand?.label || 'Edge'
+      targetType = 'edge'
+    }
+
+    const tPoints: { x: number; y: number }[] = []
+    for (const c of coMatched) {
+      if (c.targetPoint) {
+        if (!tPoints.some((tp) => Math.abs(tp.x - c.targetPoint!.x) < 0.5 && Math.abs(tp.y - c.targetPoint!.y) < 0.5)) {
+          tPoints.push(c.targetPoint)
+        }
       }
     }
+
+    yMatches = [
+      {
+        axis: 'y',
+        targetType,
+        coord: bestY.coord,
+        label,
+        targetIndex: bestY.targetIndex,
+        targetPoints: tPoints,
+        startCoord: minX,
+        endCoord: maxX,
+      },
+    ]
   }
 
-  return { x: resX, y: resY, snappedX, snappedY }
+  // Include the snapped position of the moving anchor point in targetPoints for indicator pips
+  if (xMatches.length > 0) {
+    xMatches[0].targetPoints = [
+      { x: resX, y: resY },
+      ...(xMatches[0].targetPoints || []).filter(
+        (tp) => Math.abs(tp.x - resX) > 0.5 || Math.abs(tp.y - resY) > 0.5
+      ),
+    ]
+  }
+  if (yMatches.length > 0) {
+    yMatches[0].targetPoints = [
+      { x: resX, y: resY },
+      ...(yMatches[0].targetPoints || []).filter(
+        (tp) => Math.abs(tp.x - resX) > 0.5 || Math.abs(tp.y - resY) > 0.5
+      ),
+    ]
+  }
+
+  return {
+    x: resX,
+    y: resY,
+    snappedX,
+    snappedY,
+    xMatches,
+    yMatches,
+  }
 }
 
 /**
@@ -1358,3 +1611,171 @@ export function snapVectorHandle(
 
   return { x: hx, y: hy }
 }
+
+/**
+ * Deep clones a VectorPoint.
+ */
+export function cloneVectorPoint(pt: VectorPoint): VectorPoint {
+  return {
+    x: pt.x,
+    y: pt.y,
+    cp1: pt.cp1 ? { x: pt.cp1.x, y: pt.cp1.y } : undefined,
+    cp2: pt.cp2 ? { x: pt.cp2.x, y: pt.cp2.y } : undefined,
+    mode: pt.mode,
+  }
+}
+
+/**
+ * Deep clones an array of VectorPoints.
+ */
+export function cloneVectorPoints(pts: VectorPoint[]): VectorPoint[] {
+  return pts.map(cloneVectorPoint)
+}
+
+/**
+ * Subdivides a point list using de Casteljau Bézier curve midpoint splitting
+ * until it matches targetCount, preserving the exact shape contour and curve geometry.
+ */
+export function subdividePointsToCount(points: VectorPoint[], targetCount: number, closed: boolean = true): VectorPoint[] {
+  if (points.length >= targetCount || points.length === 0) {
+    return cloneVectorPoints(points)
+  }
+
+  const result = cloneVectorPoints(points)
+
+  while (result.length < targetCount) {
+    let maxDist = -1
+    let splitIdx = 0
+
+    const numSegments = closed ? result.length : Math.max(1, result.length - 1)
+    for (let i = 0; i < numSegments; i++) {
+      const nextIdx = (i + 1) % result.length
+      const p1 = result[i]
+      const p2 = result[nextIdx]
+      const d = Math.hypot(p2.x - p1.x, p2.y - p1.y)
+      if (d > maxDist) {
+        maxDist = d
+        splitIdx = i
+      }
+    }
+
+    const curr = result[splitIdx]
+    const nextIdx = (splitIdx + 1) % result.length
+    const next = result[nextIdx]
+
+    // Calculate new midpoint
+    let newX = round((curr.x + next.x) / 2)
+    let newY = round((curr.y + next.y) / 2)
+    let newCp1: { x: number; y: number } | undefined = undefined
+    let newCp2: { x: number; y: number } | undefined = undefined
+
+    // If there is curved Bézier geometry between curr and next, perform de Casteljau split at t=0.5
+    if (curr.cp2 || next.cp1) {
+      const p0 = { x: curr.x, y: curr.y }
+      const p1 = curr.cp2 || { x: curr.x, y: curr.y }
+      const p2 = next.cp1 || { x: next.x, y: next.y }
+      const p3 = { x: next.x, y: next.y }
+
+      const q0 = { x: (p0.x + p1.x) / 2, y: (p0.y + p1.y) / 2 }
+      const q1 = { x: (p1.x + p2.x) / 2, y: (p1.y + p2.y) / 2 }
+      const q2 = { x: (p2.x + p3.x) / 2, y: (p2.y + p3.y) / 2 }
+
+      const r0 = { x: (q0.x + q1.x) / 2, y: (q0.y + q1.y) / 2 }
+      const r1 = { x: (q1.x + q2.x) / 2, y: (q1.y + q2.y) / 2 }
+
+      const s = { x: (r0.x + r1.x) / 2, y: (r0.y + r1.y) / 2 }
+
+      curr.cp2 = { x: round(q0.x), y: round(q0.y) }
+      newX = round(s.x)
+      newY = round(s.y)
+      newCp1 = { x: round(r0.x), y: round(r0.y) }
+      newCp2 = { x: round(r1.x), y: round(r1.y) }
+      next.cp1 = { x: round(q2.x), y: round(q2.y) }
+    }
+
+    const newPt: VectorPoint = {
+      x: newX,
+      y: newY,
+      cp1: newCp1,
+      cp2: newCp2,
+      mode: 1,
+    }
+
+    result.splice(splitIdx + 1, 0, newPt)
+  }
+
+  return result
+}
+
+/**
+ * Interpolates smoothly between two arrays of vector points at progress p (0..1).
+ * Handles anchor points, incoming/outgoing control handles, Bézier modes,
+ * and morphs shapes even with different anchor point counts via adaptive subdivision.
+ */
+export function interpolateVectorPoints(
+  pts0: VectorPoint[],
+  pts1: VectorPoint[],
+  p: number,
+  closed: boolean = true
+): VectorPoint[] {
+  if (!pts0 || pts0.length === 0) return pts1 ? cloneVectorPoints(pts1) : []
+  if (!pts1 || pts1.length === 0) return pts0 ? cloneVectorPoints(pts0) : []
+
+  if (p <= 0) return cloneVectorPoints(pts0)
+  if (p >= 1) return cloneVectorPoints(pts1)
+
+  let aPoints = pts0
+  let bPoints = pts1
+
+  if (aPoints.length !== bPoints.length) {
+    const targetLen = Math.max(aPoints.length, bPoints.length)
+    if (aPoints.length < targetLen) {
+      aPoints = subdividePointsToCount(aPoints, targetLen, closed)
+    }
+    if (bPoints.length < targetLen) {
+      bPoints = subdividePointsToCount(bPoints, targetLen, closed)
+    }
+  }
+
+  const count = aPoints.length
+  const result: VectorPoint[] = new Array(count)
+
+  for (let i = 0; i < count; i++) {
+    const a = aPoints[i]
+    const b = bPoints[i]
+
+    const x = round(a.x + (b.x - a.x) * p)
+    const y = round(a.y + (b.y - a.y) * p)
+
+    let cp1: { x: number; y: number } | undefined = undefined
+    if (a.cp1 || b.cp1) {
+      const startCp1 = a.cp1 || { x: a.x, y: a.y }
+      const endCp1 = b.cp1 || { x: b.x, y: b.y }
+      cp1 = {
+        x: round(startCp1.x + (endCp1.x - startCp1.x) * p),
+        y: round(startCp1.y + (endCp1.y - startCp1.y) * p),
+      }
+    }
+
+    let cp2: { x: number; y: number } | undefined = undefined
+    if (a.cp2 || b.cp2) {
+      const startCp2 = a.cp2 || { x: a.x, y: a.y }
+      const endCp2 = b.cp2 || { x: b.x, y: b.y }
+      cp2 = {
+        x: round(startCp2.x + (endCp2.x - startCp2.x) * p),
+        y: round(startCp2.y + (endCp2.y - startCp2.y) * p),
+      }
+    }
+
+    result[i] = {
+      x,
+      y,
+      cp1,
+      cp2,
+      mode: p < 0.5 ? a.mode : b.mode,
+    }
+  }
+
+  return result
+}
+

@@ -1,4 +1,5 @@
 import type { Layer, Keyframe } from '#/types'
+import { cloneVectorPoints, interpolateVectorPoints, buildSvgPath } from './vector'
 
 function uid(): string {
   return Math.random().toString(36).slice(2, 8)
@@ -128,6 +129,7 @@ export function sampleLayerKeyframeState(layer: Layer, time: number, id?: string
     fill: layer.fill,
     radius: layer.radius,
     blur: layer.blur ?? 0,
+    points: layer.points ? cloneVectorPoints(layer.points) : undefined,
   }
 }
 
@@ -191,6 +193,7 @@ export function convertAnimationToKeyframes(
     radius: layer.radius,
     fontSize: layer.fontSize,
     fontWeight: layer.fontWeight,
+    points: layer.points ? cloneVectorPoints(layer.points) : undefined,
   }
 
   const keyframes: Keyframe[] = []
@@ -378,8 +381,11 @@ export function interpolateKeyframes(layer: Layer, time: number): Layer {
     return layer
   }
 
+  const hasPointsKeyframe = kfs.some((kf) => kf.points !== undefined && kf.points.length > 0)
+
   if (kfs.length === 1) {
     const k = kfs[0]
+    const pts = hasPointsKeyframe ? (k.points ? cloneVectorPoints(k.points) : layer.points) : layer.points
     return {
       ...layer,
       x: k.x,
@@ -395,6 +401,8 @@ export function interpolateKeyframes(layer: Layer, time: number): Layer {
       fill: k.fill ?? layer.fill,
       radius: k.radius ?? layer.radius,
       blur: k.blur ?? layer.blur,
+      points: pts,
+      pathData: (layer.type === 'path' && pts) ? buildSvgPath(pts, layer.closed !== false, k.w, k.h) : layer.pathData,
     }
   }
 
@@ -416,6 +424,7 @@ export function interpolateKeyframes(layer: Layer, time: number): Layer {
   // Boundary conditions: before first keyframe or after last keyframe
   const first = kfs[0]
   if (time <= first.time) {
+    const pts = hasPointsKeyframe ? (first.points ? cloneVectorPoints(first.points) : layer.points) : layer.points
     return {
       ...layer,
       x: first.x,
@@ -431,11 +440,14 @@ export function interpolateKeyframes(layer: Layer, time: number): Layer {
       fill: hasFillKeyframe ? getKfFill(first) : layer.fill,
       radius: hasRadiusKeyframe ? getKfRadius(first) : layer.radius,
       blur: hasBlurKeyframe ? getKfBlur(first) : layer.blur,
+      points: pts,
+      pathData: (layer.type === 'path' && pts) ? buildSvgPath(pts, layer.closed !== false, first.w, first.h) : layer.pathData,
     }
   }
 
   const last = kfs[kfs.length - 1]
   if (time >= last.time) {
+    const pts = hasPointsKeyframe ? (last.points ? cloneVectorPoints(last.points) : layer.points) : layer.points
     return {
       ...layer,
       x: last.x,
@@ -451,6 +463,8 @@ export function interpolateKeyframes(layer: Layer, time: number): Layer {
       fill: hasFillKeyframe ? getKfFill(last) : layer.fill,
       radius: hasRadiusKeyframe ? getKfRadius(last) : layer.radius,
       blur: hasBlurKeyframe ? getKfBlur(last) : layer.blur,
+      points: pts,
+      pathData: (layer.type === 'path' && pts) ? buildSvgPath(pts, layer.closed !== false, last.w, last.h) : layer.pathData,
     }
   }
 
@@ -505,6 +519,18 @@ export function interpolateKeyframes(layer: Layer, time: number): Layer {
     ? (lerpColor(getKfFill(k0) || layer.fill, getKfFill(k1) || layer.fill, p) || layer.fill)
     : layer.fill
 
+  // Interpolate vector anchor points
+  let points = layer.points
+  if (hasPointsKeyframe) {
+    const pts0 = k0.points || layer.points
+    const pts1 = k1.points || layer.points
+    if (pts0 && pts1) {
+      points = interpolateVectorPoints(pts0, pts1, p, layer.closed !== false)
+    } else {
+      points = pts1 || pts0 || layer.points
+    }
+  }
+
   return {
     ...layer,
     x,
@@ -520,6 +546,8 @@ export function interpolateKeyframes(layer: Layer, time: number): Layer {
     fill,
     radius,
     blur,
+    points,
+    pathData: (layer.type === 'path' && points) ? buildSvgPath(points, layer.closed !== false, w, h) : layer.pathData,
   }
 }
 
@@ -564,7 +592,7 @@ export function upsertKeyframe(layer: Layer, time: number, customProps?: Partial
   // keyframe 2 has blur 0 + black color).
   if (customProps && existing.length > 0) {
     const animatableKeys: (keyof Keyframe)[] = [
-      'color', 'fill', 'blur', 'opacity', 'radius', 'fontSize', 'fontWeight', 'rotation', 'x', 'y', 'w', 'h', 'scale'
+      'color', 'fill', 'blur', 'opacity', 'radius', 'fontSize', 'fontWeight', 'rotation', 'x', 'y', 'w', 'h', 'scale', 'points'
     ]
 
     for (const key of animatableKeys) {
@@ -584,6 +612,7 @@ export function upsertKeyframe(layer: Layer, time: number, customProps?: Partial
             else if (key === 'y') existing[i].y = layer.y
             else if (key === 'w') existing[i].w = layer.w
             else if (key === 'h') existing[i].h = layer.h
+            else if (key === 'points') existing[i].points = layer.points ? cloneVectorPoints(layer.points) : undefined
           }
         }
       }
@@ -591,9 +620,13 @@ export function upsertKeyframe(layer: Layer, time: number, customProps?: Partial
   }
 
   if (matchIndex >= 0) {
+    const updatedProps = { ...customProps }
+    if (updatedProps.points) {
+      updatedProps.points = cloneVectorPoints(updatedProps.points)
+    }
     existing[matchIndex] = {
       ...existing[matchIndex],
-      ...customProps,
+      ...updatedProps,
     }
   } else {
     // Sample layer's interpolated values at clampedTime
@@ -614,7 +647,17 @@ export function upsertKeyframe(layer: Layer, time: number, customProps?: Partial
       fill: customProps?.fill !== undefined ? customProps.fill : currentSample.fill,
       radius: currentSample.radius,
       blur: customProps?.blur !== undefined ? customProps.blur : (currentSample.blur ?? 0),
+      points: customProps?.points !== undefined
+        ? cloneVectorPoints(customProps.points)
+        : currentSample.points
+          ? cloneVectorPoints(currentSample.points)
+          : layer.points
+            ? cloneVectorPoints(layer.points)
+            : undefined,
       ...customProps,
+    }
+    if (customProps?.points) {
+      newKf.points = cloneVectorPoints(customProps.points)
     }
     existing.push(newKf)
   }

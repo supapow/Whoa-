@@ -33,6 +33,7 @@ export interface Keyframe {
   fill?: string
   radius?: number
   blur?: number
+  points?: VectorPoint[]
 }
 
 export interface Layer {

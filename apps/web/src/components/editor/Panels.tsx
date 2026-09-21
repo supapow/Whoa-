@@ -1689,7 +1689,19 @@ export function VectorFloatingPanel() {
 
           <div className="my-0.5 h-px w-4 bg-white/20" />
 
-          {/* 8. Open/collapse panel */}
+          {/* 8. Done (finish vector editing) */}
+          <button
+            type="button"
+            data-testid="vector-panel-done"
+            onClick={() => setVectorEditingId(null)}
+            aria-label="Finish editing vector"
+            title="Done (finish vector editing)"
+            className={`${inactiveBtnClass} text-emerald-400 hover:text-emerald-300`}
+          >
+            <Check className="size-4" />
+          </button>
+
+          {/* 9. Open/collapse panel */}
           <button
             type="button"
             data-testid="vector-panel-toggle"

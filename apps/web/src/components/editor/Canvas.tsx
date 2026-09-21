@@ -11,6 +11,7 @@ import { interpolateKeyframes } from '#/lib/keyframes'
 import {
   buildSvgPath, scaleVectorPoints, tightenVectorLayer,
   updateHandleWithMode, snapVectorAnchor, snapVectorHandle, switchPointBezierMode,
+  type VectorAlignResult,
 } from '#/lib/vector'
 
 function useSize<T extends HTMLElement>() {
@@ -293,6 +294,7 @@ type Gesture =
       snapAnchorIdx: number
       layerW: number
       layerH: number
+      rotation?: number
       moved: boolean
       deselectOnTap?: boolean
     }
@@ -430,6 +432,8 @@ export default function Canvas() {
   const [gapMatch, setGapMatch] = useState<GapMatchResult | null>(null)
   const [elementAlign, setElementAlign] = useState<ElementAlignResult | null>(null)
   const [rotationSnap, setRotationSnap] = useState<RotationSnapState | null>(null)
+  const [vectorAlign, setVectorAlign] = useState<(VectorAlignResult & { layerId: string }) | null>(null)
+  const vectorAlignNudgeTimer = useRef<number | null>(null)
   const marqueeSession = useRef<{ active: boolean; start: { x: number; y: number }; update?: (event: PointerEvent) => void; finish?: (event: PointerEvent) => void }>({ active: false, start: { x: 0, y: 0 } })
   const marqueeLongPress = useRef<number | null>(null)
   const [pinchActive, setPinchActive] = useState(false)
@@ -481,6 +485,11 @@ export default function Canvas() {
   const anchorHoldTriggered = useRef(false)
   const lastAnchorGestureMoved = useRef(false)
   const [holdingAnchorIdx, setHoldingAnchorIdx] = useState<number | null>(null)
+
+  // Clear vector alignment guides whenever vector editing layer or selected anchors change
+  useEffect(() => {
+    setVectorAlign(null)
+  }, [vectorEditingId, selectedAnchorIndices])
   const tapTrackerRef = useRef<{
     layerId: string
     time: number
@@ -602,13 +611,42 @@ export default function Canvas() {
         if (g.moved) {
           let adx = dx
           let ady = dy
+          if (g.rotation) {
+            const rad = ((g.rotation || 0) * Math.PI) / 180
+            const cos = Math.cos(rad)
+            const sin = Math.sin(rad)
+            adx = dx * cos + dy * sin
+            ady = -dx * sin + dy * cos
+          }
           const snapAnchorIdx = g.snapAnchorIdx
           if (vectorSnapRef.current && g.startPoints[snapAnchorIdx]) {
-            const candX = Math.round(g.startPoints[snapAnchorIdx].x + dx)
-            const candY = Math.round(g.startPoints[snapAnchorIdx].y + dy)
-            const snapped = snapVectorAnchor(candX, candY, g.startPoints, snapAnchorIdx, g.layerW, g.layerH)
+            const candX = Math.round(g.startPoints[snapAnchorIdx].x + adx)
+            const candY = Math.round(g.startPoints[snapAnchorIdx].y + ady)
+            const snapped = snapVectorAnchor(
+              candX,
+              candY,
+              g.startPoints,
+              g.activeSelected,
+              g.layerW,
+              g.layerH
+            )
             adx = snapped.x - g.startPoints[snapAnchorIdx].x
             ady = snapped.y - g.startPoints[snapAnchorIdx].y
+            if (snapped.snappedX || snapped.snappedY) {
+              setVectorAlign({
+                layerId: g.id,
+                x: snapped.x,
+                y: snapped.y,
+                snappedX: snapped.snappedX,
+                snappedY: snapped.snappedY,
+                xMatches: snapped.xMatches,
+                yMatches: snapped.yMatches,
+              })
+            } else {
+              setVectorAlign(null)
+            }
+          } else {
+            setVectorAlign(null)
           }
           const updated = g.startPoints.map((p, idx) => {
             if (!g.activeSelected.includes(idx)) return p
@@ -1675,8 +1713,11 @@ export default function Canvas() {
         if (g.moved) {
           const l = layersRef.current.find((cand) => cand.id === g.id)
           if (l && l.type === 'path' && l.points) {
-            const tight = tightenVectorLayer(l)
-            updateLayer(l.id, tight)
+            const isAnimated = Boolean(l.keyframes && l.keyframes.length > 0)
+            if (!isAnimated) {
+              const tight = tightenVectorLayer(l)
+              updateLayer(l.id, tight)
+            }
           }
           if (g.activeSelected && g.activeSelected.length > 0) {
             setSelectedAnchors(g.activeSelected)
@@ -1691,6 +1732,12 @@ export default function Canvas() {
         }
         gesture.current = null
         panGesture.current = null
+        setVectorAlign(null)
+        setSnapGuides(null)
+        setSizeMatch(null)
+        setGapMatch(null)
+        setElementAlign(null)
+        setRotationSnap(null)
         return
       }
       const moved = g?.mode === 'move' ? g.moved : false
@@ -1737,6 +1784,7 @@ export default function Canvas() {
     setGapMatch(null)
     setElementAlign(null)
     setRotationSnap(null)
+    setVectorAlign(null)
   }
   window.addEventListener('pointermove', move)
     window.addEventListener('pointerup', up)
@@ -1857,8 +1905,38 @@ export default function Canvas() {
                 cp2: p.cp2 ? { x: p.cp2.x + ndx, y: p.cp2.y + ndy } : undefined,
               }
             })
-            const tight = tightenVectorLayer({ ...vLayer, points: updated })
-            updateLayer(vLayer.id, tight)
+            const isAnimated = Boolean(vLayer.keyframes && vLayer.keyframes.length > 0)
+            if (isAnimated) {
+              updateLayer(vLayer.id, { points: updated })
+            } else {
+              const tight = tightenVectorLayer({ ...vLayer, points: updated })
+              updateLayer(vLayer.id, tight)
+            }
+
+            const snapIdx = activeSel[0]
+            if (vLayer.points[snapIdx]) {
+              const candX = vLayer.points[snapIdx].x + ndx
+              const candY = vLayer.points[snapIdx].y + ndy
+              const alignRes = snapVectorAnchor(candX, candY, vLayer.points, activeSel, vLayer.w, vLayer.h, 1)
+              if (alignRes.snappedX || alignRes.snappedY) {
+                setVectorAlign({
+                  layerId: vLayer.id,
+                  x: alignRes.x,
+                  y: alignRes.y,
+                  snappedX: alignRes.snappedX,
+                  snappedY: alignRes.snappedY,
+                  xMatches: alignRes.xMatches,
+                  yMatches: alignRes.yMatches,
+                })
+                if (vectorAlignNudgeTimer.current) window.clearTimeout(vectorAlignNudgeTimer.current)
+                vectorAlignNudgeTimer.current = window.setTimeout(() => {
+                  setVectorAlign(null)
+                  vectorAlignNudgeTimer.current = null
+                }, 1200)
+              } else {
+                setVectorAlign(null)
+              }
+            }
             return
           }
         }
@@ -2370,10 +2448,15 @@ export default function Canvas() {
     )
 
     if (isVectorEditingAnchors && vectorEditLayer && vectorEditLayer.points) {
+      setVectorAlign(null)
       if (e.pointerType === 'touch') {
         e.currentTarget.setPointerCapture?.(e.pointerId)
       }
-      const startPoints = vectorEditLayer.points.map((p) => ({
+      const effVectorLayer = vectorEditLayer.keyframes && vectorEditLayer.keyframes.length > 0
+        ? interpolateKeyframes(vectorEditLayer, time)
+        : vectorEditLayer
+      const effPoints = effVectorLayer.points || vectorEditLayer.points
+      const startPoints = effPoints.map((p) => ({
         ...p,
         cp1: p.cp1 ? { ...p.cp1 } : undefined,
         cp2: p.cp2 ? { ...p.cp2 } : undefined,
@@ -2386,8 +2469,9 @@ export default function Canvas() {
         startPoints,
         activeSelected: [...selectedAnchorIndicesRef.current],
         snapAnchorIdx: selectedAnchorIndicesRef.current[0] ?? 0,
-        layerW: vectorEditLayer.w,
-        layerH: vectorEditLayer.h,
+        layerW: effVectorLayer.w,
+        layerH: effVectorLayer.h,
+        rotation: effVectorLayer.rotation || 0,
         moved: false,
         deselectOnTap: l.id !== vectorEditLayer.id,
       }
@@ -3021,7 +3105,12 @@ export default function Canvas() {
         )
 
         if (isVectorEditingAnchors && vectorEditLayer && vectorEditLayer.points) {
-          const startPoints = vectorEditLayer.points.map((p) => ({
+          setVectorAlign(null)
+          const effVectorLayer = vectorEditLayer.keyframes && vectorEditLayer.keyframes.length > 0
+            ? interpolateKeyframes(vectorEditLayer, time)
+            : vectorEditLayer
+          const effPoints = effVectorLayer.points || vectorEditLayer.points
+          const startPoints = effPoints.map((p) => ({
             ...p,
             cp1: p.cp1 ? { ...p.cp1 } : undefined,
             cp2: p.cp2 ? { ...p.cp2 } : undefined,
@@ -3034,8 +3123,9 @@ export default function Canvas() {
             startPoints,
             activeSelected: [...selectedAnchorIndicesRef.current],
             snapAnchorIdx: selectedAnchorIndicesRef.current[0] ?? 0,
-            layerW: vectorEditLayer.w,
-            layerH: vectorEditLayer.h,
+            layerW: effVectorLayer.w,
+            layerH: effVectorLayer.h,
+            rotation: effVectorLayer.rotation || 0,
             moved: false,
             deselectOnTap: true,
           }
@@ -3662,23 +3752,26 @@ export default function Canvas() {
             }) : undefined
             const isImagePositioning = Boolean(imagePositioningId && imagePositioningId === sel.id && sel.type === 'image')
             const isVectorEditing = Boolean(vectorEditingId && vectorEditingId === sel.id && sel.type === 'path')
+            const effSel = (isVectorEditing && sel.keyframes && sel.keyframes.length > 0)
+              ? interpolateKeyframes(sel, time)
+              : sel
             return (
               <div
                 style={{
                   position: 'absolute',
-                  left: isVectorEditing ? sel.x : bounds.left,
-                  top: isVectorEditing ? sel.y : bounds.top,
-                  width: isVectorEditing ? sel.w : boxW,
-                  height: isVectorEditing ? sel.h : boxH,
-                  transform: (selected.length === 1 && !isGroup && sel.rotation)
-                    ? `rotate(${sel.rotation}deg)`
+                  left: isVectorEditing ? effSel.x : bounds.left,
+                  top: isVectorEditing ? effSel.y : bounds.top,
+                  width: isVectorEditing ? effSel.w : boxW,
+                  height: isVectorEditing ? effSel.h : boxH,
+                  transform: (selected.length === 1 && !isGroup && effSel.rotation)
+                    ? `rotate(${effSel.rotation}deg)`
                     : (rotationSnap?.active && rotationSnap.deltaAngle)
                       ? `rotate(${rotationSnap.deltaAngle}deg)`
                       : undefined,
                   transformOrigin: '50% 50%',
                   border: 'none',
                   pointerEvents: 'none',
-                  zIndex: 60,
+                  zIndex: isVectorEditing ? 100 : 60,
                   boxSizing: 'border-box',
                 }}
               >
@@ -3751,68 +3844,6 @@ export default function Canvas() {
                         cursor: 'pointer',
                         border: 'none',
                         fontWeight: 600,
-                      }}
-                    >
-                      Done
-                    </button>
-                  </div>
-                )}
-                {isVectorEditing && anchorMultiSelectMode && (
-                  <div
-                    data-testid="vector-anchor-multiselect-badge"
-                    onPointerDown={(e) => e.stopPropagation()}
-                    onClick={(e) => e.stopPropagation()}
-                    style={{
-                      position: 'absolute',
-                      top: -38 / eff,
-                      left: '50%',
-                      transform: 'translateX(-50%)',
-                      backgroundColor: '#090d16',
-                      color: '#ffffff',
-                      fontSize: Math.max(11, 12 / eff),
-                      fontWeight: 600,
-                      padding: `${3 / eff}px ${10 / eff}px`,
-                      borderRadius: 9999,
-                      boxShadow: '0 4px 16px rgba(0,0,0,0.5)',
-                      display: 'flex',
-                      alignItems: 'center',
-                      gap: 8 / eff,
-                      whiteSpace: 'nowrap',
-                      pointerEvents: 'auto',
-                      border: '1px solid rgba(59,130,246,0.5)',
-                      zIndex: 90,
-                    }}
-                  >
-                    <span
-                      style={{
-                        width: 7 / eff,
-                        height: 7 / eff,
-                        borderRadius: '50%',
-                        backgroundColor: '#3b82f6',
-                        display: 'inline-block',
-                      }}
-                    />
-                    <span>
-                      {selectedAnchorIndices.length} {selectedAnchorIndices.length === 1 ? 'anchor' : 'anchors'} selected
-                    </span>
-                    <span style={{ opacity: 0.6, fontSize: Math.max(10, 11 / eff) }}>Tap points to toggle</span>
-                    <button
-                      type="button"
-                      data-testid="vector-anchor-multiselect-done-btn"
-                      onClick={(e) => {
-                        e.stopPropagation()
-                        setAnchorMultiSelectMode(false)
-                      }}
-                      style={{
-                        backgroundColor: '#2563eb',
-                        color: '#ffffff',
-                        border: 'none',
-                        borderRadius: 9999,
-                        padding: `${2 / eff}px ${8 / eff}px`,
-                        fontSize: Math.max(10, 11 / eff),
-                        fontWeight: 600,
-                        cursor: 'pointer',
-                        marginLeft: 4 / eff,
                       }}
                     >
                       Done
@@ -3975,129 +4006,139 @@ export default function Canvas() {
                 ))}
 
                 {/* ON-CANVAS VECTOR ANCHOR POINTS & BÉZIER CONTROLS */}
-                {isVectorEditing && sel.points && sel.points.length > 0 && !multiSelectMode && (
-                  <div
-                    data-testid="vector-canvas-points-overlay"
-                    style={{ position: 'absolute', inset: 0, pointerEvents: 'none', zIndex: 70 }}
-                  >
-                    {sel.points.map((pt, pIdx) => {
-                      const isAnchorSelected = selectedAnchorIndices.includes(pIdx)
-                      const pRadius = 5.5 / eff
-                      const cRadius = 4.5 / eff
-                      const hitRadius = Math.max(pRadius, 14 / eff)
-                      const cHitRadius = Math.max(cRadius, 12 / eff)
-                      const pts = sel.points!
+                {isVectorEditing && sel.points && sel.points.length > 0 && !multiSelectMode && (() => {
+                  const isAnimated = Boolean(sel.keyframes && sel.keyframes.length > 0)
+                  const effSel = isAnimated ? interpolateKeyframes(sel, time) : sel
+                  const pts = effSel.points || sel.points!
+                  return (
+                    <div
+                      data-testid="vector-canvas-points-overlay"
+                      style={{ position: 'absolute', inset: 0, pointerEvents: 'none', zIndex: 70 }}
+                    >
+                      {pts.map((pt, pIdx) => {
+                        const isAnchorSelected = selectedAnchorIndices.includes(pIdx)
+                        const pRadius = 5.5 / eff
+                        const cRadius = 4.5 / eff
+                        const hitRadius = Math.max(pRadius, 14 / eff)
+                        const cHitRadius = Math.max(cRadius, 12 / eff)
 
-                      const handlePointDrag = (e: React.PointerEvent) => {
-                        e.stopPropagation()
-                        e.preventDefault()
+                        const handlePointDrag = (e: React.PointerEvent) => {
+                          e.stopPropagation()
+                          e.preventDefault()
 
-                        if (anchorHoldTimer.current) {
-                          window.clearTimeout(anchorHoldTimer.current)
-                          anchorHoldTimer.current = null
-                        }
-                        anchorHoldTriggered.current = false
-                        lastAnchorGestureMoved.current = false
-                        setHoldingAnchorIdx(pIdx)
+                          setVectorAlign(null)
 
-                        // Holding down on any anchor point triggers multi-select mode
-                        anchorHoldTimer.current = window.setTimeout(() => {
-                          anchorHoldTriggered.current = true
-                          anchorHoldTimer.current = null
-                          setHoldingAnchorIdx(null)
-                          setAnchorMultiSelectMode(true)
-                          anchorMultiSelectModeRef.current = true
-
-                          // Ensure the held anchor point is in the multi-selection
-                          const curr = selectedAnchorIndicesRef.current
-                          if (!curr.includes(pIdx)) {
-                            setSelectedAnchors([...curr, pIdx])
+                          if (anchorHoldTimer.current) {
+                            window.clearTimeout(anchorHoldTimer.current)
+                            anchorHoldTimer.current = null
                           }
-                          try {
-                            navigator.vibrate?.(45)
-                          } catch {}
-                          if (gesture.current && gesture.current.mode === 'vector-anchor') {
-                            gesture.current.moved = false
-                          }
-                        }, 400)
+                          anchorHoldTriggered.current = false
+                          lastAnchorGestureMoved.current = false
+                          setHoldingAnchorIdx(pIdx)
 
-                        const target = e.currentTarget as HTMLElement
-                        target.setPointerCapture?.(e.pointerId)
+                          // Holding down on any anchor point triggers multi-select mode
+                          anchorHoldTimer.current = window.setTimeout(() => {
+                            anchorHoldTriggered.current = true
+                            anchorHoldTimer.current = null
+                            setHoldingAnchorIdx(null)
+                            setAnchorMultiSelectMode(true)
+                            anchorMultiSelectModeRef.current = true
 
-                        const isMulti = anchorMultiSelectModeRef.current || e.shiftKey
-                        const currentIndices = selectedAnchorIndicesRef.current
-                        let activeSelected: number[]
-                        if (currentIndices.includes(pIdx)) {
-                          activeSelected = currentIndices.length > 0 ? [...currentIndices] : [pIdx]
-                        } else {
-                          activeSelected = isMulti ? [...currentIndices, pIdx] : [pIdx]
-                        }
+                            // Ensure the held anchor point is in the multi-selection
+                            const curr = selectedAnchorIndicesRef.current
+                            if (!curr.includes(pIdx)) {
+                              setSelectedAnchors([...curr, pIdx])
+                            }
+                            try {
+                              navigator.vibrate?.(45)
+                            } catch {}
+                            if (gesture.current && gesture.current.mode === 'vector-anchor') {
+                              gesture.current.moved = false
+                            }
+                          }, 400)
 
-                        const startPoints = pts.map((p) => ({
-                          ...p,
-                          cp1: p.cp1 ? { ...p.cp1 } : undefined,
-                          cp2: p.cp2 ? { ...p.cp2 } : undefined,
-                        }))
+                          const target = e.currentTarget as HTMLElement
+                          target.setPointerCapture?.(e.pointerId)
 
-                        gesture.current = {
-                          id: sel.id,
-                          mode: 'vector-anchor',
-                          sx: e.clientX,
-                          sy: e.clientY,
-                          startPoints,
-                          activeSelected: [...activeSelected],
-                          snapAnchorIdx: pIdx,
-                          layerW: sel.w,
-                          layerH: sel.h,
-                          moved: false,
-                          deselectOnTap: false,
-                        }
-                      }
-
-                      const handleCpDrag = (cpKey: 'cp1' | 'cp2', e: React.PointerEvent) => {
-                        e.stopPropagation()
-                        e.preventDefault()
-                        const target = e.currentTarget as HTMLElement
-                        target.setPointerCapture?.(e.pointerId)
-                        const origPoint = { ...pts[pIdx] }
-                        const origCp = pts[pIdx][cpKey] || { x: pt.x, y: pt.y }
-                        const startX = e.clientX
-                        const startY = e.clientY
-
-                        const onPointerMove = (ev: PointerEvent) => {
-                          const dx = (ev.clientX - startX) / (scale * view.scale)
-                          const dy = (ev.clientY - startY) / (scale * view.scale)
-                          let newCpX = Math.round(origCp.x + dx)
-                          let newCpY = Math.round(origCp.y + dy)
-
-                          if (vectorSnap) {
-                            const snapped = snapVectorHandle(newCpX, newCpY, pt.x, pt.y)
-                            newCpX = snapped.x
-                            newCpY = snapped.y
+                          const isMulti = anchorMultiSelectModeRef.current || e.shiftKey
+                          const currentIndices = selectedAnchorIndicesRef.current
+                          let activeSelected: number[]
+                          if (currentIndices.includes(pIdx)) {
+                            activeSelected = currentIndices.length > 0 ? [...currentIndices] : [pIdx]
+                          } else {
+                            activeSelected = isMulti ? [...currentIndices, pIdx] : [pIdx]
                           }
 
-                          const handlePatch = updateHandleWithMode(origPoint, cpKey, { x: newCpX, y: newCpY })
-                          const updated = [...pts]
-                          updated[pIdx] = {
-                            ...pts[pIdx],
-                            ...handlePatch,
-                          }
-                          updateLayer(sel.id, { points: updated })
-                        }
+                          const startPoints = pts.map((p) => ({
+                            ...p,
+                            cp1: p.cp1 ? { ...p.cp1 } : undefined,
+                            cp2: p.cp2 ? { ...p.cp2 } : undefined,
+                          }))
 
-                        const onPointerUp = () => {
-                          window.removeEventListener('pointermove', onPointerMove)
-                          window.removeEventListener('pointerup', onPointerUp)
-                          const current = layersRef.current.find((cand) => cand.id === sel.id)
-                          if (current && current.type === 'path' && current.points) {
-                            const tight = tightenVectorLayer(current)
-                            updateLayer(sel.id, tight)
+                          gesture.current = {
+                            id: sel.id,
+                            mode: 'vector-anchor',
+                            sx: e.clientX,
+                            sy: e.clientY,
+                            startPoints,
+                            activeSelected: [...activeSelected],
+                            snapAnchorIdx: pIdx,
+                            layerW: effSel.w,
+                            layerH: effSel.h,
+                            rotation: effSel.rotation || 0,
+                            moved: false,
+                            deselectOnTap: false,
                           }
                         }
 
-                        window.addEventListener('pointermove', onPointerMove)
-                        window.addEventListener('pointerup', onPointerUp)
-                      }
+                        const handleCpDrag = (cpKey: 'cp1' | 'cp2', e: React.PointerEvent) => {
+                          e.stopPropagation()
+                          e.preventDefault()
+                          const target = e.currentTarget as HTMLElement
+                          target.setPointerCapture?.(e.pointerId)
+                          const origPoint = { ...pts[pIdx] }
+                          const origCp = pts[pIdx][cpKey] || { x: pt.x, y: pt.y }
+                          const startX = e.clientX
+                          const startY = e.clientY
+
+                          const onPointerMove = (ev: PointerEvent) => {
+                            const dx = (ev.clientX - startX) / (scale * view.scale)
+                            const dy = (ev.clientY - startY) / (scale * view.scale)
+                            let newCpX = Math.round(origCp.x + dx)
+                            let newCpY = Math.round(origCp.y + dy)
+
+                            if (vectorSnap) {
+                              const snapped = snapVectorHandle(newCpX, newCpY, pt.x, pt.y)
+                              newCpX = snapped.x
+                              newCpY = snapped.y
+                            }
+
+                            const handlePatch = updateHandleWithMode(origPoint, cpKey, { x: newCpX, y: newCpY })
+                            const updated = [...pts]
+                            updated[pIdx] = {
+                              ...pts[pIdx],
+                              ...handlePatch,
+                            }
+                            updateLayer(sel.id, { points: updated })
+                          }
+
+                          const onPointerUp = () => {
+                            window.removeEventListener('pointermove', onPointerMove)
+                            window.removeEventListener('pointerup', onPointerUp)
+                            setVectorAlign(null)
+                            const current = layersRef.current.find((cand) => cand.id === sel.id)
+                            if (current && current.type === 'path' && current.points) {
+                              const isAnim = Boolean(current.keyframes && current.keyframes.length > 0)
+                              if (!isAnim) {
+                                const tight = tightenVectorLayer(current)
+                                updateLayer(sel.id, tight)
+                              }
+                            }
+                          }
+
+                          window.addEventListener('pointermove', onPointerMove)
+                          window.addEventListener('pointerup', onPointerUp)
+                        }
 
                       return (
                         <div key={`vpt-group-${pIdx}`}>
@@ -4213,19 +4254,27 @@ export default function Canvas() {
                           <div
                             data-testid={`vector-anchor-${pIdx}`}
                             onPointerDown={handlePointDrag}
-                            onPointerUp={() => {
+                            onPointerUp={(e) => {
+                              try {
+                                (e.currentTarget as HTMLElement).releasePointerCapture?.(e.pointerId)
+                              } catch {}
                               if (anchorHoldTimer.current) {
                                 window.clearTimeout(anchorHoldTimer.current)
                                 anchorHoldTimer.current = null
                                 setHoldingAnchorIdx(null)
                               }
+                              setVectorAlign(null)
                             }}
-                            onPointerCancel={() => {
+                            onPointerCancel={(e) => {
+                              try {
+                                (e.currentTarget as HTMLElement).releasePointerCapture?.(e.pointerId)
+                              } catch {}
                               if (anchorHoldTimer.current) {
                                 window.clearTimeout(anchorHoldTimer.current)
                                 anchorHoldTimer.current = null
                                 setHoldingAnchorIdx(null)
                               }
+                              setVectorAlign(null)
                             }}
                             onClick={(e) => {
                               e.stopPropagation()
@@ -4250,8 +4299,13 @@ export default function Canvas() {
                               const prev = pts[(pIdx - 1 + pts.length) % pts.length]
                               const next = pts[(pIdx + 1) % pts.length]
                               updated[pIdx] = switchPointBezierMode(pt, hasCp ? 1 : 2, prev, next)
-                              const tight = tightenVectorLayer({ ...sel, points: updated })
-                              updateLayer(sel.id, tight)
+                              const isAnim = Boolean(sel.keyframes && sel.keyframes.length > 0)
+                              if (isAnim) {
+                                updateLayer(sel.id, { points: updated })
+                              } else {
+                                const tight = tightenVectorLayer({ ...sel, points: updated })
+                                updateLayer(sel.id, tight)
+                              }
                             }}
                             style={{
                               position: 'absolute',
@@ -4323,6 +4377,135 @@ export default function Canvas() {
                               )}
                             </svg>
                           </div>
+                        </div>
+                      )
+                    })}
+                  </div>
+                  )
+                })()}
+
+                {/* VECTOR ALIGNMENT SMART GUIDES */}
+                {isVectorEditing && vectorAlign && vectorAlign.layerId === sel.id && (vectorAlign.xMatches.length > 0 || vectorAlign.yMatches.length > 0) && (
+                  <div
+                    data-testid="vector-align-guides"
+                    style={{
+                      position: 'absolute',
+                      inset: 0,
+                      pointerEvents: 'none',
+                      zIndex: 100,
+                      overflow: 'visible',
+                      transform: 'translateZ(0)',
+                      WebkitTransform: 'translateZ(0)',
+                    }}
+                  >
+                    {/* Vertical Alignment Lines (X Matches) */}
+                    {vectorAlign.xMatches.map((m, idx) => {
+                      const strokeColor = '#7e22ce'
+                      const pipR = Math.max(2, 2.5 / eff)
+                      const lineH = Math.max(1, m.endCoord - m.startCoord)
+
+                      return (
+                        <div
+                          key={`vector-align-x-${idx}`}
+                          data-testid={`vector-align-guide-x-${idx}`}
+                          data-align-type={m.targetType}
+                          data-coord={m.coord}
+                          style={{
+                            position: 'absolute',
+                            left: m.coord,
+                            top: m.startCoord,
+                            width: 1,
+                            height: lineH,
+                            transform: 'translateX(-50%) translateZ(0)',
+                            WebkitTransform: 'translateX(-50%) translateZ(0)',
+                            overflow: 'visible',
+                            pointerEvents: 'none',
+                            zIndex: 100,
+                          }}
+                        >
+                          <svg
+                            className="absolute inset-0 overflow-visible pointer-events-none"
+                            style={{ width: '100%', height: '100%' }}
+                          >
+                            <line
+                              data-testid="vector-align-line-x"
+                              x1="50%"
+                              y1={0}
+                              x2="50%"
+                              y2={lineH}
+                              stroke={strokeColor}
+                              strokeWidth={Math.max(0.6, 0.75 / eff)}
+                              shapeRendering="geometricPrecision"
+                            />
+                            {m.targetPoints?.map((pt, pIdx) => (
+                              <circle
+                                key={`x-pip-${pIdx}`}
+                                cx="50%"
+                                cy={pt.y - m.startCoord}
+                                r={pipR}
+                                fill={strokeColor}
+                                stroke="#ffffff"
+                                strokeWidth={0.75 / eff}
+                                shapeRendering="geometricPrecision"
+                              />
+                            ))}
+                          </svg>
+                        </div>
+                      )
+                    })}
+
+                    {/* Horizontal Alignment Lines (Y Matches) */}
+                    {vectorAlign.yMatches.map((m, idx) => {
+                      const strokeColor = '#7e22ce'
+                      const pipR = Math.max(2, 2.5 / eff)
+                      const lineW = Math.max(1, m.endCoord - m.startCoord)
+
+                      return (
+                        <div
+                          key={`vector-align-y-${idx}`}
+                          data-testid={`vector-align-guide-y-${idx}`}
+                          data-align-type={m.targetType}
+                          data-coord={m.coord}
+                          style={{
+                            position: 'absolute',
+                            left: m.startCoord,
+                            top: m.coord,
+                            width: lineW,
+                            height: 1,
+                            transform: 'translateY(-50%) translateZ(0)',
+                            WebkitTransform: 'translateY(-50%) translateZ(0)',
+                            overflow: 'visible',
+                            pointerEvents: 'none',
+                            zIndex: 100,
+                          }}
+                        >
+                          <svg
+                            className="absolute inset-0 overflow-visible pointer-events-none"
+                            style={{ width: '100%', height: '100%' }}
+                          >
+                            <line
+                              data-testid="vector-align-line-y"
+                              x1={0}
+                              y1="50%"
+                              x2={lineW}
+                              y2="50%"
+                              stroke={strokeColor}
+                              strokeWidth={Math.max(0.6, 0.75 / eff)}
+                              shapeRendering="geometricPrecision"
+                            />
+                            {m.targetPoints?.map((pt, pIdx) => (
+                              <circle
+                                key={`y-pip-${pIdx}`}
+                                cx={pt.x - m.startCoord}
+                                cy="50%"
+                                r={pipR}
+                                fill={strokeColor}
+                                stroke="#ffffff"
+                                strokeWidth={0.75 / eff}
+                                shapeRendering="geometricPrecision"
+                              />
+                            ))}
+                          </svg>
                         </div>
                       )
                     })}

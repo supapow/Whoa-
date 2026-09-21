@@ -541,9 +541,11 @@ export default function Toolbar({ onExport }: { onExport?: () => void }) {
     }
   }
 
+  const isVectorEditing = Boolean(vectorEditingId)
+
   return (
     <>
-      {Boolean(selected) && (
+      {Boolean(selected) && !isVectorEditing && (
         <div
           className={`absolute right-3 z-40 flex flex-col items-end gap-2 select-none pointer-events-none transition-[bottom] duration-200 ${
             timelineOpen ? 'bottom-[19.5rem]' : 'bottom-[4.5rem]'

@@ -19,7 +19,7 @@ import {
   removeKeyframeAt,
   upsertKeyframe,
 } from '#/lib/keyframes'
-import { scaleVectorPoints } from '#/lib/vector'
+import { scaleVectorPoints, buildSvgPath } from '#/lib/vector'
 
 export interface HistoryEntry {
   project: Project
@@ -120,11 +120,19 @@ function applyLayerUpdate(l: Layer, patch: Partial<Layer>, currentTime: number):
     }
   }
 
-  // If layer has keyframes and a transform or style property is patched, update/upsert keyframe at currentTime
+  // If points were updated for a path layer, synchronize pathData
+  if (l.type === 'path' && updated.points) {
+    const targetW = updated.w !== undefined ? updated.w : l.w
+    const targetH = updated.h !== undefined ? updated.h : l.h
+    updated.pathData = buildSvgPath(updated.points, updated.closed !== false, targetW, targetH)
+  }
+
+  // If layer has keyframes and a transform, style, or points property is patched, update/upsert keyframe at currentTime
   if (l.keyframes && l.keyframes.length > 0 && !('keyframes' in patch)) {
     const keyframePropKeys = [
       'x', 'y', 'w', 'h', 'rotation', 'opacity',
-      'fontSize', 'fontWeight', 'color', 'fill', 'radius', 'blur'
+      'fontSize', 'fontWeight', 'color', 'fill', 'radius', 'blur',
+      'points'
     ]
     const isKeyframeProp = keyframePropKeys.some((k) => k in patch)
     if (isKeyframeProp) {
