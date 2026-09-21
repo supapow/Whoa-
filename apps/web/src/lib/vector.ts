@@ -84,6 +84,47 @@ function round(n: number): number {
 /**
  * Scales an array of VectorPoints by sx and sy.
  */
+/**
+ * Removes duplicate anchors and anchors that are effectively on a straight segment.
+ * Curved anchors and subpath starts are preserved so font outlines keep their shape.
+ */
+export function simplifyVectorPoints(points: VectorPoint[], tolerance = 0.35): VectorPoint[] {
+  if (!points || points.length < 3) return points || []
+
+  const result: VectorPoint[] = []
+  const distanceToLine = (p: VectorPoint, a: VectorPoint, b: VectorPoint) => {
+    const dx = b.x - a.x
+    const dy = b.y - a.y
+    const length = Math.hypot(dx, dy)
+    if (length < 0.001) return Math.hypot(p.x - a.x, p.y - a.y)
+    return Math.abs(dy * p.x - dx * p.y + b.x * a.y - b.y * a.x) / length
+  }
+
+  for (const point of points) {
+    const previous = result[result.length - 1]
+    if (previous && !point.subpathStart && Math.hypot(point.x - previous.x, point.y - previous.y) <= tolerance && !point.cp1 && !point.cp2) {
+      continue
+    }
+    result.push(point)
+  }
+
+  let changed = true
+  while (changed && result.length > 2) {
+    changed = false
+    for (let i = 1; i < result.length - 1; i += 1) {
+      const point = result[i]
+      if (point.subpathStart || point.cp1 || point.cp2 || result[i + 1].subpathStart) continue
+      if (distanceToLine(point, result[i - 1], result[i + 1]) <= tolerance) {
+        result.splice(i, 1)
+        changed = true
+        break
+      }
+    }
+  }
+
+  return result
+}
+
 export function scaleVectorPoints(points: VectorPoint[], sx: number, sy: number): VectorPoint[] {
   if (!points) return []
   return points.map((p) => ({

@@ -19,7 +19,7 @@ import {
   removeKeyframeAt,
   upsertKeyframe,
 } from '#/lib/keyframes'
-import { scaleVectorPoints, buildSvgPath } from '#/lib/vector'
+import { scaleVectorPoints, buildSvgPath, simplifyVectorPoints } from '#/lib/vector'
 import { convertTextLayerToVectors } from '#/lib/textToVector'
 
 export interface HistoryEntry {
@@ -1015,11 +1015,12 @@ interface Ctx extends State {
   clearKeyframes: (layerId: string) => void
   replaceLayerWithLayers: (targetId: string, newLayers: Layer[], selectId?: string, selectIds?: string[]) => void
   convertTextToVectors: (
-    targetId: string,
-    mode?: 'single' | 'group',
-    options?: { preserveLigatures?: boolean }
+  targetId: string,
+  mode?: 'single' | 'group',
+  options?: { preserveLigatures?: boolean }
   ) => Promise<boolean>
-}
+  simplifyVectorLayer: (targetId: string, tolerance?: number) => void
+  }
 
 const EditorCtx = createContext<Ctx | null>(null)
 
@@ -1160,6 +1161,13 @@ export function EditorProvider({ project, children }: { project: Project; childr
     [state.project.layers],
   )
 
+  const simplifyVectorLayer = useCallback((targetId: string, tolerance = 0.35) => {
+    const layer = state.project.layers.find((l) => l.id === targetId)
+    if (!layer || layer.type !== 'path' || !layer.points) return
+    const points = simplifyVectorPoints(layer.points, tolerance)
+    if (points.length !== layer.points.length) dispatch({ t: 'updateLayer', id: targetId, patch: { points } })
+  }, [state.project.layers])
+
   const addLayer = useCallback(
     (type: LayerType, extra?: Partial<Layer>) => {
       const layer = createLayer(type, state.project.preset, extra)
@@ -1225,6 +1233,7 @@ export function EditorProvider({ project, children }: { project: Project; childr
       clearKeyframes,
       replaceLayerWithLayers,
       convertTextToVectors,
+      simplifyVectorLayer,
     }),
     [
       state,
@@ -1272,6 +1281,7 @@ export function EditorProvider({ project, children }: { project: Project; childr
       clearKeyframes,
       replaceLayerWithLayers,
       convertTextToVectors,
+      simplifyVectorLayer,
     ],
   )
 

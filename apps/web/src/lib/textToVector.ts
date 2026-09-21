@@ -303,7 +303,9 @@ export async function convertTextLayerToVectors(
   const text = textLayer.text || 'Text'
   const fontSize = Math.max(12, textLayer.fontSize || 54)
   const fontFamily = textLayer.fontFamily || 'Manrope'
-  const fontWeight = textLayer.fontWeight || 700
+  // Keep the source weight numeric and pass it through to the font resolver. This prevents
+  // falsy/string values from silently falling back to the default 700 outline.
+  const fontWeight = Math.max(100, Math.min(900, Number(textLayer.fontWeight) || 700))
   const font = await loadFont(fontFamily, fontWeight)
 
   // Configure OpenType features: enable ligatures by default (matching browser text rendering)

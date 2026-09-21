@@ -1,7 +1,7 @@
 import { useRef, useState, useEffect } from 'react'
 import {
   X, Upload, Type as TypeIcon, Folder, FolderPlus,
-  Component as ComponentIcon, ChevronRight, ChevronLeft, ChevronDown, Plus, Trash2,
+  Component as ComponentIcon, ChevronRight, ChevronLeft, ChevronDown, Plus, Trash2, WandSparkles,
   Lock, Unlock, CircleDot, Diamond, Droplet, PenTool, Spline, Magnet, Check, CheckSquare,
 } from 'lucide-react'
 import { useEditor } from '#/store/editor'
@@ -1908,7 +1908,7 @@ function VectorToolPanel() {
 
 function VectorPanel() {
   const { l, up } = useSel()
-  const { vectorSnap, toggleVectorSnap, selectedAnchorIndices, setSelectedAnchors, vectorEditingId, setVectorEditingId } = useEditor()
+  const { vectorSnap, toggleVectorSnap, selectedAnchorIndices, setSelectedAnchors, vectorEditingId, setVectorEditingId, simplifyVectorLayer } = useEditor()
   const pts = l.points || []
 
   useEffect(() => {
@@ -2067,6 +2067,18 @@ function VectorPanel() {
         className={`${actionClass} hover:text-red-400`}
       >
         <Trash2 className="size-4" />
+      </button>
+      {/* Reduce safe, redundant anchors without changing curved segments */}
+      <button
+        type="button"
+        data-testid="simplify-vector-btn"
+        onClick={() => simplifyVectorLayer(l.id)}
+        disabled={pts.length < 3}
+        aria-label="Reduce redundant anchor points"
+        title="Reduce redundant anchor points"
+        className={`${actionClass} hover:text-accent`}
+      >
+        <WandSparkles className="size-4" />
       </button>
       {/* Closed path toggle */}
       <button
