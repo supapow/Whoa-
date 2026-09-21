@@ -8,7 +8,7 @@ import {
   AlignHorizontalDistributeCenter, AlignVerticalDistributeCenter,
   Magnet, ChevronUp, ChevronDown, Lock, Unlock,
   Move, ArrowUpToLine, ArrowDownToLine, ArrowLeftToLine, ArrowRightToLine, Maximize2, Expand,
-  Droplet, PenTool, Download,
+  Droplet, PenTool, Download, Spline,
 } from 'lucide-react'
 import { useEditor, type AlignMode } from '#/store/editor'
 import { parseImagePosition } from '#/lib/imagePosition'
@@ -358,6 +358,13 @@ export default function Toolbar({ onExport }: { onExport?: () => void }) {
         { key: 'color', label: 'Color', icon: <PaintBucket /> },
         { key: 'style', label: 'Style', icon: <Bold /> },
         { key: 'align', label: 'Align', icon: <AlignLeft /> },
+        {
+          key: 'convert-vector',
+          label: 'To Vector',
+          icon: <Spline className="h-4 w-4" />,
+          accent: true,
+          onClick: () => openTool('convertText'),
+        },
         ...common,
       ]
     } else if (selected.type === 'shape') {

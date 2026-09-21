@@ -17,13 +17,33 @@ export function buildSvgPath(
   const sx = (x: number) => (normalized ? x * w : x)
   const sy = (y: number) => (normalized ? y * h : y)
 
-  const p0 = points[0]
-  let d = `M ${round(sx(p0.x))} ${round(sy(p0.y))}`
+  let d = ''
+  let subpathStartIdx = 0
 
-  for (let i = 1; i < points.length; i++) {
-    const prev = points[i - 1]
+  for (let i = 0; i < points.length; i++) {
     const curr = points[i]
+    if (i === 0 || curr.subpathStart) {
+      if (i > 0 && closed && i - subpathStartIdx > 2) {
+        const prev = points[i - 1]
+        const pStart = points[subpathStartIdx]
+        const hasCp1 = prev.cp2 !== undefined
+        const hasCp2 = pStart.cp1 !== undefined
+        if (hasCp1 || hasCp2) {
+          const cp1x = hasCp1 ? sx(prev.cp2!.x) : sx(prev.x)
+          const cp1y = hasCp1 ? sy(prev.cp2!.y) : sy(prev.y)
+          const cp2x = hasCp2 ? sx(pStart.cp1!.x) : sx(pStart.x)
+          const cp2y = hasCp2 ? sy(pStart.cp1!.y) : sy(pStart.y)
+          d += ` C ${round(cp1x)} ${round(cp1y)}, ${round(cp2x)} ${round(cp2y)}, ${round(sx(pStart.x))} ${round(sy(pStart.y))} Z`
+        } else {
+          d += ' Z'
+        }
+      }
+      subpathStartIdx = i
+      d += (d ? ' ' : '') + `M ${round(sx(curr.x))} ${round(sy(curr.y))}`
+      continue
+    }
 
+    const prev = points[i - 1]
     const hasCp1 = prev.cp2 !== undefined
     const hasCp2 = curr.cp1 !== undefined
 
@@ -38,16 +58,17 @@ export function buildSvgPath(
     }
   }
 
-  if (closed && points.length > 2) {
+  if (closed && points.length - subpathStartIdx > 2) {
     const last = points[points.length - 1]
+    const pStart = points[subpathStartIdx]
     const hasCp1 = last.cp2 !== undefined
-    const hasCp2 = p0.cp1 !== undefined
+    const hasCp2 = pStart.cp1 !== undefined
     if (hasCp1 || hasCp2) {
       const cp1x = hasCp1 ? sx(last.cp2!.x) : sx(last.x)
       const cp1y = hasCp1 ? sy(last.cp2!.y) : sy(last.y)
-      const cp2x = hasCp2 ? sx(p0.cp1!.x) : sx(p0.x)
-      const cp2y = hasCp2 ? sy(p0.cp1!.y) : sy(p0.y)
-      d += ` C ${round(cp1x)} ${round(cp1y)}, ${round(cp2x)} ${round(cp2y)}, ${round(sx(p0.x))} ${round(sy(p0.y))} Z`
+      const cp2x = hasCp2 ? sx(pStart.cp1!.x) : sx(pStart.x)
+      const cp2y = hasCp2 ? sy(pStart.cp1!.y) : sy(pStart.y)
+      d += ` C ${round(cp1x)} ${round(cp1y)}, ${round(cp2x)} ${round(cp2y)}, ${round(sx(pStart.x))} ${round(sy(pStart.y))} Z`
     } else {
       d += ' Z'
     }

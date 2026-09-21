@@ -9,5 +9,11 @@
     "build": "npm run build --workspace=apps/web && cp -r apps/web/dist ./dist",
     "preview": "npm run preview --workspace=apps/web",
     "lint": "node ./apps/web/node_modules/typescript/bin/tsc --noEmit --project apps/web/tsconfig.json"
+  },
+  "dependencies": {
+    "opentype.js": "^2.0.0"
+  },
+  "devDependencies": {
+    "@types/opentype.js": "^1.3.10"
   }
 }

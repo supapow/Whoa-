@@ -8,6 +8,7 @@ export interface VectorPoint {
   cp1?: { x: number; y: number } // incoming control handle
   cp2?: { x: number; y: number } // outgoing control handle
   mode?: 1 | 2 | 3 | 4 // Bézier Mode: 1 (Corner/independent), 2 (Mirrored), 3 (Asymmetric smooth), 4 (Disconnected/free)
+  subpathStart?: boolean // if true, begins a new subpath (M command)
 }
 
 export interface Background {

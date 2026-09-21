@@ -24,6 +24,7 @@ const TITLES: Record<string, string> = {
   style: 'Text Style', align: 'Alignment', shape: 'Shape', radius: 'Corner Radius',
   animate: 'Animation', mask: 'Mask & Cut', crop: 'Crop',
   vector: 'Vector Path & Béziers',
+  convertText: 'Convert Text to Vector',
 }
 
 export default function ToolSheet() {
@@ -50,7 +51,7 @@ export default function ToolSheet() {
 
 function PanelBody({ tool }: { tool: string }) {
   const { selected } = useEditor()
-  const needsLayer = ['font', 'color', 'blur', 'style', 'align', 'shape', 'radius', 'animate', 'mask', 'crop', 'vector']
+  const needsLayer = ['font', 'color', 'blur', 'style', 'align', 'shape', 'radius', 'animate', 'mask', 'crop', 'vector', 'convertText']
   if (needsLayer.includes(tool) && !selected) {
     return <MockPanel text="Select a layer on the canvas first." />
   }
@@ -66,6 +67,7 @@ function PanelBody({ tool }: { tool: string }) {
     case 'color': return <ColorPanel />
     case 'blur': return <BlurPanel />
     case 'style': return <StylePanel />
+    case 'convertText': return <ConvertTextPanel />
     case 'align': return <AlignPanel />
     case 'shape': return <ShapePanel />
     case 'radius': return <RadiusPanel />
@@ -757,6 +759,7 @@ function useSel() {
 
 function FontPanel() {
   const { l, up } = useSel()
+  const { openTool } = useEditor()
   return (
     <div className="space-y-2 pb-4">
       {FONTS.map((f) => (
@@ -767,6 +770,18 @@ function FontPanel() {
           <span className="text-txt3">Ag</span>
         </button>
       ))}
+
+      <div className="pt-2">
+        <button
+          type="button"
+          data-testid="font-convert-vector-btn"
+          onClick={() => openTool('convertText')}
+          className="flex w-full items-center justify-center gap-2 rounded-xl border border-accent/40 bg-accent/10 py-3 text-xs font-semibold text-accent hover:bg-accent/20 transition-all active:scale-98 cursor-pointer"
+        >
+          <Spline className="h-4 w-4" />
+          <span>Convert Text to Vector Paths</span>
+        </button>
+      </div>
     </div>
   )
 }
@@ -1008,13 +1023,128 @@ function Slider({ label, value, min, max, step = 1, onChange, tid, suffix = '' }
   )
 }
 
+function ConvertTextSection({ layer }: { layer: Layer }) {
+  const { convertTextToVectors, openTool } = useEditor()
+  const [loadingMode, setLoadingMode] = useState<'single' | 'group' | null>(null)
+  const [errorMsg, setErrorMsg] = useState<string | null>(null)
+
+  const handleConvert = async (mode: 'single' | 'group') => {
+    setLoadingMode(mode)
+    setErrorMsg(null)
+    try {
+      const success = await convertTextToVectors(layer.id, mode)
+      if (success) {
+        openTool(null)
+      } else {
+        setErrorMsg('Could not convert text. Check font or characters.')
+      }
+    } catch (err) {
+      console.error(err)
+      setErrorMsg('Conversion failed. Please try again.')
+    } finally {
+      setLoadingMode(null)
+    }
+  }
+
+  return (
+    <div className="mt-4 rounded-2xl border border-line bg-surface2/70 p-4" data-testid="convert-text-section">
+      <div className="flex items-center justify-between mb-2">
+        <div className="flex items-center gap-2">
+          <div className="grid h-7 w-7 place-items-center rounded-lg bg-accent/15 text-accent">
+            <Spline className="h-4 w-4" />
+          </div>
+          <div>
+            <h4 className="text-xs font-semibold text-txt">Convert to Vectors</h4>
+            <p className="text-[10px] text-txt3">Turn text glyphs into editable Bézier paths</p>
+          </div>
+        </div>
+        <span className="rounded-md bg-accent/10 px-2 py-0.5 text-[10px] font-semibold text-accent">
+          OpenType
+        </span>
+      </div>
+
+      <p className="text-[11px] text-txt2 mb-3 leading-relaxed">
+        Transform letters into vector curves with adjustable anchor points and directional handles.
+      </p>
+
+      {errorMsg && (
+        <div className="mb-3 rounded-xl border border-danger/30 bg-danger/10 p-2 text-xs text-danger">
+          {errorMsg}
+        </div>
+      )}
+
+      <div className="grid grid-cols-2 gap-2">
+        <button
+          type="button"
+          data-testid="convert-text-single-btn"
+          disabled={loadingMode !== null}
+          onClick={() => handleConvert('single')}
+          className="flex flex-col items-center justify-center rounded-xl border border-accent/40 bg-accent/15 hover:bg-accent/25 p-3 text-center transition-all active:scale-95 disabled:opacity-50 cursor-pointer"
+        >
+          <Spline className="h-4 w-4 text-accent mb-1" />
+          <span className="text-xs font-semibold text-accent">Single Path</span>
+          <span className="text-[10px] text-txt3 mt-0.5">Combined outline</span>
+        </button>
+
+        <button
+          type="button"
+          data-testid="convert-text-group-btn"
+          disabled={loadingMode !== null}
+          onClick={() => handleConvert('group')}
+          className="flex flex-col items-center justify-center rounded-xl border border-line bg-surface2 hover:bg-surface2/80 p-3 text-center transition-all active:scale-95 disabled:opacity-50 cursor-pointer"
+        >
+          <FolderPlus className="h-4 w-4 text-indigo-400 mb-1" />
+          <span className="text-xs font-semibold text-txt">Per Letter</span>
+          <span className="text-[10px] text-txt3 mt-0.5">Grouped layers</span>
+        </button>
+      </div>
+
+      {loadingMode && (
+        <div className="mt-2.5 flex items-center justify-center gap-2 text-xs text-accent">
+          <div className="h-3 w-3 animate-spin rounded-full border-2 border-accent border-t-transparent" />
+          <span>Generating vector Bézier curves...</span>
+        </div>
+      )}
+    </div>
+  )
+}
+
+function ConvertTextPanel() {
+  const { selected } = useEditor()
+  if (!selected || selected.type !== 'text') {
+    return <MockPanel text="Select a text layer to convert it to vectors." />
+  }
+
+  return (
+    <div className="space-y-4 pb-4" data-testid="panel-convert-text">
+      <div className="rounded-2xl border border-line bg-surface2 p-4">
+        <div className="text-[11px] font-medium text-txt3 uppercase tracking-wider mb-1">Source Text</div>
+        <div
+          className="text-lg font-bold text-txt break-words truncate"
+          style={{ fontFamily: selected.fontFamily || 'Manrope', fontWeight: selected.fontWeight || 700 }}
+        >
+          {selected.text || 'Text'}
+        </div>
+        <div className="mt-2 flex items-center gap-3 text-xs text-txt3">
+          <span>Font: <strong className="text-txt">{selected.fontFamily || 'Manrope'}</strong></span>
+          <span>Size: <strong className="text-txt">{selected.fontSize || 40}px</strong></span>
+          <span>Chars: <strong className="text-txt">{selected.text?.length || 0}</strong></span>
+        </div>
+      </div>
+
+      <ConvertTextSection layer={selected} />
+    </div>
+  )
+}
+
 function StylePanel() {
   const { l, up } = useSel()
   return (
     <div className="pb-4">
       <Slider label="Size" tid="slider-size" value={l.fontSize || 40} min={10} max={400} onChange={(v: number) => up({ fontSize: v })} />
       <Slider label="Weight" tid="slider-weight" value={l.fontWeight || 700} min={400} max={800} step={100} onChange={(v: number) => up({ fontWeight: v })} />
-        </div>
+      {l.type === 'text' && <ConvertTextSection layer={l} />}
+    </div>
   )
 }
 

@@ -20,6 +20,7 @@ import {
   upsertKeyframe,
 } from '#/lib/keyframes'
 import { scaleVectorPoints, buildSvgPath } from '#/lib/vector'
+import { convertTextLayerToVectors } from '#/lib/textToVector'
 
 export interface HistoryEntry {
   project: Project
@@ -98,6 +99,7 @@ type Action =
   | { t: 'moveKeyframe'; layerId: string; keyframeId: string; newTime: number }
   | { t: 'deleteKeyframe'; layerId: string; keyframeId: string }
   | { t: 'clearKeyframes'; layerId: string }
+  | { t: 'replaceLayerWithLayers'; targetId: string; newLayers: Layer[]; selectId?: string; selectIds?: string[] }
   | { t: 'undo' }
   | { t: 'redo' }
   | { t: 'checkpoint' }
@@ -631,7 +633,25 @@ function innerReducer(state: State, a: Action): State {
         tool: null,
       }
     }
-  case 'duplicate': {
+    case 'replaceLayerWithLayers': {
+      const idx = p.layers.findIndex((l) => l.id === a.targetId)
+      if (idx === -1) return state
+      const updatedLayers = [
+        ...p.layers.slice(0, idx),
+        ...a.newLayers,
+        ...p.layers.slice(idx + 1),
+      ]
+      const nextSelectId = a.selectId || (a.newLayers.length > 0 ? a.newLayers[0].id : null)
+      const nextSelectIds = a.selectIds || (nextSelectId ? [nextSelectId] : [])
+      return {
+        ...state,
+        project: touch({ ...p, layers: updatedLayers }),
+        selectedId: nextSelectId,
+        selectedIds: nextSelectIds,
+        vectorEditingId: null,
+      }
+    }
+    case 'duplicate': {
   const targetIds = a.ids?.length ? a.ids : a.id ? [a.id] : []
   if (targetIds.length === 0) return state
 
@@ -993,6 +1013,8 @@ interface Ctx extends State {
   moveKeyframe: (layerId: string, keyframeId: string, newTime: number) => void
   deleteKeyframe: (layerId: string, keyframeId: string) => void
   clearKeyframes: (layerId: string) => void
+  replaceLayerWithLayers: (targetId: string, newLayers: Layer[], selectId?: string, selectIds?: string[]) => void
+  convertTextToVectors: (targetId: string, mode?: 'single' | 'group') => Promise<boolean>
 }
 
 const EditorCtx = createContext<Ctx | null>(null)
@@ -1089,6 +1111,47 @@ export function EditorProvider({ project, children }: { project: Project; childr
   const deleteKeyframe = useCallback((layerId: string, keyframeId: string) => dispatch({ t: 'deleteKeyframe', layerId, keyframeId }), [])
   const clearKeyframes = useCallback((layerId: string) => dispatch({ t: 'clearKeyframes', layerId }), [])
 
+  const replaceLayerWithLayers = useCallback(
+    (targetId: string, newLayers: Layer[], selectId?: string, selectIds?: string[]) => {
+      dispatch({ t: 'replaceLayerWithLayers', targetId, newLayers, selectId, selectIds })
+    },
+    [],
+  )
+
+  const convertTextToVectors = useCallback(
+    async (targetId: string, mode: 'single' | 'group' = 'single'): Promise<boolean> => {
+      const layer = state.project.layers.find((l) => l.id === targetId)
+      if (!layer || layer.type !== 'text') return false
+      try {
+        const res = await convertTextLayerToVectors(layer, mode)
+        if (res.mode === 'single' && res.singleLayer) {
+          dispatch({
+            t: 'replaceLayerWithLayers',
+            targetId,
+            newLayers: [res.singleLayer],
+            selectId: res.singleLayer.id,
+            selectIds: [res.singleLayer.id],
+          })
+          return true
+        } else if (res.mode === 'group' && res.groupLayer && res.childLayers) {
+          dispatch({
+            t: 'replaceLayerWithLayers',
+            targetId,
+            newLayers: [...res.childLayers, res.groupLayer],
+            selectId: res.groupLayer.id,
+            selectIds: [res.groupLayer.id],
+          })
+          return true
+        }
+        return false
+      } catch (err) {
+        console.error('[convertTextToVectors] Error converting text to vectors:', err)
+        return false
+      }
+    },
+    [state.project.layers],
+  )
+
   const addLayer = useCallback(
     (type: LayerType, extra?: Partial<Layer>) => {
       const layer = createLayer(type, state.project.preset, extra)
@@ -1152,6 +1215,8 @@ export function EditorProvider({ project, children }: { project: Project; childr
       moveKeyframe,
       deleteKeyframe,
       clearKeyframes,
+      replaceLayerWithLayers,
+      convertTextToVectors,
     }),
     [
       state,
@@ -1197,6 +1262,8 @@ export function EditorProvider({ project, children }: { project: Project; childr
       moveKeyframe,
       deleteKeyframe,
       clearKeyframes,
+      replaceLayerWithLayers,
+      convertTextToVectors,
     ],
   )
 
