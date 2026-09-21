@@ -1026,13 +1026,14 @@ function Slider({ label, value, min, max, step = 1, onChange, tid, suffix = '' }
 function ConvertTextSection({ layer }: { layer: Layer }) {
   const { convertTextToVectors, openTool } = useEditor()
   const [loadingMode, setLoadingMode] = useState<'single' | 'group' | null>(null)
+  const [preserveLigatures, setPreserveLigatures] = useState(true)
   const [errorMsg, setErrorMsg] = useState<string | null>(null)
 
   const handleConvert = async (mode: 'single' | 'group') => {
     setLoadingMode(mode)
     setErrorMsg(null)
     try {
-      const success = await convertTextToVectors(layer.id, mode)
+      const success = await convertTextToVectors(layer.id, mode, { preserveLigatures })
       if (success) {
         openTool(null)
       } else {
@@ -1098,6 +1099,19 @@ function ConvertTextSection({ layer }: { layer: Layer }) {
           <span className="text-[10px] text-txt3 mt-0.5">Grouped layers</span>
         </button>
       </div>
+
+      <label className="mt-3 flex items-center justify-between rounded-xl bg-surface/80 px-3 py-2 text-xs text-txt2 cursor-pointer select-none border border-line/60">
+        <div className="flex flex-col pr-2">
+          <span className="font-medium text-txt text-[11px]">Standard Ligatures</span>
+          <span className="text-[10px] text-txt3">Keep touching letter pairs (e.g. tt, fi, fl) connected</span>
+        </div>
+        <input
+          type="checkbox"
+          checked={preserveLigatures}
+          onChange={(e) => setPreserveLigatures(e.target.checked)}
+          className="h-4 w-4 rounded accent-accent cursor-pointer"
+        />
+      </label>
 
       {loadingMode && (
         <div className="mt-2.5 flex items-center justify-center gap-2 text-xs text-accent">

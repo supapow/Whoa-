@@ -8,76 +8,127 @@ const fontCache = new Map<string, opentype.Font>()
 const pendingFontLoads = new Map<string, Promise<opentype.Font>>()
 
 /**
- * Determine the best local font file based on fontFamily and fontWeight.
+ * Determine the exact local TTF font file based on fontFamily and fontWeight.
  */
 export function getFontFileForFamily(fontFamily: string = 'Manrope', fontWeight: number = 700): string {
   const fam = fontFamily.toLowerCase()
-  const isBold = fontWeight >= 600
 
-  if (fam.includes('serif') || fam.includes('playfair') || fam.includes('georgia')) {
-    return '/fonts/serif-bold.otf'
+  if (fam.includes('ibm')) {
+    return fontWeight >= 600 ? '/fonts/ibm-plex-sans-700.ttf' : '/fonts/ibm-plex-sans-400.ttf'
+  }
+  if (fam.includes('playfair')) {
+    return fontWeight >= 600 ? '/fonts/playfair-display-700.ttf' : '/fonts/playfair-display-400.ttf'
+  }
+  if (fam.includes('anton') || fam.includes('impact')) {
+    return '/fonts/anton.ttf'
+  }
+  if (fam.includes('archivo') || fam.includes('arial black')) {
+    return '/fonts/archivo-black.ttf'
   }
   if (fam.includes('mono') || fam.includes('courier')) {
-    return '/fonts/mono-bold.otf'
+    return fontWeight >= 600 ? '/fonts/courier-bold.ttf' : '/fonts/courier-regular.ttf'
   }
-  if (fam.includes('ibm') && !isBold) {
-    return '/fonts/sans-regular.otf'
+  if (fam.includes('georgia') || fam.includes('serif')) {
+    return fontWeight >= 600 ? '/fonts/georgia-bold.ttf' : '/fonts/georgia-regular.ttf'
   }
-  return isBold ? '/fonts/sans-bold.otf' : '/fonts/sans-regular.otf'
+
+  // Default: Manrope with full weight spectrum
+  if (fontWeight >= 750) return '/fonts/manrope-800.ttf'
+  if (fontWeight >= 650) return '/fonts/manrope-700.ttf'
+  if (fontWeight >= 550) return '/fonts/manrope-600.ttf'
+  return '/fonts/manrope-400.ttf'
 }
 
 /**
- * Load and parse an OpenType font file with caching.
+ * Dynamically fetch and parse a Google Font TTF if not bundled locally.
+ */
+async function fetchGoogleFont(family: string, weight: number): Promise<opentype.Font | null> {
+  try {
+    const famParam = family.trim().replace(/\s+/g, '+')
+    const query = weight ? `family=${famParam}:wght@${weight}` : `family=${famParam}`
+    const cssUrl = `https://fonts.googleapis.com/css2?${query}`
+    const res = await fetch(cssUrl, {
+      headers: {
+        'User-Agent':
+          'Mozilla/5.0 (Linux; U; Android 4.3; en-us; SM-N900T Build/JSS15J) AppleWebKit/534.30 (KHTML, like Gecko) Version/4.0 Mobile Safari/534.30',
+      },
+    })
+    if (!res.ok) return null
+    const css = await res.text()
+    const match = css.match(/src:\s*url\((https:\/\/[^)]+)\)\s*format\(['"]?truetype['"]?\)/i)
+    if (!match) return null
+
+    const fontRes = await fetch(match[1])
+    if (!fontRes.ok) return null
+    const buffer = await fontRes.arrayBuffer()
+    return opentype.parse(buffer)
+  } catch (err) {
+    console.warn(`[textToVector] Failed dynamic Google Font fetch for ${family}:`, err)
+    return null
+  }
+}
+
+/**
+ * Load and parse an OpenType font file with caching and fallbacks.
  */
 export async function loadFont(fontFamily: string = 'Manrope', fontWeight: number = 700): Promise<opentype.Font> {
-  const fontFile = getFontFileForFamily(fontFamily, fontWeight)
+  const cacheKey = `${fontFamily.toLowerCase()}__${fontWeight}`
 
-  if (fontCache.has(fontFile)) {
-    return fontCache.get(fontFile)!
+  if (fontCache.has(cacheKey)) {
+    return fontCache.get(cacheKey)!
   }
 
-  if (pendingFontLoads.has(fontFile)) {
-    return pendingFontLoads.get(fontFile)!
+  if (pendingFontLoads.has(cacheKey)) {
+    return pendingFontLoads.get(cacheKey)!
   }
 
   const loadPromise = (async () => {
+    const fontFile = getFontFileForFamily(fontFamily, fontWeight)
+
+    // Try bundled local file first
     try {
       const res = await fetch(fontFile)
-      if (!res.ok) {
-        throw new Error(`Failed to load font from ${fontFile}: ${res.statusText}`)
-      }
-      const buffer = await res.arrayBuffer()
-      const font = opentype.parse(buffer)
-      fontCache.set(fontFile, font)
-      return font
-    } catch (err) {
-      console.warn(`[textToVector] Failed to load ${fontFile}, attempting sans-bold fallback:`, err)
-      if (fontFile !== '/fonts/sans-bold.otf') {
-        const fallbackRes = await fetch('/fonts/sans-bold.otf')
-        const fallbackBuf = await fallbackRes.arrayBuffer()
-        const font = opentype.parse(fallbackBuf)
-        fontCache.set(fontFile, font)
+      if (res.ok) {
+        const buffer = await res.arrayBuffer()
+        const font = opentype.parse(buffer)
+        fontCache.set(cacheKey, font)
         return font
       }
-      throw err
-    } finally {
-      pendingFontLoads.delete(fontFile)
+    } catch {
+      // Continue to dynamic fetch or fallback
     }
-  })()
 
-  pendingFontLoads.set(fontFile, loadPromise)
+    // Try Google Fonts dynamic fetch for unbundled font families
+    const dynamicFont = await fetchGoogleFont(fontFamily, fontWeight)
+    if (dynamicFont) {
+      fontCache.set(cacheKey, dynamicFont)
+      return dynamicFont
+    }
+
+    // Safe fallback: local Manrope
+    const fallbackFile = fontWeight >= 600 ? '/fonts/manrope-800.ttf' : '/fonts/manrope-400.ttf'
+    const fallbackRes = await fetch(fallbackFile)
+    const fallbackBuf = await fallbackRes.arrayBuffer()
+    const font = opentype.parse(fallbackBuf)
+    fontCache.set(cacheKey, font)
+    return font
+  })().finally(() => {
+    pendingFontLoads.delete(cacheKey)
+  })
+
+  pendingFontLoads.set(cacheKey, loadPromise)
   return loadPromise
 }
 
 /**
- * Format raw number to fixed decimals avoiding scientific notation and rounding bugs.
+ * Format raw number to fixed decimals avoiding scientific notation and rounding jitter.
  */
 function fmt(num: number): number {
   return Math.round(num * 100) / 100
 }
 
 /**
- * Clean SVG path builder directly from OpenType commands without opentype.js v2 NaN bugs.
+ * High-precision SVG path string generator from OpenType commands.
  */
 export function commandsToSvgPath(
   commands: opentype.PathCommand[],
@@ -97,7 +148,6 @@ export function commandsToSvgPath(
     } else if (cmd.type === 'C') {
       d += `C ${fmt((cmd.x1 + dx) * sx)} ${fmt((cmd.y1 + dy) * sy)} ${fmt((cmd.x2 + dx) * sx)} ${fmt((cmd.y2 + dy) * sy)} ${fmt((cmd.x + dx) * sx)} ${fmt((cmd.y + dy) * sy)} `
     } else if (cmd.type === 'Q') {
-      // Direct quadratic Bézier command
       d += `Q ${fmt((cmd.x1 + dx) * sx)} ${fmt((cmd.y1 + dy) * sy)} ${fmt((cmd.x + dx) * sx)} ${fmt((cmd.y + dy) * sy)} `
     } else if (cmd.type === 'Z') {
       d += 'Z '
@@ -109,7 +159,10 @@ export function commandsToSvgPath(
 
 /**
  * Converts OpenType path commands into Bannr's editable VectorPoint[] format.
- * Converts quadratic Béziers to cubic Béziers for full handle compatibility.
+ * - Preserves floating-point precision (2 decimal places) for razor-sharp letter geometry.
+ * - Converts TrueType quadratic Béziers to cubic Béziers for full handle compatibility.
+ * - Prevents duplicate anchor points at subpath closures.
+ * - Smoothly connects closed contours with incoming and outgoing Bézier handles.
  */
 export function commandsToVectorPoints(
   commands: opentype.PathCommand[],
@@ -126,8 +179,8 @@ export function commandsToVectorPoints(
   for (const cmd of commands) {
     if (cmd.type === 'M') {
       const pt: VectorPoint = {
-        x: Math.round((cmd.x + dx) * sx),
-        y: Math.round((cmd.y + dy) * sy),
+        x: fmt((cmd.x + dx) * sx),
+        y: fmt((cmd.y + dy) * sy),
         mode: 1,
         subpathStart: true,
       }
@@ -135,59 +188,85 @@ export function commandsToVectorPoints(
       currPoint = pt
       startPoint = pt
     } else if (cmd.type === 'L') {
+      const px = fmt((cmd.x + dx) * sx)
+      const py = fmt((cmd.y + dy) * sy)
+
+      // If this line segment closes back to the start point, do not duplicate the anchor
+      if (startPoint && Math.abs(px - startPoint.x) < 0.05 && Math.abs(py - startPoint.y) < 0.05) {
+        continue
+      }
+
       const pt: VectorPoint = {
-        x: Math.round((cmd.x + dx) * sx),
-        y: Math.round((cmd.y + dy) * sy),
+        x: px,
+        y: py,
         mode: 1,
       }
       points.push(pt)
       currPoint = pt
     } else if (cmd.type === 'C') {
+      const px = fmt((cmd.x + dx) * sx)
+      const py = fmt((cmd.y + dy) * sy)
+      const cp1x = fmt((cmd.x1 + dx) * sx)
+      const cp1y = fmt((cmd.y1 + dy) * sy)
+      const cp2x = fmt((cmd.x2 + dx) * sx)
+      const cp2y = fmt((cmd.y2 + dy) * sy)
+
+      const isClosing = startPoint && Math.abs(px - startPoint.x) < 0.05 && Math.abs(py - startPoint.y) < 0.05
+      if (isClosing) {
+        if (currPoint) currPoint.cp2 = { x: cp1x, y: cp1y }
+        if (startPoint) startPoint.cp1 = { x: cp2x, y: cp2y }
+        continue
+      }
+
       if (currPoint) {
-        currPoint.cp2 = {
-          x: Math.round((cmd.x1 + dx) * sx),
-          y: Math.round((cmd.y1 + dy) * sy),
-        }
+        currPoint.cp2 = { x: cp1x, y: cp1y }
       }
       const pt: VectorPoint = {
-        x: Math.round((cmd.x + dx) * sx),
-        y: Math.round((cmd.y + dy) * sy),
-        cp1: {
-          x: Math.round((cmd.x2 + dx) * sx),
-          y: Math.round((cmd.y2 + dy) * sy),
-        },
+        x: px,
+        y: py,
+        cp1: { x: cp2x, y: cp2y },
         mode: 1,
       }
       points.push(pt)
       currPoint = pt
     } else if (cmd.type === 'Q') {
-      // Mathematical conversion of Quadratic (P0, CP, P1) to Cubic (P0, CP1, CP2, P1)
-      const p0 = currPoint ? { x: currPoint.x, y: currPoint.y } : { x: (cmd.x1 + dx) * sx, y: (cmd.y1 + dy) * sy }
+      // Quadratic to Cubic Bézier conversion
+      const p0 = currPoint
+        ? { x: currPoint.x, y: currPoint.y }
+        : { x: fmt((cmd.x1 + dx) * sx), y: fmt((cmd.y1 + dy) * sy) }
       const cpx = (cmd.x1 + dx) * sx
       const cpy = (cmd.y1 + dy) * sy
       const p1x = (cmd.x + dx) * sx
       const p1y = (cmd.y + dy) * sy
 
-      const cp1x = p0.x + (2 / 3) * (cpx - p0.x)
-      const cp1y = p0.y + (2 / 3) * (cpy - p0.y)
-      const cp2x = p1x + (2 / 3) * (cpx - p1x)
-      const cp2y = p1y + (2 / 3) * (cpy - p1y)
+      const cp1x = fmt(p0.x + (2 / 3) * (cpx - p0.x))
+      const cp1y = fmt(p0.y + (2 / 3) * (cpy - p0.y))
+      const cp2x = fmt(p1x + (2 / 3) * (cpx - p1x))
+      const cp2y = fmt(p1y + (2 / 3) * (cpy - p1y))
+      const px = fmt(p1x)
+      const py = fmt(p1y)
+
+      const isClosing = startPoint && Math.abs(px - startPoint.x) < 0.05 && Math.abs(py - startPoint.y) < 0.05
+      if (isClosing) {
+        if (currPoint) currPoint.cp2 = { x: cp1x, y: cp1y }
+        if (startPoint) startPoint.cp1 = { x: cp2x, y: cp2y }
+        continue
+      }
 
       if (currPoint) {
-        currPoint.cp2 = { x: Math.round(cp1x), y: Math.round(cp1y) }
+        currPoint.cp2 = { x: cp1x, y: cp1y }
       }
       const pt: VectorPoint = {
-        x: Math.round(p1x),
-        y: Math.round(p1y),
-        cp1: { x: Math.round(cp2x), y: Math.round(cp2y) },
+        x: px,
+        y: py,
+        cp1: { x: cp2x, y: cp2y },
         mode: 1,
       }
       points.push(pt)
       currPoint = pt
     } else if (cmd.type === 'Z') {
-      // Connect to start point if needed
       if (currPoint && startPoint && currPoint !== startPoint) {
-        if (Math.hypot(currPoint.x - startPoint.x, currPoint.y - startPoint.y) <= 2) {
+        if (Math.abs(currPoint.x - startPoint.x) < 0.05 && Math.abs(currPoint.y - startPoint.y) < 0.05) {
           if (currPoint.cp1 && !startPoint.cp1) {
             startPoint.cp1 = currPoint.cp1
           }
@@ -200,6 +279,10 @@ export function commandsToVectorPoints(
   return points
 }
 
+export interface ConvertOptions {
+  preserveLigatures?: boolean
+}
+
 export interface ConvertedTextResult {
   mode: 'single' | 'group'
   singleLayer?: Layer
@@ -208,50 +291,60 @@ export interface ConvertedTextResult {
 }
 
 /**
- * Main conversion function: converts a live Text layer into vector path layer(s).
- * - 'single': combines all characters into a single unified vector path layer.
- * - 'group': creates a group containing an individual vector path layer for every letter.
+ * Converts a live Text layer into vector path layer(s).
+ * - 'single': combines all characters into a single unified vector path layer with accurate ligatures and curves.
+ * - 'group': creates a group containing an individual vector path layer for every letter/ligature glyph.
  */
 export async function convertTextLayerToVectors(
   textLayer: Layer,
-  mode: 'single' | 'group' = 'single'
+  mode: 'single' | 'group' = 'single',
+  options: ConvertOptions = {}
 ): Promise<ConvertedTextResult> {
-  const text = textLayer.text?.trim() || 'Text'
+  const text = textLayer.text || 'Text'
   const fontSize = Math.max(12, textLayer.fontSize || 54)
   const fontFamily = textLayer.fontFamily || 'Manrope'
   const fontWeight = textLayer.fontWeight || 700
   const font = await loadFont(fontFamily, fontWeight)
 
+  // Configure OpenType features: enable ligatures by default (matching browser text rendering)
+  const useLigatures = options.preserveLigatures !== false
+  const renderOptions = {
+    features: {
+      liga: useLigatures,
+      calt: useLigatures,
+      rclt: useLigatures,
+    },
+  }
+
   const lines = text.split('\n')
   const lineHeight = fontSize * 1.2
   const baselineOffset = fontSize * 0.85
 
-  // First pass: measure each line's width to support text alignment (left / center / right)
+  // First pass: measure line widths accurately using font.forEachGlyph to honor kerning and ligatures
   const lineMetrics = lines.map((line) => {
-    if (!line) return { lineWidth: 0, glyphPaths: [] }
-    const glyphPaths = font.getPaths(line, 0, 0, fontSize)
+    if (!line) return { lineWidth: 0 }
     let minX = Infinity
     let maxX = -Infinity
-    for (const gp of glyphPaths) {
-      if (gp.commands.length > 0) {
-        const bb = gp.getBoundingBox()
+    font.forEachGlyph(line, 0, 0, fontSize, renderOptions, (glyph, gx, gy, gSize) => {
+      if (glyph.name === 'space' || !glyph.unicode && !glyph.name) return
+      const p = glyph.getPath(gx, gy, gSize, renderOptions)
+      if (p.commands.length > 0) {
+        const bb = p.getBoundingBox()
         minX = Math.min(minX, bb.x1)
         maxX = Math.max(maxX, bb.x2)
       }
-    }
+    })
     const lineWidth = isFinite(minX) && isFinite(maxX) ? maxX - minX : font.getAdvanceWidth(line, fontSize)
-    return { lineWidth: Math.max(1, lineWidth), glyphPaths }
+    return { lineWidth: Math.max(1, lineWidth) }
   })
 
   const maxLineWidth = Math.max(...lineMetrics.map((m) => m.lineWidth), 1)
 
   // Position glyphs according to line, alignment, and baseline
   type PositionedGlyph = {
-    char: string
+    label: string
     commands: opentype.PathCommand[]
     bbox: { x1: number; y1: number; x2: number; y2: number }
-    originX: number
-    originY: number
   }
 
   const allGlyphs: PositionedGlyph[] = []
@@ -271,24 +364,33 @@ export async function convertTextLayerToVectors(
     }
 
     const lineY = lineIdx * lineHeight + baselineOffset
-    const glyphPaths = font.getPaths(line, lineStartX, lineY, fontSize)
 
-    line.split('').forEach((char, charIdx) => {
-      const gp = glyphPaths[charIdx]
-      if (!gp || char === ' ' || gp.commands.length === 0) return
+    font.forEachGlyph(line, lineStartX, lineY, fontSize, renderOptions, (glyph, gx, gy, gSize) => {
+      if (glyph.name === 'space') return
+      const p = glyph.getPath(gx, gy, gSize, renderOptions)
+      if (p.commands.length === 0) return
 
-      const bb = gp.getBoundingBox()
+      const bb = p.getBoundingBox()
       globalMinX = Math.min(globalMinX, bb.x1)
       globalMinY = Math.min(globalMinY, bb.y1)
       globalMaxX = Math.max(globalMaxX, bb.x2)
       globalMaxY = Math.max(globalMaxY, bb.y2)
 
+      // Derive human-readable label
+      let label = glyph.name || 'Char'
+      if (label.includes('.liga') || label.includes('_')) {
+        const cleanName = label.replace('.liga', '').replace(/_/g, '')
+        label = `Ligature ${cleanName}`
+      } else if (glyph.unicode) {
+        label = `Letter ${String.fromCodePoint(glyph.unicode)}`
+      } else {
+        label = `Letter ${label}`
+      }
+
       allGlyphs.push({
-        char,
-        commands: gp.commands,
+        label,
+        commands: p.commands,
         bbox: bb,
-        originX: lineStartX,
-        originY: lineY,
       })
     })
   })
@@ -354,7 +456,7 @@ export async function convertTextLayerToVectors(
       fill: textLayer.color || '#FFFFFF',
       stroke: undefined,
       strokeWidth: 0,
-      fillRule: 'evenodd',
+      fillRule: 'nonzero',
       closed: true,
       pathData: localSvgPath,
       points: localPoints,
@@ -363,7 +465,7 @@ export async function convertTextLayerToVectors(
     return { mode: 'single', singleLayer }
   }
 
-  // Mode B: Create a Group containing an individual vector path layer for every letter
+  // Mode B: Create a Group containing an individual vector path layer for every letter/ligature
   const parentGroupId = uid()
   const childLayers: Layer[] = []
 
@@ -381,7 +483,7 @@ export async function convertTextLayerToVectors(
     const childLayer: Layer = {
       id: uid(),
       type: 'path',
-      name: `Letter ${g.char}`,
+      name: g.label,
       x: gx,
       y: gy,
       w: gw,
@@ -396,7 +498,7 @@ export async function convertTextLayerToVectors(
       anim: textLayer.anim ?? 'none',
       groupId: parentGroupId,
       fill: textLayer.color || '#FFFFFF',
-      fillRule: 'evenodd',
+      fillRule: 'nonzero',
       closed: true,
       pathData: glyphPath,
       points: glyphPoints,

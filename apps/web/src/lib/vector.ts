@@ -23,7 +23,7 @@ export function buildSvgPath(
   for (let i = 0; i < points.length; i++) {
     const curr = points[i]
     if (i === 0 || curr.subpathStart) {
-      if (i > 0 && closed && i - subpathStartIdx > 2) {
+      if (i > 0 && closed && i - subpathStartIdx >= 2) {
         const prev = points[i - 1]
         const pStart = points[subpathStartIdx]
         const hasCp1 = prev.cp2 !== undefined
@@ -58,7 +58,7 @@ export function buildSvgPath(
     }
   }
 
-  if (closed && points.length - subpathStartIdx > 2) {
+  if (closed && points.length - subpathStartIdx >= 2) {
     const last = points[points.length - 1]
     const pStart = points[subpathStartIdx]
     const hasCp1 = last.cp2 !== undefined

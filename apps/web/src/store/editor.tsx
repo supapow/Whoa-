@@ -1014,7 +1014,11 @@ interface Ctx extends State {
   deleteKeyframe: (layerId: string, keyframeId: string) => void
   clearKeyframes: (layerId: string) => void
   replaceLayerWithLayers: (targetId: string, newLayers: Layer[], selectId?: string, selectIds?: string[]) => void
-  convertTextToVectors: (targetId: string, mode?: 'single' | 'group') => Promise<boolean>
+  convertTextToVectors: (
+    targetId: string,
+    mode?: 'single' | 'group',
+    options?: { preserveLigatures?: boolean }
+  ) => Promise<boolean>
 }
 
 const EditorCtx = createContext<Ctx | null>(null)
@@ -1119,11 +1123,15 @@ export function EditorProvider({ project, children }: { project: Project; childr
   )
 
   const convertTextToVectors = useCallback(
-    async (targetId: string, mode: 'single' | 'group' = 'single'): Promise<boolean> => {
+    async (
+      targetId: string,
+      mode: 'single' | 'group' = 'single',
+      options?: { preserveLigatures?: boolean }
+    ): Promise<boolean> => {
       const layer = state.project.layers.find((l) => l.id === targetId)
       if (!layer || layer.type !== 'text') return false
       try {
-        const res = await convertTextLayerToVectors(layer, mode)
+        const res = await convertTextLayerToVectors(layer, mode, options)
         if (res.mode === 'single' && res.singleLayer) {
           dispatch({
             t: 'replaceLayerWithLayers',

@@ -5445,7 +5445,7 @@ function LayerContent({
           strokeWidth={strokeWidth}
           strokeLinecap={strokeLinecap}
           strokeLinejoin={strokeLinejoin}
-          fillRule={layer.fillRule}
+          fillRule={layer.fillRule === 'evenodd' ? 'nonzero' : (layer.fillRule || 'nonzero')}
           shapeRendering="geometricPrecision"
           style={{ transition: 'fill-opacity 0.2s ease' }}
         />
