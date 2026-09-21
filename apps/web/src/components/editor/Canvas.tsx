@@ -3666,10 +3666,10 @@ export default function Canvas() {
               <div
                 style={{
                   position: 'absolute',
-                  left: bounds.left,
-                  top: bounds.top,
-                  width: boxW,
-                  height: boxH,
+                  left: isVectorEditing ? sel.x : bounds.left,
+                  top: isVectorEditing ? sel.y : bounds.top,
+                  width: isVectorEditing ? sel.w : boxW,
+                  height: isVectorEditing ? sel.h : boxH,
                   transform: (selected.length === 1 && !isGroup && sel.rotation)
                     ? `rotate(${sel.rotation}deg)`
                     : (rotationSnap?.active && rotationSnap.deltaAngle)
@@ -3984,13 +3984,9 @@ export default function Canvas() {
                       const isAnchorSelected = selectedAnchorIndices.includes(pIdx)
                       const pRadius = 5.5 / eff
                       const cRadius = 4.5 / eff
+                      const hitRadius = Math.max(pRadius, 14 / eff)
+                      const cHitRadius = Math.max(cRadius, 12 / eff)
                       const pts = sel.points!
-                      // Keep the HTML overlay in the same coordinate space as the
-                      // SVG viewBox, even when the measured layer box differs slightly.
-                      const pointScaleX = sel.w > 0 ? boxW / sel.w : 1
-                      const pointScaleY = sel.h > 0 ? boxH / sel.h : 1
-                      const px = (value: number) => value * pointScaleX
-                      const py = (value: number) => value * pointScaleY
 
                       const handlePointDrag = (e: React.PointerEvent) => {
                         e.stopPropagation()
@@ -4109,10 +4105,10 @@ export default function Canvas() {
                           {pt.cp1 && (
                             <svg style={{ position: 'absolute', inset: 0, width: '100%', height: '100%', pointerEvents: 'none', overflow: 'visible' }}>
                               <line
-                                x1={px(pt.x)}
-                                y1={py(pt.y)}
-                                x2={px(pt.cp1.x)}
-                                y2={py(pt.cp1.y)}
+                                x1={pt.x}
+                                y1={pt.y}
+                                x2={pt.cp1.x}
+                                y2={pt.cp1.y}
                                 stroke="#ec4899"
                                 strokeWidth={1.5 / eff}
                                 strokeDasharray={`${3 / eff} ${3 / eff}`}
@@ -4123,10 +4119,10 @@ export default function Canvas() {
                           {pt.cp2 && (
                             <svg style={{ position: 'absolute', inset: 0, width: '100%', height: '100%', pointerEvents: 'none', overflow: 'visible' }}>
                               <line
-                                x1={px(pt.x)}
-                                y1={py(pt.y)}
-                                x2={px(pt.cp2.x)}
-                                y2={py(pt.cp2.y)}
+                                x1={pt.x}
+                                y1={pt.y}
+                                x2={pt.cp2.x}
+                                y2={pt.cp2.y}
                                 stroke="#ec4899"
                                 strokeWidth={1.5 / eff}
                                 strokeDasharray={`${3 / eff} ${3 / eff}`}
@@ -4142,10 +4138,10 @@ export default function Canvas() {
                               onPointerDown={(e) => handleCpDrag('cp1', e)}
                               style={{
                                 position: 'absolute',
-                                left: px(pt.cp1.x) - cRadius,
-                                top: py(pt.cp1.y) - cRadius,
-                                width: cRadius * 2,
-                                height: cRadius * 2,
+                                left: pt.cp1.x - cHitRadius,
+                                top: pt.cp1.y - cHitRadius,
+                                width: cHitRadius * 2,
+                                height: cHitRadius * 2,
                                 display: 'grid',
                                 placeItems: 'center',
                                 cursor: 'crosshair',
@@ -4181,10 +4177,10 @@ export default function Canvas() {
                               onPointerDown={(e) => handleCpDrag('cp2', e)}
                               style={{
                                 position: 'absolute',
-                                left: px(pt.cp2.x) - cRadius,
-                                top: py(pt.cp2.y) - cRadius,
-                                width: cRadius * 2,
-                                height: cRadius * 2,
+                                left: pt.cp2.x - cHitRadius,
+                                top: pt.cp2.y - cHitRadius,
+                                width: cHitRadius * 2,
+                                height: cHitRadius * 2,
                                 display: 'grid',
                                 placeItems: 'center',
                                 cursor: 'crosshair',
@@ -4259,19 +4255,16 @@ export default function Canvas() {
                             }}
                             style={{
                               position: 'absolute',
-                              left: px(pt.x) - pRadius,
-                              top: py(pt.y) - pRadius,
-                              width: pRadius * 2,
-                              height: pRadius * 2,
+                              left: pt.x - hitRadius,
+                              top: pt.y - hitRadius,
+                              width: hitRadius * 2,
+                              height: hitRadius * 2,
                               display: 'grid',
                               placeItems: 'center',
                               cursor: isAnchorSelected ? 'grab' : (anchorMultiSelectMode ? 'pointer' : 'grab'),
                               pointerEvents: 'auto',
                               touchAction: 'none',
                               zIndex: 75,
-                              padding: `${7 / eff}px`,
-                              margin: `-${7 / eff}px`,
-                              boxSizing: 'content-box',
                             }}
                             title={
                               anchorMultiSelectMode
@@ -4280,16 +4273,16 @@ export default function Canvas() {
                             }
                           >
                             <svg
-                              width={pRadius * 2 + 10}
-                              height={pRadius * 2 + 10}
-                              viewBox={`0 0 ${pRadius * 2 + 10} ${pRadius * 2 + 10}`}
+                              width={pRadius * 2}
+                              height={pRadius * 2}
+                              viewBox={`0 0 ${pRadius * 2} ${pRadius * 2}`}
                               className="pointer-events-none overflow-visible"
                             >
                               {/* Pulse ring when user is holding down this anchor */}
                               {holdingAnchorIdx === pIdx && (
                                 <circle
-                                  cx={pRadius + 5}
-                                  cy={pRadius + 5}
+                                  cx={pRadius}
+                                  cy={pRadius}
                                   r={pRadius + 3.5 / eff}
                                   fill="none"
                                   stroke="#3b82f6"
@@ -4300,8 +4293,8 @@ export default function Canvas() {
                               {/* Multi-select halo for selected anchors in multi-select mode */}
                               {anchorMultiSelectMode && isAnchorSelected && (
                                 <circle
-                                  cx={pRadius + 5}
-                                  cy={pRadius + 5}
+                                  cx={pRadius}
+                                  cy={pRadius}
                                   r={pRadius + 2.5 / eff}
                                   fill="none"
                                   stroke="#2563eb"
@@ -4311,8 +4304,8 @@ export default function Canvas() {
                               )}
                               {/* Anchor point circle: thin border matching fill (#007AFF) when selected, filled white with thin border when inactive */}
                               <circle
-                                cx={pRadius + 5}
-                                cy={pRadius + 5}
+                                cx={pRadius}
+                                cy={pRadius}
                                 r={pRadius}
                                 fill={isAnchorSelected ? '#007AFF' : '#ffffff'}
                                 stroke={isAnchorSelected ? '#007AFF' : (anchorMultiSelectMode ? '#3b82f6' : '#007AFF')}
@@ -4322,8 +4315,8 @@ export default function Canvas() {
                               {/* Inner white dot when selected in multi-select mode */}
                               {anchorMultiSelectMode && isAnchorSelected && (
                                 <circle
-                                  cx={pRadius + 5}
-                                  cy={pRadius + 5}
+                                  cx={pRadius}
+                                  cy={pRadius}
                                   r={Math.max(1.2, pRadius * 0.4)}
                                   fill="#ffffff"
                                 />
