@@ -1017,7 +1017,7 @@ interface Ctx extends State {
   convertTextToVectors: (
     targetId: string,
     mode?: 'single' | 'group',
-    options?: { preserveLigatures?: boolean }
+    options?: { preserveLigatures?: boolean; simplifyPaths?: boolean }
   ) => Promise<boolean>
 }
 
@@ -1126,7 +1126,7 @@ export function EditorProvider({ project, children }: { project: Project; childr
     async (
       targetId: string,
       mode: 'single' | 'group' = 'single',
-      options?: { preserveLigatures?: boolean }
+      options?: { preserveLigatures?: boolean; simplifyPaths?: boolean }
     ): Promise<boolean> => {
       const layer = state.project.layers.find((l) => l.id === targetId)
       if (!layer || layer.type !== 'text') return false

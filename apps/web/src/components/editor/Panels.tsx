@@ -1,8 +1,9 @@
-import { useRef, useState, useEffect } from 'react'
+import { useRef, useState, useEffect, useSyncExternalStore } from 'react'
 import {
   X, Upload, Type as TypeIcon, Folder, FolderPlus,
   Component as ComponentIcon, ChevronRight, ChevronLeft, ChevronDown, Plus, Trash2,
   Lock, Unlock, CircleDot, Diamond, Droplet, PenTool, Spline, Magnet, Check, CheckSquare,
+  Wand2, Globe, FileUp, Sparkles,
 } from 'lucide-react'
 import { useEditor } from '#/store/editor'
 import type { ShapeKind, Layer, VectorPoint } from '#/types'
@@ -10,10 +11,15 @@ import { hasKeyframeAt, getAdjacentKeyframes, interpolateKeyframes } from '#/lib
 import {
   FONTS, PALETTE, GRADIENTS, BG_IMAGES, STOCK_IMAGES, STICKERS, SHAPES,
 } from '#/lib/data'
+import {
+  getAllFonts, getAvailableWeightsForFont, getClosestAvailableWeight,
+  registerUploadedFontFile, addGoogleFontFamily, subscribeFonts, type FontDefinition,
+} from '#/lib/fonts'
 import { getLibraryComponents, deleteComponentFromLibrary, type ComponentItem } from '#/lib/groups'
 import {
-  VECTOR_PRESETS, convertShapeToVector, buildSvgPath, tightenVectorLayer,
+  VECTOR_PRESETS, convertShapeToVector, buildSvgPath, tightenVectorLayer, simplifyVectorPoints,
   createShapeVectorPoints, fitVectorPointsToBounds, getPointBezierMode, switchPointBezierMode,
+  getAdjacentVectorPoints,
 } from '#/lib/vector'
 
 const TITLES: Record<string, string> = {
@@ -31,11 +37,12 @@ export default function ToolSheet() {
   const { tool, openTool } = useEditor()
   if (!tool) return null
   if (tool === 'vector') return <VectorToolPanel />
+  const isFont = tool === 'font'
   return (
     <div className="absolute inset-0 z-60 flex flex-col justify-end" data-testid="tool-sheet">
       <div className="absolute inset-0 bg-black/40 animate-fade" onClick={() => openTool(null)} />
-      <div className="animate-sheet relative max-h-[82vh] overflow-y-auto rounded-t-3xl border-t border-line bg-surface pb-8 no-scrollbar">
-        <div className="sticky top-0 flex items-center justify-between bg-surface px-5 pt-4 pb-3 z-10">
+      <div className={`animate-sheet relative ${isFont ? 'max-h-[40vh] max-h-[40%] pb-4' : 'max-h-[82vh] pb-8'} overflow-y-auto rounded-t-3xl border-t border-line bg-surface no-scrollbar`}>
+        <div className={`sticky top-0 flex items-center justify-between bg-surface px-5 ${isFont ? 'pt-3 pb-2' : 'pt-4 pb-3'} z-10`}>
           <h3 className="text-lg font-bold">{TITLES[tool] || 'Options'}</h3>
           <button onClick={() => openTool(null)} data-testid="sheet-close" className="grid h-8 w-8 place-items-center rounded-full bg-surface2 text-txt2">
             <X className="h-4 w-4" />
@@ -760,25 +767,242 @@ function useSel() {
 function FontPanel() {
   const { l, up } = useSel()
   const { openTool } = useEditor()
-  return (
-    <div className="space-y-2 pb-4">
-      {FONTS.map((f) => (
-        <button key={f} data-testid={`font-${f}`} onClick={() => up({ fontFamily: f })}
-          style={{ fontFamily: f }}
-          className={`flex w-full items-center justify-between rounded-xl border px-4 py-3 text-lg ${l.fontFamily === f ? 'border-accent bg-accent/10' : 'border-line bg-surface2'}`}>
-          <span>{f}</span>
-          <span className="text-txt3">Ag</span>
-        </button>
-      ))}
+  const fileInputRef = useRef<HTMLInputElement>(null)
+  const [activeTab, setActiveTab] = useState<'all' | 'google' | 'custom'>('all')
+  const [searchQuery, setSearchQuery] = useState('')
+  const [isUploading, setIsUploading] = useState(false)
+  const [googleFontInput, setGoogleFontInput] = useState('')
+  const [showAddGoogle, setShowAddGoogle] = useState(false)
+  const [uploadFeedback, setUploadFeedback] = useState<string | null>(null)
 
-      <div className="pt-2">
+  // Reactive subscription to dynamic fonts and uploaded fonts
+  const allFonts = useSyncExternalStore(subscribeFonts, getAllFonts, getAllFonts)
+
+  const selectedFamily = l.fontFamily || 'Manrope'
+  const availableWeights = getAvailableWeightsForFont(selectedFamily)
+  const currentWeight = getClosestAvailableWeight(selectedFamily, l.fontWeight || 700)
+
+  // Handle font upload from user's device (TTF / OTF / WOFF)
+  const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0]
+    if (!file) return
+    setIsUploading(true)
+    setUploadFeedback(null)
+    try {
+      const res = await registerUploadedFontFile(file)
+      if (res) {
+        up({ fontFamily: res.family, fontWeight: res.weight })
+        setUploadFeedback(`Added "${res.family}" (${res.weight})`)
+        setTimeout(() => setUploadFeedback(null), 3000)
+      } else {
+        setUploadFeedback('Could not read font file. Please use a valid TTF/OTF.')
+        setTimeout(() => setUploadFeedback(null), 4000)
+      }
+    } catch {
+      setUploadFeedback('Failed to upload font.')
+      setTimeout(() => setUploadFeedback(null), 3000)
+    } finally {
+      setIsUploading(false)
+      if (fileInputRef.current) fileInputRef.current.value = ''
+    }
+  }
+
+  const handleAddGoogleFont = async () => {
+    const name = googleFontInput.trim()
+    if (!name) return
+    setIsUploading(true)
+    setUploadFeedback(null)
+    try {
+      const def = await addGoogleFontFamily(name, [400, 700])
+      if (def) {
+        up({ fontFamily: def.family, fontWeight: def.variants[0].weight })
+        setUploadFeedback(`Added Google Font "${def.family}"`)
+        setGoogleFontInput('')
+        setShowAddGoogle(false)
+        setTimeout(() => setUploadFeedback(null), 3000)
+      }
+    } catch {
+      setUploadFeedback(`Failed to load "${name}". Check the exact name.`)
+      setTimeout(() => setUploadFeedback(null), 4000)
+    } finally {
+      setIsUploading(false)
+    }
+  }
+
+  // Filter fonts by tab and search
+  const filteredFonts = allFonts.filter((f) => {
+    if (activeTab === 'google' && f.source !== 'google') return false
+    if (activeTab === 'custom' && f.source !== 'custom') return false
+    if (searchQuery) {
+      return f.family.toLowerCase().includes(searchQuery.toLowerCase())
+    }
+    return true
+  })
+
+  return (
+    <div className="space-y-1.5 pb-2">
+      {/* Hidden file input for uploading from device */}
+      <input
+        ref={fileInputRef}
+        type="file"
+        accept=".ttf,.otf,.woff"
+        className="hidden"
+        onChange={handleFileUpload}
+      />
+
+      {/* Top action row: Filter tabs + Upload button + Add Google Font */}
+      <div className="flex items-center justify-between gap-1 pb-0.5">
+        <div className="flex items-center gap-0.5 bg-surface2/80 p-0.5 rounded-md text-[10px]">
+          {(['all', 'google', 'custom'] as const).map((tab) => (
+            <button
+              key={tab}
+              type="button"
+              onClick={() => setActiveTab(tab)}
+              className={`px-1.5 py-0.5 rounded capitalize transition-colors ${
+                activeTab === tab ? 'bg-surface font-semibold text-white shadow-xs' : 'text-txt3 hover:text-txt2'
+              }`}
+            >
+              {tab === 'all' ? 'All' : tab === 'google' ? 'Google' : 'Custom'}
+            </button>
+          ))}
+        </div>
+
+        <div className="flex items-center gap-1">
+          <button
+            type="button"
+            data-testid="font-upload-btn"
+            onClick={() => fileInputRef.current?.click()}
+            disabled={isUploading}
+            title="Upload font from your device (TTF, OTF)"
+            className="flex items-center gap-1 rounded bg-surface2/90 hover:bg-surface2 px-1.5 py-0.5 text-[10px] font-medium text-txt hover:text-white transition-colors cursor-pointer"
+          >
+            <FileUp className="h-3 w-3 text-accent" />
+            <span>Upload</span>
+          </button>
+
+          <button
+            type="button"
+            data-testid="font-add-google-btn"
+            onClick={() => setShowAddGoogle((v) => !v)}
+            title="Add any font from Google Fonts"
+            className={`flex items-center gap-1 rounded px-1.5 py-0.5 text-[10px] font-medium transition-colors cursor-pointer ${
+              showAddGoogle ? 'bg-accent text-white' : 'bg-surface2/90 hover:bg-surface2 text-txt hover:text-white'
+            }`}
+          >
+            <Globe className="h-3 w-3" />
+            <span>+ Google</span>
+          </button>
+        </div>
+      </div>
+
+      {/* Quick Google Font input dialog */}
+      {showAddGoogle && (
+        <div className="flex items-center gap-1.5 rounded-lg bg-surface2 p-1.5 animate-in fade-in">
+          <input
+            type="text"
+            placeholder="e.g. Space Grotesk, Syne, Outfit"
+            value={googleFontInput}
+            onChange={(e) => setGoogleFontInput(e.target.value)}
+            onKeyDown={(e) => e.key === 'Enter' && handleAddGoogleFont()}
+            className="flex-1 rounded bg-surface px-2 py-1 text-xs text-white placeholder:text-txt3 outline-none"
+            autoFocus
+          />
+          <button
+            type="button"
+            onClick={handleAddGoogleFont}
+            disabled={!googleFontInput.trim() || isUploading}
+            className="rounded bg-accent px-2.5 py-1 text-xs font-semibold text-white disabled:opacity-50 cursor-pointer"
+          >
+            Add
+          </button>
+        </div>
+      )}
+
+      {uploadFeedback && (
+        <div className="rounded-md bg-accent/15 px-2 py-1 text-[11px] text-accent font-medium text-center animate-in fade-in">
+          {uploadFeedback}
+        </div>
+      )}
+
+      {/* Real weights selector for currently active font (eliminates fake synthetic weights) */}
+      <div className="rounded-lg bg-surface2/50 px-2 py-1 flex items-center justify-between gap-1.5 border-0">
+        <span className="text-[9px] font-medium text-txt3 uppercase tracking-wider shrink-0">
+          Real Weights:
+        </span>
+        <div className="flex items-center gap-1 overflow-x-auto no-scrollbar">
+          {availableWeights.map((w) => {
+            const isWeightActive = currentWeight === w.weight
+            return (
+              <button
+                key={w.weight}
+                type="button"
+                data-testid={`weight-${w.weight}`}
+                onClick={() => up({ fontWeight: w.weight })}
+                className={`px-1.5 py-0.5 rounded text-[9.5px] whitespace-nowrap transition-colors cursor-pointer ${
+                  isWeightActive
+                    ? 'bg-accent text-white font-bold'
+                    : 'bg-surface/80 hover:bg-surface text-txt2 hover:text-white'
+                }`}
+              >
+                {w.label} ({w.weight})
+              </button>
+            )
+          })}
+        </div>
+      </div>
+
+      {/* Font list buttons: strictly borderless, compact height, text-xs */}
+      <div className="space-y-0.5 max-h-[19vh] overflow-y-auto no-scrollbar">
+        {filteredFonts.map((f) => {
+          const isSelected = selectedFamily.toLowerCase() === f.family.toLowerCase()
+          return (
+            <button
+              key={f.family}
+              data-testid={`font-${f.family}`}
+              onClick={() => {
+                const nextWeight = getClosestAvailableWeight(f.family, l.fontWeight || 700)
+                up({ fontFamily: f.family, fontWeight: nextWeight })
+              }}
+              style={{ fontFamily: f.family }}
+              className={`flex w-full items-center justify-between rounded-md px-2.5 py-1 text-xs transition-colors cursor-pointer border-0 ${
+                isSelected
+                  ? 'bg-accent/15 text-accent font-semibold'
+                  : 'bg-surface2/60 hover:bg-surface2 text-txt hover:text-white'
+              }`}
+            >
+              <div className="flex items-center gap-1.5 min-w-0">
+                <span className="truncate">{f.family}</span>
+                {f.source === 'custom' && (
+                  <span className="rounded bg-indigo-500/20 px-1 py-0.2 text-[8px] font-semibold text-indigo-300 shrink-0">
+                    Uploaded
+                  </span>
+                )}
+                {f.source === 'google' && (
+                  <span className="rounded bg-sky-500/15 px-1 py-0.2 text-[8px] font-semibold text-sky-300 shrink-0">
+                    Google
+                  </span>
+                )}
+              </div>
+              <div className="flex items-center gap-2 shrink-0">
+                <span className="text-[9px] text-txt3">
+                  {f.variants.length} {f.variants.length === 1 ? 'wt' : 'wts'}
+                </span>
+                <span className={isSelected ? 'text-accent/80 font-bold' : 'text-txt3'}>Ag</span>
+              </div>
+            </button>
+          )
+        })}
+      </div>
+
+      {/* Vector conversion button */}
+      <div className="pt-0.5">
         <button
           type="button"
           data-testid="font-convert-vector-btn"
           onClick={() => openTool('convertText')}
-          className="flex w-full items-center justify-center gap-2 rounded-xl border border-accent/40 bg-accent/10 py-3 text-xs font-semibold text-accent hover:bg-accent/20 transition-all active:scale-98 cursor-pointer"
+          className="flex w-full items-center justify-center gap-1.5 rounded-lg bg-accent/10 hover:bg-accent/20 py-1.5 text-xs font-semibold text-accent transition-all active:scale-98 cursor-pointer border-0"
         >
-          <Spline className="h-4 w-4" />
+          <Spline className="h-3.5 w-3.5" />
           <span>Convert Text to Vector Paths</span>
         </button>
       </div>
@@ -1027,13 +1251,14 @@ function ConvertTextSection({ layer }: { layer: Layer }) {
   const { convertTextToVectors, openTool } = useEditor()
   const [loadingMode, setLoadingMode] = useState<'single' | 'group' | null>(null)
   const [preserveLigatures, setPreserveLigatures] = useState(true)
+  const [simplifyPaths, setSimplifyPaths] = useState(true)
   const [errorMsg, setErrorMsg] = useState<string | null>(null)
 
   const handleConvert = async (mode: 'single' | 'group') => {
     setLoadingMode(mode)
     setErrorMsg(null)
     try {
-      const success = await convertTextToVectors(layer.id, mode, { preserveLigatures })
+      const success = await convertTextToVectors(layer.id, mode, { preserveLigatures, simplifyPaths })
       if (success) {
         openTool(null)
       } else {
@@ -1113,6 +1338,19 @@ function ConvertTextSection({ layer }: { layer: Layer }) {
         />
       </label>
 
+      <label className="mt-2 flex items-center justify-between rounded-xl bg-surface/80 px-3 py-2 text-xs text-txt2 cursor-pointer select-none border border-line/60">
+        <div className="flex flex-col pr-2">
+          <span className="font-medium text-txt text-[11px]">Simplify Vector Paths</span>
+          <span className="text-[10px] text-txt3">Remove redundant anchors while preserving curve fidelity</span>
+        </div>
+        <input
+          type="checkbox"
+          checked={simplifyPaths}
+          onChange={(e) => setSimplifyPaths(e.target.checked)}
+          className="h-4 w-4 rounded accent-accent cursor-pointer"
+        />
+      </label>
+
       {loadingMode && (
         <div className="mt-2.5 flex items-center justify-center gap-2 text-xs text-accent">
           <div className="h-3 w-3 animate-spin rounded-full border-2 border-accent border-t-transparent" />
@@ -1153,10 +1391,45 @@ function ConvertTextPanel() {
 
 function StylePanel() {
   const { l, up } = useSel()
+  const family = l.fontFamily || 'Manrope'
+  const realWeights = getAvailableWeightsForFont(family)
+  const currentWeight = getClosestAvailableWeight(family, l.fontWeight || 700)
+
   return (
-    <div className="pb-4">
+    <div className="pb-4 space-y-3">
       <Slider label="Size" tid="slider-size" value={l.fontSize || 40} min={10} max={400} onChange={(v: number) => up({ fontSize: v })} />
-      <Slider label="Weight" tid="slider-weight" value={l.fontWeight || 700} min={400} max={800} step={100} onChange={(v: number) => up({ fontWeight: v })} />
+
+      {/* Real Available Weights selection instead of a continuous slider that causes faux/synthetic weights */}
+      <div className="space-y-1.5">
+        <div className="flex items-center justify-between text-xs">
+          <span className="text-txt2 font-medium">Font Weight</span>
+          <span className="text-[11px] text-txt3">
+            Real Weight: <strong className="text-txt font-semibold">{currentWeight}</strong>
+          </span>
+        </div>
+        <div className="flex flex-wrap gap-1.5 pt-0.5">
+          {realWeights.map((w) => {
+            const isSelected = currentWeight === w.weight
+            return (
+              <button
+                key={w.weight}
+                type="button"
+                data-testid={`style-weight-${w.weight}`}
+                onClick={() => up({ fontWeight: w.weight })}
+                className={`flex-1 min-w-[65px] py-1.5 px-2 rounded-lg text-xs font-semibold transition-all cursor-pointer text-center ${
+                  isSelected
+                    ? 'bg-accent text-white shadow-xs'
+                    : 'bg-surface2 hover:bg-surface2/80 text-txt2 hover:text-white'
+                }`}
+              >
+                {w.label}
+                <div className="text-[9px] opacity-75">{w.weight}</div>
+              </button>
+            )
+          })}
+        </div>
+      </div>
+
       {l.type === 'text' && <ConvertTextSection layer={l} />}
     </div>
   )
@@ -1663,9 +1936,8 @@ export function VectorFloatingPanel() {
     const targets = validSelected.length > 0 ? validSelected : [0]
     const updated = pts.map((pt, i) => {
       if (!targets.includes(i)) return pt
-      const prev = pts[(i - 1 + pts.length) % pts.length]
-      const next = pts[(i + 1) % pts.length]
-      return switchPointBezierMode(pt, targetMode, prev, next)
+      const { prevPt, nextPt } = getAdjacentVectorPoints(pts, i, l.closed !== false)
+      return switchPointBezierMode(pt, targetMode, prevPt, nextPt)
     })
     const tight = tightenVectorLayer({ ...l, points: updated })
     up(tight)
@@ -1681,21 +1953,24 @@ export function VectorFloatingPanel() {
 
     const selIdx = validSelected.length > 0 ? validSelected[validSelected.length - 1] : pts.length - 1
     const currPt = pts[selIdx]
-    const nextIdx = (selIdx + 1) % pts.length
-    const nextPt = pts[nextIdx]
+    const { nextPt } = getAdjacentVectorPoints(pts, selIdx, l.closed !== false)
 
     let newX: number
     let newY: number
 
-    if (!l.closed && selIdx === pts.length - 1) {
-      const prevPt = pts.length > 1 ? pts[pts.length - 2] : { x: 0, y: 0 }
-      const dx = currPt.x - prevPt.x || 30
-      const dy = currPt.y - prevPt.y || 0
+    if (!l.closed && !nextPt) {
+      const { prevPt } = getAdjacentVectorPoints(pts, selIdx, false)
+      const p = prevPt || { x: 0, y: 0 }
+      const dx = currPt.x - p.x || 30
+      const dy = currPt.y - p.y || 0
       newX = Math.round(Math.min(l.w + 60, Math.max(0, currPt.x + dx)))
       newY = Math.round(Math.min(l.h + 60, Math.max(0, currPt.y + dy)))
-    } else {
+    } else if (nextPt) {
       newX = Math.round((currPt.x + nextPt.x) / 2)
       newY = Math.round((currPt.y + nextPt.y) / 2)
+    } else {
+      newX = Math.round(currPt.x + 20)
+      newY = Math.round(currPt.y + 20)
     }
 
     const insertIdx = selIdx + 1
@@ -1710,7 +1985,26 @@ export function VectorFloatingPanel() {
     const targets = validSelected.length > 0 ? validSelected : [pts.length - 1]
     if (pts.length - targets.length < 2) return
 
-    const newPoints = pts.filter((_, idx) => !targets.includes(idx))
+    const targetSet = new Set(targets)
+    const newPoints: VectorPoint[] = []
+    let transferSubpathStart = false
+
+    for (let i = 0; i < pts.length; i++) {
+      const p = pts[i]
+      const isStart = Boolean(i > 0 && p.subpathStart)
+      if (targetSet.has(i)) {
+        if (isStart || transferSubpathStart) {
+          transferSubpathStart = true
+        }
+        continue
+      }
+      if (transferSubpathStart) {
+        newPoints.push({ ...p, subpathStart: true })
+        transferSubpathStart = false
+      } else {
+        newPoints.push(p)
+      }
+    }
     const tight = tightenVectorLayer({ ...l, points: newPoints })
     up(tight)
     const nextSel = Math.min(targets[0] ?? 0, newPoints.length - 1)
@@ -1886,6 +2180,130 @@ export function VectorFloatingPanel() {
   )
 }
 
+export function TextFloatingPanel() {
+  const { selected, tool, openTool, updateLayer } = useEditor()
+  const [expanded, setExpanded] = useState(true)
+
+  if (!selected || selected.type !== 'text' || tool) return null
+
+  const l = selected
+  const up = (patch: any) => updateLayer(l.id, patch)
+
+  const selectedFamily = l.fontFamily || 'Manrope'
+  const currentWeight = getClosestAvailableWeight(selectedFamily, l.fontWeight || 700)
+
+  const btnClass = 'grid h-8 w-8 place-items-center rounded-full transition-all active:scale-90 focus:outline-none'
+  const inactiveBtnClass = `${btnClass} text-white/70 hover:bg-white/20 hover:text-white`
+  const activeBtnClass = `${btnClass} bg-accent text-white shadow-sm ring-1 ring-accent/60`
+
+  return (
+    <section
+      role="toolbar"
+      aria-label="Text font toolbar"
+      data-testid="floating-text-panel"
+      className="pointer-events-auto absolute right-3 top-1/2 z-30 -translate-y-1/2 flex w-9 flex-col items-center gap-1 rounded-full border border-white/10 bg-black/60 p-1 text-xs font-semibold text-white shadow-2xl backdrop-blur-md transition-all duration-200"
+    >
+      {expanded ? (
+        <div className="flex w-full flex-col items-center gap-1">
+          {/* 1. Open font selector sheet */}
+          <button
+            type="button"
+            data-testid="text-floating-font-btn"
+            onClick={() => openTool('font')}
+            aria-label="Font family selection"
+            title={`Font: ${selectedFamily} (Click to change font)`}
+            className={activeBtnClass}
+          >
+            <TypeIcon className="size-4" />
+          </button>
+
+          {/* 2. Text style & weights */}
+          <button
+            type="button"
+            data-testid="text-floating-style-btn"
+            onClick={() => openTool('style')}
+            aria-label="Text style and real weights"
+            title={`Style & Weights (Current weight: ${currentWeight})`}
+            className={inactiveBtnClass}
+          >
+            <span className="text-[11px] font-bold">W</span>
+          </button>
+
+          {/* 3. Text color */}
+          <button
+            type="button"
+            data-testid="text-floating-color-btn"
+            onClick={() => openTool('color')}
+            aria-label="Text color"
+            title="Text color"
+            className={inactiveBtnClass}
+          >
+            <div
+              className="h-3.5 w-3.5 rounded-full border border-white/40 shadow-xs"
+              style={{ backgroundColor: l.color || '#FFFFFF' }}
+            />
+          </button>
+
+          {/* 4. Text alignment cycle */}
+          <button
+            type="button"
+            data-testid="text-floating-align-btn"
+            onClick={() => {
+              const nextAlign = l.align === 'left' ? 'center' : l.align === 'center' ? 'right' : 'left'
+              up({ align: nextAlign })
+            }}
+            aria-label={`Alignment: ${l.align || 'left'}`}
+            title={`Alignment: ${l.align || 'left'} (Click to cycle)`}
+            className={inactiveBtnClass}
+          >
+            <span className="text-[10px] font-bold uppercase">{l.align ? l.align[0] : 'L'}</span>
+          </button>
+
+          {/* 5. Convert text to vector path */}
+          <button
+            type="button"
+            data-testid="text-floating-vector-btn"
+            onClick={() => openTool('convertText')}
+            aria-label="Convert text to vector paths"
+            title="Convert text to vector paths"
+            className={`${inactiveBtnClass} hover:text-accent`}
+          >
+            <Spline className="size-4 text-accent" />
+          </button>
+
+          <div className="my-0.5 h-px w-4 bg-white/20" />
+
+          {/* 6. Collapse toggle button */}
+          <button
+            type="button"
+            data-testid="text-panel-toggle"
+            onClick={() => setExpanded(false)}
+            aria-label="Collapse text panel"
+            title="Collapse text panel"
+            className={inactiveBtnClass}
+          >
+            <ChevronRight className="size-4" />
+          </button>
+        </div>
+      ) : (
+        /* Collapsed state: Toggle button with the same TypeIcon as horizontal toolbar */
+        <div className="flex flex-col items-center gap-1">
+          <button
+            type="button"
+            data-testid="text-panel-toggle"
+            onClick={() => setExpanded(true)}
+            aria-label="Open text element toolpanel"
+            title="Open text element toolpanel"
+            className={activeBtnClass}
+          >
+            <TypeIcon className="size-4" />
+          </button>
+        </div>
+      )}
+    </section>
+  )
+}
+
 function VectorToolPanel() {
   const { openTool, selected, setVectorEditingId } = useEditor()
   useEffect(() => {
@@ -1910,6 +2328,20 @@ function VectorPanel() {
   const { l, up } = useSel()
   const { vectorSnap, toggleVectorSnap, selectedAnchorIndices, setSelectedAnchors, vectorEditingId, setVectorEditingId } = useEditor()
   const pts = l.points || []
+  const [notice, setNotice] = useState<string | null>(null)
+  const noticeTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+
+  const showNotice = (msg: string) => {
+    if (noticeTimerRef.current) clearTimeout(noticeTimerRef.current)
+    setNotice(msg)
+    noticeTimerRef.current = setTimeout(() => setNotice(null), 2400)
+  }
+
+  useEffect(() => {
+    return () => {
+      if (noticeTimerRef.current) clearTimeout(noticeTimerRef.current)
+    }
+  }, [])
 
   useEffect(() => {
     if (l && l.type === 'path' && vectorEditingId !== l.id) {
@@ -1927,9 +2359,8 @@ function VectorPanel() {
     const targets = validSelected.length > 0 ? validSelected : [0]
     const updated = pts.map((pt, i) => {
       if (!targets.includes(i)) return pt
-      const prev = pts[(i - 1 + pts.length) % pts.length]
-      const next = pts[(i + 1) % pts.length]
-      return switchPointBezierMode(pt, targetMode, prev, next)
+      const { prevPt, nextPt } = getAdjacentVectorPoints(pts, i, l.closed !== false)
+      return switchPointBezierMode(pt, targetMode, prevPt, nextPt)
     })
     const tight = tightenVectorLayer({ ...l, points: updated })
     up(tight)
@@ -1948,21 +2379,24 @@ function VectorPanel() {
     }
     const selIdx = validSelected.length > 0 ? validSelected[validSelected.length - 1] : pts.length - 1
     const currPt = pts[selIdx]
-    const nextIdx = (selIdx + 1) % pts.length
-    const nextPt = pts[nextIdx]
+    const { nextPt } = getAdjacentVectorPoints(pts, selIdx, l.closed !== false)
 
     let newX: number
     let newY: number
 
-    if (!l.closed && selIdx === pts.length - 1) {
-      const prevPt = pts.length > 1 ? pts[pts.length - 2] : { x: 0, y: 0 }
-      const dx = currPt.x - prevPt.x || 30
-      const dy = currPt.y - prevPt.y || 0
+    if (!l.closed && !nextPt) {
+      const { prevPt } = getAdjacentVectorPoints(pts, selIdx, false)
+      const p = prevPt || { x: 0, y: 0 }
+      const dx = currPt.x - p.x || 30
+      const dy = currPt.y - p.y || 0
       newX = Math.round(Math.min(l.w + 60, Math.max(0, currPt.x + dx)))
       newY = Math.round(Math.min(l.h + 60, Math.max(0, currPt.y + dy)))
-    } else {
+    } else if (nextPt) {
       newX = Math.round((currPt.x + nextPt.x) / 2)
       newY = Math.round((currPt.y + nextPt.y) / 2)
+    } else {
+      newX = Math.round(currPt.x + 20)
+      newY = Math.round(currPt.y + 20)
     }
 
     const insertIdx = selIdx + 1
@@ -1976,11 +2410,49 @@ function VectorPanel() {
   const removePoint = () => {
     const targets = validSelected.length > 0 ? validSelected : [pts.length - 1]
     if (pts.length - targets.length < 2) return
-    const updated = pts.filter((_, i) => !targets.includes(i))
+
+    const targetSet = new Set(targets)
+    const updated: VectorPoint[] = []
+    let transferSubpathStart = false
+
+    for (let i = 0; i < pts.length; i++) {
+      const p = pts[i]
+      const isStart = Boolean(i > 0 && p.subpathStart)
+      if (targetSet.has(i)) {
+        if (isStart || transferSubpathStart) {
+          transferSubpathStart = true
+        }
+        continue
+      }
+      if (transferSubpathStart) {
+        updated.push({ ...p, subpathStart: true })
+        transferSubpathStart = false
+      } else {
+        updated.push(p)
+      }
+    }
+
     const tight = tightenVectorLayer({ ...l, points: updated })
     up(tight)
     const nextSel = Math.min(targets[0] ?? 0, updated.length - 1)
     setSelectedAnchors([Math.max(0, nextSel)])
+  }
+
+  const handleSimplifyPath = () => {
+    if (!pts || pts.length <= 2) return
+    const originalCount = pts.length
+    const tolerance = originalCount > 25 ? 0.75 : 1.0
+    const simplified = simplifyVectorPoints(pts, tolerance)
+    if (simplified.length < originalCount) {
+      const tight = tightenVectorLayer({ ...l, points: simplified })
+      up(tight)
+      setSelectedAnchors([0])
+      const diff = originalCount - simplified.length
+      const pct = Math.round((diff / originalCount) * 100)
+      showNotice(`Simplified: -${diff} anchors (-${pct}%)`)
+    } else {
+      showNotice('Already optimal')
+    }
   }
 
   const canDelete = pts.length - (validSelected.length > 0 ? validSelected.length : 1) >= 2
@@ -2080,6 +2552,18 @@ function VectorPanel() {
       >
         <Spline className="size-4" />
       </button>
+      {/* Simplify path (remove redundant anchors) */}
+      <button
+        type="button"
+        data-testid="simplify-path-btn"
+        onClick={handleSimplifyPath}
+        disabled={pts.length < 3}
+        aria-label="Simplify path: Remove redundant anchor points"
+        title={`Simplify path — remove redundant anchor points (${pts.length} anchors)`}
+        className={`${actionClass} hover:text-amber-300`}
+      >
+        <Wand2 className="size-4" />
+      </button>
       <div className="my-0.5 h-px w-4 bg-white/20" />
       <div className="flex flex-col items-center gap-0.5" aria-label="Select anchor point">
         {pts.map((_, i) => (
@@ -2093,6 +2577,11 @@ function VectorPanel() {
           />
         ))}
       </div>
+      {notice && (
+        <div className="pointer-events-none absolute right-12 top-1/2 -translate-y-1/2 whitespace-nowrap rounded-lg border border-accent/40 bg-black/90 px-3 py-1.5 text-xs font-semibold text-accent shadow-2xl backdrop-blur-md">
+          {notice}
+        </div>
+      )}
     </div>
   )
 }

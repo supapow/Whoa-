@@ -2,122 +2,15 @@ import * as opentype from 'opentype.js'
 import type { Layer, VectorPoint } from '#/types'
 import { uid } from '#/lib/data'
 import { computeGroupBounds } from '#/lib/groups'
-
-// In-memory cache for parsed fonts to ensure instant subsequent conversions
-const fontCache = new Map<string, opentype.Font>()
-const pendingFontLoads = new Map<string, Promise<opentype.Font>>()
-
-/**
- * Determine the exact local TTF font file based on fontFamily and fontWeight.
- */
-export function getFontFileForFamily(fontFamily: string = 'Manrope', fontWeight: number = 700): string {
-  const fam = fontFamily.toLowerCase()
-
-  if (fam.includes('ibm')) {
-    return fontWeight >= 600 ? '/fonts/ibm-plex-sans-700.ttf' : '/fonts/ibm-plex-sans-400.ttf'
-  }
-  if (fam.includes('playfair')) {
-    return fontWeight >= 600 ? '/fonts/playfair-display-700.ttf' : '/fonts/playfair-display-400.ttf'
-  }
-  if (fam.includes('anton') || fam.includes('impact')) {
-    return '/fonts/anton.ttf'
-  }
-  if (fam.includes('archivo') || fam.includes('arial black')) {
-    return '/fonts/archivo-black.ttf'
-  }
-  if (fam.includes('mono') || fam.includes('courier')) {
-    return fontWeight >= 600 ? '/fonts/courier-bold.ttf' : '/fonts/courier-regular.ttf'
-  }
-  if (fam.includes('georgia') || fam.includes('serif')) {
-    return fontWeight >= 600 ? '/fonts/georgia-bold.ttf' : '/fonts/georgia-regular.ttf'
-  }
-
-  // Default: Manrope with full weight spectrum
-  if (fontWeight >= 750) return '/fonts/manrope-800.ttf'
-  if (fontWeight >= 650) return '/fonts/manrope-700.ttf'
-  if (fontWeight >= 550) return '/fonts/manrope-600.ttf'
-  return '/fonts/manrope-400.ttf'
-}
-
-/**
- * Dynamically fetch and parse a Google Font TTF if not bundled locally.
- */
-async function fetchGoogleFont(family: string, weight: number): Promise<opentype.Font | null> {
-  try {
-    const famParam = family.trim().replace(/\s+/g, '+')
-    const query = weight ? `family=${famParam}:wght@${weight}` : `family=${famParam}`
-    const cssUrl = `https://fonts.googleapis.com/css2?${query}`
-    const res = await fetch(cssUrl, {
-      headers: {
-        'User-Agent':
-          'Mozilla/5.0 (Linux; U; Android 4.3; en-us; SM-N900T Build/JSS15J) AppleWebKit/534.30 (KHTML, like Gecko) Version/4.0 Mobile Safari/534.30',
-      },
-    })
-    if (!res.ok) return null
-    const css = await res.text()
-    const match = css.match(/src:\s*url\((https:\/\/[^)]+)\)\s*format\(['"]?truetype['"]?\)/i)
-    if (!match) return null
-
-    const fontRes = await fetch(match[1])
-    if (!fontRes.ok) return null
-    const buffer = await fontRes.arrayBuffer()
-    return opentype.parse(buffer)
-  } catch (err) {
-    console.warn(`[textToVector] Failed dynamic Google Font fetch for ${family}:`, err)
-    return null
-  }
-}
+import { simplifyVectorPoints } from '#/lib/vector'
+import { getVerifiedOpenTypeFont, getClosestAvailableWeight } from '#/lib/fonts'
 
 /**
  * Load and parse an OpenType font file with caching and fallbacks.
+ * Uses getVerifiedOpenTypeFont to ensure genuine vector curves without faux synthesized weights.
  */
 export async function loadFont(fontFamily: string = 'Manrope', fontWeight: number = 700): Promise<opentype.Font> {
-  const cacheKey = `${fontFamily.toLowerCase()}__${fontWeight}`
-
-  if (fontCache.has(cacheKey)) {
-    return fontCache.get(cacheKey)!
-  }
-
-  if (pendingFontLoads.has(cacheKey)) {
-    return pendingFontLoads.get(cacheKey)!
-  }
-
-  const loadPromise = (async () => {
-    const fontFile = getFontFileForFamily(fontFamily, fontWeight)
-
-    // Try bundled local file first
-    try {
-      const res = await fetch(fontFile)
-      if (res.ok) {
-        const buffer = await res.arrayBuffer()
-        const font = opentype.parse(buffer)
-        fontCache.set(cacheKey, font)
-        return font
-      }
-    } catch {
-      // Continue to dynamic fetch or fallback
-    }
-
-    // Try Google Fonts dynamic fetch for unbundled font families
-    const dynamicFont = await fetchGoogleFont(fontFamily, fontWeight)
-    if (dynamicFont) {
-      fontCache.set(cacheKey, dynamicFont)
-      return dynamicFont
-    }
-
-    // Safe fallback: local Manrope
-    const fallbackFile = fontWeight >= 600 ? '/fonts/manrope-800.ttf' : '/fonts/manrope-400.ttf'
-    const fallbackRes = await fetch(fallbackFile)
-    const fallbackBuf = await fallbackRes.arrayBuffer()
-    const font = opentype.parse(fallbackBuf)
-    fontCache.set(cacheKey, font)
-    return font
-  })().finally(() => {
-    pendingFontLoads.delete(cacheKey)
-  })
-
-  pendingFontLoads.set(cacheKey, loadPromise)
-  return loadPromise
+  return getVerifiedOpenTypeFont(fontFamily, fontWeight)
 }
 
 /**
@@ -191,8 +84,13 @@ export function commandsToVectorPoints(
       const px = fmt((cmd.x + dx) * sx)
       const py = fmt((cmd.y + dy) * sy)
 
+      // Skip 0-distance duplicate line segments emitted by font decoders
+      if (currPoint && Math.abs(px - currPoint.x) < 0.25 && Math.abs(py - currPoint.y) < 0.25) {
+        continue
+      }
+
       // If this line segment closes back to the start point, do not duplicate the anchor
-      if (startPoint && Math.abs(px - startPoint.x) < 0.05 && Math.abs(py - startPoint.y) < 0.05) {
+      if (startPoint && Math.hypot(px - startPoint.x, py - startPoint.y) < 0.35) {
         continue
       }
 
@@ -211,7 +109,7 @@ export function commandsToVectorPoints(
       const cp2x = fmt((cmd.x2 + dx) * sx)
       const cp2y = fmt((cmd.y2 + dy) * sy)
 
-      const isClosing = startPoint && Math.abs(px - startPoint.x) < 0.05 && Math.abs(py - startPoint.y) < 0.05
+      const isClosing = startPoint && Math.hypot(px - startPoint.x, py - startPoint.y) < 0.35
       if (isClosing) {
         if (currPoint) currPoint.cp2 = { x: cp1x, y: cp1y }
         if (startPoint) startPoint.cp1 = { x: cp2x, y: cp2y }
@@ -246,7 +144,7 @@ export function commandsToVectorPoints(
       const px = fmt(p1x)
       const py = fmt(p1y)
 
-      const isClosing = startPoint && Math.abs(px - startPoint.x) < 0.05 && Math.abs(py - startPoint.y) < 0.05
+      const isClosing = startPoint && Math.hypot(px - startPoint.x, py - startPoint.y) < 0.35
       if (isClosing) {
         if (currPoint) currPoint.cp2 = { x: cp1x, y: cp1y }
         if (startPoint) startPoint.cp1 = { x: cp2x, y: cp2y }
@@ -266,7 +164,7 @@ export function commandsToVectorPoints(
       currPoint = pt
     } else if (cmd.type === 'Z') {
       if (currPoint && startPoint && currPoint !== startPoint) {
-        if (Math.abs(currPoint.x - startPoint.x) < 0.05 && Math.abs(currPoint.y - startPoint.y) < 0.05) {
+        if (Math.hypot(currPoint.x - startPoint.x, currPoint.y - startPoint.y) < 0.35) {
           if (currPoint.cp1 && !startPoint.cp1) {
             startPoint.cp1 = currPoint.cp1
           }
@@ -281,6 +179,7 @@ export function commandsToVectorPoints(
 
 export interface ConvertOptions {
   preserveLigatures?: boolean
+  simplifyPaths?: boolean
 }
 
 export interface ConvertedTextResult {
@@ -424,7 +323,8 @@ export async function convertTextLayerToVectors(
 
     // Offset commands so they sit at (0, 0) inside the layer's local coordinate system
     const localSvgPath = commandsToSvgPath(allCommands, -globalMinX, -globalMinY)
-    const localPoints = commandsToVectorPoints(allCommands, -globalMinX, -globalMinY)
+    const rawPoints = commandsToVectorPoints(allCommands, -globalMinX, -globalMinY)
+    const localPoints = options.simplifyPaths !== false ? simplifyVectorPoints(rawPoints, 0.75) : rawPoints
 
     const singleLayer: Layer = {
       id: uid(),
@@ -478,7 +378,8 @@ export async function convertTextLayerToVectors(
 
     // Local path inside this glyph's bounding box
     const glyphPath = commandsToSvgPath(g.commands, -g.bbox.x1, -g.bbox.y1)
-    const glyphPoints = commandsToVectorPoints(g.commands, -g.bbox.x1, -g.bbox.y1)
+    const rawGlyphPoints = commandsToVectorPoints(g.commands, -g.bbox.x1, -g.bbox.y1)
+    const glyphPoints = options.simplifyPaths !== false ? simplifyVectorPoints(rawGlyphPoints, 0.75) : rawGlyphPoints
 
     const childLayer: Layer = {
       id: uid(),
