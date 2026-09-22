@@ -1096,7 +1096,17 @@ function FontPanel() {
 }
 
 function ColorPanel() {
-  const { selected, selectedIds, updateLayers, updateLayer, time, startEyedropper } = useEditor()
+  const {
+    selected,
+    selectedIds,
+    updateLayers,
+    updateLayer,
+    time,
+    startEyedropper,
+    updateEyedropperColor,
+    finishEyedropper,
+    cancelEyedropper,
+  } = useEditor()
   const [colorMode, setColorMode] = useState<'fill' | 'stroke'>('fill')
   const [isPickerExpanded, setIsPickerExpanded] = useState(false)
   const l = selected!
@@ -1113,12 +1123,28 @@ function ColorPanel() {
   }
 
   const handleStartEyedropper = () => {
+    const initialColor = cur === 'transparent' ? '#007AFF' : (cur || '#007AFF')
     startEyedropper({
       target: 'layer',
       layerId: l.id,
       key: key as 'fill' | 'stroke' | 'color',
-      initialColor: cur === 'transparent' ? '#007AFF' : (cur || '#007AFF'),
-      currentColor: cur === 'transparent' ? '#007AFF' : (cur || '#007AFF'),
+      initialColor,
+      currentColor: initialColor,
+    })
+
+    // Use the native eyedropper when available so pixels can be sampled from
+    // rendered images without tainting a canvas or losing color accuracy.
+    const EyeDropperCtor = (window as Window & {
+      EyeDropper?: new () => { open: () => Promise<{ sRGBHex: string }> }
+    }).EyeDropper
+    if (!EyeDropperCtor) return
+
+    const picker = new EyeDropperCtor()
+    picker.open().then(({ sRGBHex }) => {
+      updateEyedropperColor(sRGBHex)
+      finishEyedropper()
+    }).catch(() => {
+      cancelEyedropper()
     })
   }
 
