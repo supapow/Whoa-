@@ -1359,19 +1359,16 @@ export function EditorProvider({ project, children }: { project: Project; childr
       nudge,
       toggleKeyframe,
       moveKeyframe,
-      deleteKeyframe,
-      clearKeyframes,
-      replaceLayerWithLayers,
-      convertTextToVectors,
-<<<<<<< HEAD
-      simplifyVectorLayer,
-=======
-      startEyedropper,
-      updateEyedropperColor,
-      cancelEyedropper,
-      finishEyedropper,
->>>>>>> origin/main
-    ],
+  deleteKeyframe,
+  clearKeyframes,
+  replaceLayerWithLayers,
+  convertTextToVectors,
+  simplifyVectorLayer,
+  startEyedropper,
+  updateEyedropperColor,
+  cancelEyedropper,
+  finishEyedropper,
+  ],
   )
 
   return <EditorCtx.Provider value={value}>{children}</EditorCtx.Provider>
