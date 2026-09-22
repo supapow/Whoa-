@@ -28,6 +28,14 @@ export interface HistoryEntry {
   selectedIds: string[]
 }
 
+export interface EyedropperSession {
+  target: 'layer' | 'background'
+  layerId?: string
+  key?: 'fill' | 'stroke' | 'color'
+  initialColor: string
+  currentColor: string
+}
+
 interface State {
   project: Project
   past: HistoryEntry[]
@@ -35,6 +43,7 @@ interface State {
   selectedId: string | null
   selectedIds: string[]
   tool: string | null
+  eyedropper: EyedropperSession | null
   time: number
   playing: boolean
   artboardSnap: boolean
@@ -100,6 +109,10 @@ type Action =
   | { t: 'deleteKeyframe'; layerId: string; keyframeId: string }
   | { t: 'clearKeyframes'; layerId: string }
   | { t: 'replaceLayerWithLayers'; targetId: string; newLayers: Layer[]; selectId?: string; selectIds?: string[] }
+  | { t: 'startEyedropper'; session: EyedropperSession }
+  | { t: 'updateEyedropperColor'; color: string }
+  | { t: 'cancelEyedropper' }
+  | { t: 'finishEyedropper' }
   | { t: 'undo' }
   | { t: 'redo' }
   | { t: 'checkpoint' }
@@ -814,6 +827,55 @@ function innerReducer(state: State, a: Action): State {
       const layers = p.layers.map((l) => (l.id === a.layerId ? { ...l, keyframes: undefined } : l))
       return { ...state, project: touch({ ...p, layers }) }
     }
+    case 'startEyedropper':
+      return {
+        ...state,
+        eyedropper: a.session,
+        tool: null,
+      }
+    case 'updateEyedropperColor': {
+      if (!state.eyedropper) return state
+      const eyedropper = { ...state.eyedropper, currentColor: a.color }
+      if (eyedropper.target === 'layer' && eyedropper.layerId && eyedropper.key) {
+        const layers = p.layers.map((l) =>
+          l.id === eyedropper.layerId ? { ...l, [eyedropper.key!]: a.color } : l
+        )
+        return { ...state, project: touch({ ...p, layers }), eyedropper }
+      }
+      if (eyedropper.target === 'background') {
+        const background: Background = { type: 'color', value: a.color }
+        return { ...state, project: touch({ ...p, background }), eyedropper }
+      }
+      return { ...state, eyedropper }
+    }
+    case 'cancelEyedropper': {
+      if (!state.eyedropper) return state
+      const { target, layerId, key, initialColor } = state.eyedropper
+      let nextProject = p
+      if (target === 'layer' && layerId && key) {
+        const layers = p.layers.map((l) =>
+          l.id === layerId ? { ...l, [key]: initialColor } : l
+        )
+        nextProject = touch({ ...p, layers })
+      } else if (target === 'background') {
+        const background: Background = { type: 'color', value: initialColor }
+        nextProject = touch({ ...p, background })
+      }
+      return {
+        ...state,
+        project: nextProject,
+        eyedropper: null,
+        tool: null,
+      }
+    }
+    case 'finishEyedropper': {
+      if (!state.eyedropper) return state
+      return {
+        ...state,
+        eyedropper: null,
+        tool: null,
+      }
+    }
     default:
       return state
   }
@@ -901,7 +963,9 @@ function reducer(state: State, a: Action): State {
     a.t === 'toggleTimeline' ||
     a.t === 'setTimelineOpen' ||
     a.t === 'setImagePositioningId' ||
-    a.t === 'setAnimationSide'
+    a.t === 'setAnimationSide' ||
+    a.t === 'startEyedropper' ||
+    a.t === 'finishEyedropper'
   ) {
     return innerReducer(state, a)
   }
@@ -914,11 +978,13 @@ function reducer(state: State, a: Action): State {
 
   const now = Date.now()
   const isContinuous =
-    a.t === 'updateLayer' || a.t === 'updateLayers' || a.t === 'nudge' || a.t === 'moveKeyframe'
+    a.t === 'updateLayer' || a.t === 'updateLayers' || a.t === 'nudge' || a.t === 'moveKeyframe' || a.t === 'updateEyedropperColor'
 
   const actionKey =
     a.t === 'updateLayer'
       ? `updateLayer:${a.id}`
+      : a.t === 'updateEyedropperColor'
+      ? 'updateEyedropperColor'
       : a.t === 'updateLayers'
       ? `updateLayers:${a.ids.slice().sort().join(',')}`
       : a.t === 'nudge'
@@ -1014,6 +1080,11 @@ interface Ctx extends State {
   deleteKeyframe: (layerId: string, keyframeId: string) => void
   clearKeyframes: (layerId: string) => void
   replaceLayerWithLayers: (targetId: string, newLayers: Layer[], selectId?: string, selectIds?: string[]) => void
+  eyedropper: EyedropperSession | null
+  startEyedropper: (session: EyedropperSession) => void
+  updateEyedropperColor: (color: string) => void
+  cancelEyedropper: () => void
+  finishEyedropper: () => void
   convertTextToVectors: (
     targetId: string,
     mode?: 'single' | 'group',
@@ -1031,6 +1102,7 @@ export function EditorProvider({ project, children }: { project: Project; childr
     selectedId: null,
     selectedIds: [],
     tool: null,
+    eyedropper: null,
     time: 0,
     playing: false,
     artboardSnap: true,
@@ -1114,6 +1186,11 @@ export function EditorProvider({ project, children }: { project: Project; childr
   const moveKeyframe = useCallback((layerId: string, keyframeId: string, newTime: number) => dispatch({ t: 'moveKeyframe', layerId, keyframeId, newTime }), [])
   const deleteKeyframe = useCallback((layerId: string, keyframeId: string) => dispatch({ t: 'deleteKeyframe', layerId, keyframeId }), [])
   const clearKeyframes = useCallback((layerId: string) => dispatch({ t: 'clearKeyframes', layerId }), [])
+
+  const startEyedropper = useCallback((session: EyedropperSession) => dispatch({ t: 'startEyedropper', session }), [])
+  const updateEyedropperColor = useCallback((color: string) => dispatch({ t: 'updateEyedropperColor', color }), [])
+  const cancelEyedropper = useCallback(() => dispatch({ t: 'cancelEyedropper' }), [])
+  const finishEyedropper = useCallback(() => dispatch({ t: 'finishEyedropper' }), [])
 
   const replaceLayerWithLayers = useCallback(
     (targetId: string, newLayers: Layer[], selectId?: string, selectIds?: string[]) => {
@@ -1225,6 +1302,11 @@ export function EditorProvider({ project, children }: { project: Project; childr
       clearKeyframes,
       replaceLayerWithLayers,
       convertTextToVectors,
+      eyedropper: state.eyedropper,
+      startEyedropper,
+      updateEyedropperColor,
+      cancelEyedropper,
+      finishEyedropper,
     }),
     [
       state,
@@ -1272,6 +1354,10 @@ export function EditorProvider({ project, children }: { project: Project; childr
       clearKeyframes,
       replaceLayerWithLayers,
       convertTextToVectors,
+      startEyedropper,
+      updateEyedropperColor,
+      cancelEyedropper,
+      finishEyedropper,
     ],
   )
 

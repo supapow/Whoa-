@@ -404,6 +404,7 @@ export default function Canvas() {
     artboardSnap, vectorSnap, selectedAnchorIndices, setSelectedAnchors, toggleSelectedAnchor,
     anchorMultiSelectMode, setAnchorMultiSelectMode,
     nudge, imagePositioningId, setImagePositioningId, vectorEditingId, setVectorEditingId, timelineOpen, checkpoint,
+    eyedropper,
   } = useEditor()
   const [nudgeIncrement, setNudgeIncrement] = useState<number>(1)
   const nudgeIncrementRef = useRef<number>(1)
@@ -2907,7 +2908,9 @@ export default function Canvas() {
   return (
     <div
       ref={ref}
-      className="checkerboard relative z-0 flex min-h-0 min-w-0 flex-1 touch-none items-center justify-center overflow-hidden select-none"
+      className={`checkerboard relative z-0 flex min-h-0 min-w-0 flex-1 touch-none items-center justify-center overflow-hidden select-none ${
+        eyedropper ? 'pointer-events-none' : ''
+      }`}
       onContextMenu={(e) => e.preventDefault()}
       onPointerDownCapture={(e) => {
         if (e.pointerType !== 'touch') return

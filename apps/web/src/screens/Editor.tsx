@@ -7,6 +7,7 @@ import Toolbar from '#/components/editor/Toolbar'
 import Timeline from '#/components/editor/Timeline'
 import ToolSheet, { VectorFloatingPanel, TextFloatingPanel } from '#/components/editor/Panels'
 import ExportSheet from '#/components/editor/ExportSheet'
+import ColorLoupe from '#/components/editor/ColorLoupe'
 
 export default function Editor({ project, onExit }: { project: Project; onExit: () => void }) {
   return (
@@ -144,6 +145,7 @@ function EditorInner({ onExit }: { onExit: () => void }) {
       <Toolbar onExport={() => setExportOpen(true)} />
       <Timeline />
       <ToolSheet />
+      <ColorLoupe />
       {exportOpen && <ExportSheet onClose={() => setExportOpen(false)} />}
     </div>
   )

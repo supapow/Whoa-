@@ -3,17 +3,18 @@ import {
   X, Upload, Type as TypeIcon, Folder, FolderPlus,
   Component as ComponentIcon, ChevronRight, ChevronLeft, ChevronDown, Plus, Trash2,
   Lock, Unlock, CircleDot, Diamond, Droplet, PenTool, Spline, Magnet, Check, CheckSquare,
-  Wand2, Globe, FileUp, Sparkles,
+  Wand2, Globe, FileUp, Pipette,
 } from 'lucide-react'
+import ColorPicker from '#/components/editor/ColorPicker'
 import { useEditor } from '#/store/editor'
 import type { ShapeKind, Layer, VectorPoint } from '#/types'
 import { hasKeyframeAt, getAdjacentKeyframes, interpolateKeyframes } from '#/lib/keyframes'
 import {
-  FONTS, PALETTE, GRADIENTS, BG_IMAGES, STOCK_IMAGES, STICKERS, SHAPES,
+  PALETTE, GRADIENTS, BG_IMAGES, STOCK_IMAGES, STICKERS, SHAPES,
 } from '#/lib/data'
 import {
   getAllFonts, getAvailableWeightsForFont, getClosestAvailableWeight,
-  registerUploadedFontFile, addGoogleFontFamily, subscribeFonts, type FontDefinition,
+  registerUploadedFontFile, addGoogleFontFamily, subscribeFonts,
 } from '#/lib/fonts'
 import { getLibraryComponents, deleteComponentFromLibrary, type ComponentItem } from '#/lib/groups'
 import {
@@ -359,8 +360,19 @@ function Images() {
 
 /* ---------- Background ---------- */
 function BackgroundPanel() {
-  const { setBackground, project } = useEditor()
+  const { setBackground, project, startEyedropper } = useEditor()
+  const [isBgPickerExpanded, setIsBgPickerExpanded] = useState(false)
   const cur = project.background.value
+  const isSolid = project.background.type === 'color'
+
+  const handleStartBgEyedropper = () => {
+    startEyedropper({
+      target: 'background',
+      initialColor: isSolid ? cur : '#FFFFFF',
+      currentColor: isSolid ? cur : '#FFFFFF',
+    })
+  }
+
   const Swatch = ({ active, onClick, style, tid, children }: any) => (
     <button onClick={onClick} data-testid={tid} style={style}
       className={`aspect-square rounded-xl border-2 transition-transform active:scale-95 ${active ? 'border-accent' : 'border-line'}`}>{children}</button>
@@ -368,10 +380,63 @@ function BackgroundPanel() {
   return (
     <div className="space-y-5 pb-4">
       <div>
-        <p className="mb-2 text-xs font-semibold uppercase tracking-wider text-txt3">Solid</p>
+        <div className="mb-2 flex items-center justify-between">
+          <p className="text-xs font-semibold uppercase tracking-wider text-txt3">Solid</p>
+          <div className="flex items-center gap-2">
+            <button
+              type="button"
+              id="bg-color-loupe-toggle"
+              data-testid="bg-color-loupe-toggle"
+              onClick={handleStartBgEyedropper}
+              className="flex items-center gap-1 text-[11px] text-accent hover:underline font-semibold cursor-pointer"
+            >
+              <Pipette className="h-3 w-3" />
+              <span>Color Loupe</span>
+            </button>
+            <span className="text-line">|</span>
+            <button
+              type="button"
+              id="bg-color-picker-toggle"
+              data-testid="bg-color-picker-toggle"
+              onClick={() => setIsBgPickerExpanded((v) => !v)}
+              className="text-[11px] text-txt3 hover:text-white font-medium cursor-pointer"
+            >
+              <span>{isBgPickerExpanded ? 'Hide Sliders' : 'Hex / Sliders'}</span>
+            </button>
+          </div>
+        </div>
+
+        {isBgPickerExpanded && (
+          <div className="mb-3 animate-in fade-in slide-in-from-top-2">
+            <ColorPicker
+              color={isSolid ? cur : '#FFFFFF'}
+              onChange={(c) => setBackground({ type: 'color', value: c })}
+              onClose={() => setIsBgPickerExpanded(false)}
+            />
+          </div>
+        )}
+
         <Grid cols={6}>
+          {/* Rainbow Color Picker Icon in the Background Grid triggers Color Loupe */}
+          <button
+            type="button"
+            id="bg-palette-color-picker-icon"
+            data-testid="bg-palette-color-picker-icon"
+            aria-label="Open screen color loupe"
+            title="Pick color from screen with circular magnifier"
+            onClick={handleStartBgEyedropper}
+            className="aspect-square rounded-xl border-2 border-line hover:border-accent transition-all active:scale-90 flex items-center justify-center relative cursor-pointer group shadow-sm hover:scale-105"
+            style={{
+              background: 'conic-gradient(from 0deg, #FF3B30, #FF9500, #FFCC00, #34C759, #00C7BE, #007AFF, #5856D6, #AF52DE, #FF2D55, #FF3B30)',
+            }}
+          >
+            <div className="grid h-5 w-5 place-items-center rounded-full bg-black/70 text-white shadow-xs group-hover:scale-110 transition-transform">
+              <Pipette className="h-3 w-3" />
+            </div>
+          </button>
+
           {PALETTE.map((c) => (
-            <Swatch key={c} tid={`bg-color-${c}`} active={cur === c} onClick={() => setBackground({ type: 'color', value: c })} style={{ background: c }} />
+            <Swatch key={c} tid={`bg-color-${c}`} active={isSolid && cur === c} onClick={() => setBackground({ type: 'color', value: c })} style={{ background: c }} />
           ))}
         </Grid>
       </div>
@@ -895,6 +960,26 @@ function FontPanel() {
         </div>
       </div>
 
+      {/* Font Search Filter */}
+      <div className="relative">
+        <input
+          type="text"
+          value={searchQuery}
+          onChange={(e) => setSearchQuery(e.target.value)}
+          placeholder="Search fonts..."
+          className="w-full rounded-md bg-surface2/80 px-2 py-1 text-[11px] text-txt placeholder:text-txt3 outline-none focus:ring-1 focus:ring-accent"
+        />
+        {searchQuery && (
+          <button
+            type="button"
+            onClick={() => setSearchQuery('')}
+            className="absolute right-1.5 top-1/2 -translate-y-1/2 text-txt3 hover:text-white text-xs"
+          >
+            ×
+          </button>
+        )}
+      </div>
+
       {/* Quick Google Font input dialog */}
       {showAddGoogle && (
         <div className="flex items-center gap-1.5 rounded-lg bg-surface2 p-1.5 animate-in fade-in">
@@ -1011,8 +1096,9 @@ function FontPanel() {
 }
 
 function ColorPanel() {
-  const { selected, selectedIds, updateLayers, updateLayer, time } = useEditor()
+  const { selected, selectedIds, updateLayers, updateLayer, time, startEyedropper } = useEditor()
   const [colorMode, setColorMode] = useState<'fill' | 'stroke'>('fill')
+  const [isPickerExpanded, setIsPickerExpanded] = useState(false)
   const l = selected!
   const isPath = l.type === 'path'
   const key = isPath ? (colorMode === 'stroke' ? 'stroke' : 'fill') : (l.type === 'shape' ? 'fill' : 'color')
@@ -1025,6 +1111,27 @@ function ColorPanel() {
       updateLayer(selected.id, patch)
     }
   }
+
+  const handleStartEyedropper = () => {
+    startEyedropper({
+      target: 'layer',
+      layerId: l.id,
+      key: key as 'fill' | 'stroke' | 'color',
+      initialColor: cur === 'transparent' ? '#007AFF' : (cur || '#007AFF'),
+      currentColor: cur === 'transparent' ? '#007AFF' : (cur || '#007AFF'),
+    })
+  }
+
+  const handleColorChange = (newColor: string) => {
+    if (isPath && colorMode === 'stroke' && (!l.strokeWidth || l.strokeWidth === 0)) {
+      up({ stroke: newColor, strokeWidth: 3 })
+    } else {
+      up({ [key]: newColor })
+    }
+  }
+
+  const activeDisplayColor = cur === 'transparent' ? 'transparent' : (cur || '#007AFF')
+
   return (
     <>
       {isPath && (
@@ -1045,19 +1152,113 @@ function ColorPanel() {
           </button>
         </div>
       )}
+
+      {/* Primary Color Picker Action: Triggers on-canvas Circular Magnifier Loupe */}
+      <div
+        id="color-picker-toggle-card"
+        data-testid="color-picker-toggle-card"
+        className="mb-3 rounded-2xl border border-line bg-surface2/70 p-2.5 transition-all"
+      >
+        <div className="flex w-full items-center justify-between gap-3 text-left">
+          <button
+            type="button"
+            id="color-picker-toggle-btn"
+            data-testid="color-picker-toggle-btn"
+            onClick={handleStartEyedropper}
+            className="flex flex-1 items-center gap-2.5 min-w-0 cursor-pointer group select-none text-left"
+            aria-label="Pick color from canvas using circular magnifier"
+            title="Color Picker (Magnifier Loupe)"
+          >
+            {/* Tappable Color Icon (Conic Rainbow Wheel with Pipette icon) */}
+            <div
+              id="color-icon"
+              data-testid="color-icon"
+              className="relative grid h-8 w-8 place-items-center rounded-full shadow-sm ring-1 ring-white/20 transition-transform group-hover:scale-105 active:scale-95 shrink-0"
+              style={{
+                background: 'conic-gradient(from 0deg, #FF3B30, #FF9500, #FFCC00, #34C759, #00C7BE, #007AFF, #5856D6, #AF52DE, #FF2D55, #FF3B30)',
+              }}
+            >
+              <div className="grid h-4 w-4 place-items-center rounded-full bg-black/60 text-white backdrop-blur-xs">
+                <Pipette className="h-2.5 w-2.5" />
+              </div>
+            </div>
+            <div className="min-w-0">
+              <div className="flex items-center gap-1.5">
+                <span className="text-xs font-semibold text-txt group-hover:text-accent transition-colors">Color Picker</span>
+                <span className="rounded bg-surface px-1.5 py-0.5 text-[10px] font-mono text-txt2 uppercase truncate">
+                  {cur === 'transparent' ? 'None' : (cur || '#007AFF')}
+                </span>
+              </div>
+              <span className="text-[10px] text-txt3 block truncate">
+                Tap to pick from canvas with magnifier
+              </span>
+            </div>
+          </button>
+
+          <div className="flex items-center gap-2 shrink-0">
+            <div
+              id="color-current-preview"
+              data-testid="color-current-preview"
+              onClick={handleStartEyedropper}
+              className="h-6 w-6 rounded-full border border-white/20 shadow-xs ring-1 ring-black/20 cursor-pointer hover:scale-105 active:scale-95 transition-transform"
+              style={{ background: activeDisplayColor }}
+              title={`Current: ${cur || '#007AFF'} (Tap to sample)`}
+            />
+            <button
+              type="button"
+              onClick={() => setIsPickerExpanded((prev) => !prev)}
+              aria-label={isPickerExpanded ? 'Hide manual sliders' : 'Show manual sliders and hex'}
+              title="Manual Hex & Sliders"
+              className={`grid h-6 w-6 place-items-center rounded-full bg-surface text-txt2 hover:text-white transition-all cursor-pointer ${
+                isPickerExpanded ? 'rotate-180 text-accent' : ''
+              }`}
+            >
+              <ChevronDown className="h-3.5 w-3.5" />
+            </button>
+          </div>
+        </div>
+
+        {/* Expanded Manual Color Picker Sliders */}
+        {isPickerExpanded && (
+          <div className="mt-3 pt-3 border-t border-line/60">
+            <ColorPicker
+              color={cur === 'transparent' ? '#007AFF' : (cur || '#007AFF')}
+              onChange={handleColorChange}
+              onClose={() => setIsPickerExpanded(false)}
+            />
+          </div>
+        )}
+      </div>
+
       <div className="pb-1">
+        <div className="mb-2 flex items-center justify-between">
+          <p className="text-xs font-semibold uppercase tracking-wider text-txt3">Swatches</p>
+          <span className="text-[10px] text-txt3">Presets</span>
+        </div>
         <Grid cols={6}>
+          {/* Rainbow Color Picker Icon in the Swatches Grid */}
+          <button
+            type="button"
+            id="palette-color-picker-icon"
+            data-testid="palette-color-picker-icon"
+            aria-label="Open screen color magnifier loupe"
+            title="Pick color from canvas with circular magnifier"
+            onClick={handleStartEyedropper}
+            className="aspect-square rounded-full border-2 border-line hover:border-accent transition-all active:scale-90 flex items-center justify-center relative cursor-pointer group shadow-sm hover:scale-105"
+            style={{
+              background: 'conic-gradient(from 0deg, #FF3B30, #FF9500, #FFCC00, #34C759, #00C7BE, #007AFF, #5856D6, #AF52DE, #FF2D55, #FF3B30)',
+            }}
+          >
+            <div className="grid h-4 w-4 place-items-center rounded-full bg-black/60 text-white shadow-xs group-hover:scale-110 transition-transform">
+              <Pipette className="h-2.5 w-2.5" />
+            </div>
+          </button>
+
           {PALETTE.map((c) => (
             <button
               key={c}
               data-testid={`color-${c}`}
-              onClick={() => {
-                if (isPath && colorMode === 'stroke' && (!l.strokeWidth || l.strokeWidth === 0)) {
-                  up({ stroke: c, strokeWidth: 3 })
-                } else {
-                  up({ [key]: c })
-                }
-              }}
+              onClick={() => handleColorChange(c)}
               style={{ background: c }}
               className={`aspect-square rounded-full border-2 transition-transform active:scale-90 ${cur === c ? 'border-accent ring-2 ring-accent/40' : 'border-line'}`}
             />

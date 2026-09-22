@@ -3,7 +3,7 @@ import type { Layer, VectorPoint } from '#/types'
 import { uid } from '#/lib/data'
 import { computeGroupBounds } from '#/lib/groups'
 import { simplifyVectorPoints } from '#/lib/vector'
-import { getVerifiedOpenTypeFont, getClosestAvailableWeight } from '#/lib/fonts'
+import { getVerifiedOpenTypeFont } from '#/lib/fonts'
 
 /**
  * Load and parse an OpenType font file with caching and fallbacks.
