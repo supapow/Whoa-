@@ -133,7 +133,68 @@ export function scaleVectorPoints(points: VectorPoint[], sx: number, sy: number)
     cp1: p.cp1 ? { x: round(p.cp1.x * sx), y: round(p.cp1.y * sy) } : undefined,
     cp2: p.cp2 ? { x: round(p.cp2.x * sx), y: round(p.cp2.y * sy) } : undefined,
     mode: p.mode,
+    subpathStart: p.subpathStart,
   }))
+}
+
+/**
+ * Returns the index range [startIdx, endIdx] (inclusive) of the subpath
+ * containing the given point index.
+ */
+export function getVectorSubpathRange(points: VectorPoint[], pointIdx: number): { startIdx: number; endIdx: number } {
+  if (!points || points.length === 0 || pointIdx < 0 || pointIdx >= points.length) {
+    return { startIdx: 0, endIdx: 0 }
+  }
+
+  let startIdx = pointIdx
+  while (startIdx > 0 && !points[startIdx].subpathStart) {
+    startIdx--
+  }
+
+  let endIdx = pointIdx
+  while (endIdx < points.length - 1 && !points[endIdx + 1].subpathStart) {
+    endIdx++
+  }
+
+  return { startIdx, endIdx }
+}
+
+/**
+ * Returns the previous and next adjacent points within the same subpath.
+ * Respects subpath boundaries and the closed property.
+ */
+export function getAdjacentVectorPoints(
+  points: VectorPoint[],
+  pointIdx: number,
+  closed: boolean = true
+): { prevPt?: VectorPoint; nextPt?: VectorPoint; prevIdx: number; nextIdx: number } {
+  if (!points || points.length === 0 || pointIdx < 0 || pointIdx >= points.length) {
+    return { prevIdx: -1, nextIdx: -1 }
+  }
+
+  const { startIdx, endIdx } = getVectorSubpathRange(points, pointIdx)
+  const count = endIdx - startIdx + 1
+
+  let prevIdx: number
+  let nextIdx: number
+
+  if (count <= 1) {
+    prevIdx = pointIdx
+    nextIdx = pointIdx
+  } else if (closed) {
+    prevIdx = pointIdx === startIdx ? endIdx : pointIdx - 1
+    nextIdx = pointIdx === endIdx ? startIdx : pointIdx + 1
+  } else {
+    prevIdx = pointIdx === startIdx ? -1 : pointIdx - 1
+    nextIdx = pointIdx === endIdx ? -1 : pointIdx + 1
+  }
+
+  return {
+    prevPt: prevIdx >= 0 ? points[prevIdx] : undefined,
+    nextPt: nextIdx >= 0 ? points[nextIdx] : undefined,
+    prevIdx,
+    nextIdx,
+  }
 }
 
 /**
@@ -219,47 +280,77 @@ export function getVectorBoundingBox(points: VectorPoint[], closed: boolean = tr
     includePoint(pt.x, pt.y)
   }
 
-  // Check Bézier curve segments for extrema
-  for (let i = 1; i < points.length; i++) {
-    const prev = points[i - 1]
+  // Check Bézier curve segments for extrema per subpath
+  let subpathStartIdx = 0
+  for (let i = 0; i < points.length; i++) {
     const curr = points[i]
-    if (prev.cp2 !== undefined || curr.cp1 !== undefined) {
-      const p0x = prev.x
-      const p1x = prev.cp2 !== undefined ? prev.cp2.x : prev.x
-      const p2x = curr.cp1 !== undefined ? curr.cp1.x : curr.x
-      const p3x = curr.x
+    if (i > 0 && curr.subpathStart) {
+      if (closed && i - subpathStartIdx >= 2) {
+        const last = points[i - 1]
+        const first = points[subpathStartIdx]
+        if (last.cp2 !== undefined || first.cp1 !== undefined) {
+          const extX = getBezierExtrema1D(
+            last.x,
+            last.cp2 !== undefined ? last.cp2.x : last.x,
+            first.cp1 !== undefined ? first.cp1.x : first.x,
+            first.x
+          )
+          const extY = getBezierExtrema1D(
+            last.y,
+            last.cp2 !== undefined ? last.cp2.y : last.y,
+            first.cp1 !== undefined ? first.cp1.y : first.y,
+            first.y
+          )
+          minX = Math.min(minX, extX.min)
+          maxX = Math.max(maxX, extX.max)
+          minY = Math.min(minY, extY.min)
+          maxY = Math.max(maxY, extY.max)
+        }
+      }
+      subpathStartIdx = i
+      continue
+    }
 
-      const p0y = prev.y
-      const p1y = prev.cp2 !== undefined ? prev.cp2.y : prev.y
-      const p2y = curr.cp1 !== undefined ? curr.cp1.y : curr.y
-      const p3y = curr.y
-
-      const extX = getBezierExtrema1D(p0x, p1x, p2x, p3x)
-      const extY = getBezierExtrema1D(p0y, p1y, p2y, p3y)
-      minX = Math.min(minX, extX.min)
-      maxX = Math.max(maxX, extX.max)
-      minY = Math.min(minY, extY.min)
-      maxY = Math.max(maxY, extY.max)
+    if (i > subpathStartIdx) {
+      const prev = points[i - 1]
+      if (prev.cp2 !== undefined || curr.cp1 !== undefined) {
+        const extX = getBezierExtrema1D(
+          prev.x,
+          prev.cp2 !== undefined ? prev.cp2.x : prev.x,
+          curr.cp1 !== undefined ? curr.cp1.x : curr.x,
+          curr.x
+        )
+        const extY = getBezierExtrema1D(
+          prev.y,
+          prev.cp2 !== undefined ? prev.cp2.y : prev.y,
+          curr.cp1 !== undefined ? curr.cp1.y : curr.y,
+          curr.y
+        )
+        minX = Math.min(minX, extX.min)
+        maxX = Math.max(maxX, extX.max)
+        minY = Math.min(minY, extY.min)
+        maxY = Math.max(maxY, extY.max)
+      }
     }
   }
 
-  // Closing segment if closed
-  if (closed && points.length > 2) {
+  // Closing segment for final subpath if closed
+  if (closed && points.length - subpathStartIdx >= 2) {
     const last = points[points.length - 1]
-    const first = points[0]
+    const first = points[subpathStartIdx]
     if (last.cp2 !== undefined || first.cp1 !== undefined) {
-      const p0x = last.x
-      const p1x = last.cp2 !== undefined ? last.cp2.x : last.x
-      const p2x = first.cp1 !== undefined ? first.cp1.x : first.x
-      const p3x = first.x
-
-      const p0y = last.y
-      const p1y = last.cp2 !== undefined ? last.cp2.y : last.y
-      const p2y = first.cp1 !== undefined ? first.cp1.y : first.y
-      const p3y = first.y
-
-      const extX = getBezierExtrema1D(p0x, p1x, p2x, p3x)
-      const extY = getBezierExtrema1D(p0y, p1y, p2y, p3y)
+      const extX = getBezierExtrema1D(
+        last.x,
+        last.cp2 !== undefined ? last.cp2.x : last.x,
+        first.cp1 !== undefined ? first.cp1.x : first.x,
+        first.x
+      )
+      const extY = getBezierExtrema1D(
+        last.y,
+        last.cp2 !== undefined ? last.cp2.y : last.y,
+        first.cp1 !== undefined ? first.cp1.y : first.y,
+        first.y
+      )
       minX = Math.min(minX, extX.min)
       maxX = Math.max(maxX, extX.max)
       minY = Math.min(minY, extY.min)
@@ -303,7 +394,226 @@ export function fitVectorPointsToBounds(
         }
       : undefined,
     mode: pt.mode,
+    subpathStart: pt.subpathStart,
   }))
+}
+
+function evalCubic(
+  p0: { x: number; y: number },
+  p1: { x: number; y: number },
+  p2: { x: number; y: number },
+  p3: { x: number; y: number },
+  t: number
+): { x: number; y: number } {
+  const mt = 1 - t
+  const mt2 = mt * mt
+  const t2 = t * t
+  return {
+    x: mt2 * mt * p0.x + 3 * mt2 * t * p1.x + 3 * mt * t2 * p2.x + t2 * t * p3.x,
+    y: mt2 * mt * p0.y + 3 * mt2 * t * p1.y + 3 * mt * t2 * p2.y + t2 * t * p3.y,
+  }
+}
+
+function fitCubic(
+  p0: { x: number; y: number },
+  v1: { x: number; y: number },
+  p3: { x: number; y: number },
+  v2: { x: number; y: number },
+  samplePts: { x: number; y: number }[],
+  chordLengths: number[]
+): { cp1: { x: number; y: number }; cp2: { x: number; y: number }; maxErr: number } | null {
+  let c11 = 0, c12 = 0, c22 = 0, x1 = 0, x2 = 0
+  const totalLen = chordLengths[chordLengths.length - 1]
+  if (totalLen <= 0.0001) return null
+
+  for (let i = 0; i < samplePts.length; i++) {
+    const t = chordLengths[i] / totalLen
+    const mt = 1 - t
+    const b0 = mt * mt * mt
+    const b1 = 3 * t * mt * mt
+    const b2 = 3 * t * t * mt
+    const b3 = t * t * t
+
+    const a1x = v1.x * b1
+    const a1y = v1.y * b1
+    const a2x = v2.x * b2
+    const a2y = v2.y * b2
+
+    const rx = samplePts[i].x - (p0.x * (b0 + b1) + p3.x * (b2 + b3))
+    const ry = samplePts[i].y - (p0.y * (b0 + b1) + p3.y * (b2 + b3))
+
+    c11 += a1x * a1x + a1y * a1y
+    c12 += a1x * a2x + a1y * a2y
+    c22 += a2x * a2x + a2y * a2y
+
+    x1 += a1x * rx + a1y * ry
+    x2 += a2x * rx + a2y * ry
+  }
+
+  const det = c11 * c22 - c12 * c12
+  if (Math.abs(det) < 1e-6) return null
+
+  const alpha1 = (x1 * c22 - x2 * c12) / det
+  const alpha2 = (c11 * x2 - c12 * x1) / det
+
+  if (alpha1 <= 0 || alpha2 <= 0) return null
+
+  const cp1 = { x: round(p0.x + alpha1 * v1.x), y: round(p0.y + alpha1 * v1.y) }
+  const cp2 = { x: round(p3.x + alpha2 * v2.x), y: round(p3.y + alpha2 * v2.y) }
+
+  let maxErr = 0
+  for (let i = 0; i < samplePts.length; i++) {
+    const t = chordLengths[i] / totalLen
+    const fitPt = evalCubic(p0, cp1, cp2, p3, t)
+    const err = Math.hypot(fitPt.x - samplePts[i].x, fitPt.y - samplePts[i].y)
+    if (err > maxErr) maxErr = err
+  }
+
+  return { cp1, cp2, maxErr }
+}
+
+function simplifySubpath(subpath: VectorPoint[], maxTolerance: number = 0.75): VectorPoint[] {
+  if (subpath.length <= 2) return subpath
+
+  // Step 1: Remove duplicate/coincident points and collinear line points
+  const clean: VectorPoint[] = []
+  for (let i = 0; i < subpath.length; i++) {
+    const curr = subpath[i]
+    if (i === 0) {
+      clean.push(curr)
+      continue
+    }
+    const prev = clean[clean.length - 1]
+
+    // Skip duplicate coincident point (< 0.25px)
+    if (Math.hypot(curr.x - prev.x, curr.y - prev.y) < 0.25) {
+      if (curr.cp2 && !prev.cp2) prev.cp2 = curr.cp2
+      continue
+    }
+
+    // Remove collinear points on straight line segments
+    if (clean.length >= 2) {
+      const prevPrev = clean[clean.length - 2]
+      const isLine1 = !prevPrev.cp2 && !prev.cp1
+      const isLine2 = !prev.cp2 && !curr.cp1
+      if (isLine1 && isLine2) {
+        const dx = curr.x - prevPrev.x
+        const dy = curr.y - prevPrev.y
+        const len = Math.hypot(dx, dy)
+        if (len > 0.1) {
+          const dist = Math.abs((curr.y - prevPrev.y) * prev.x - (curr.x - prevPrev.x) * prev.y + curr.x * prevPrev.y - curr.y * prevPrev.x) / len
+          const dot = (prev.x - prevPrev.x) * dx + (prev.y - prevPrev.y) * dy
+          if (dist < 0.35 && dot > 0 && dot < len * len) {
+            clean[clean.length - 1] = curr
+            continue
+          }
+        }
+      }
+    }
+
+    clean.push(curr)
+  }
+
+  // Remove duplicate closing point coincident with subpath start
+  if (clean.length >= 2) {
+    const first = clean[0]
+    const last = clean[clean.length - 1]
+    if (Math.hypot(last.x - first.x, last.y - first.y) < 0.35) {
+      if (last.cp1 && !first.cp1) first.cp1 = last.cp1
+      if (last.cp2 && !first.cp2) first.cp2 = last.cp2
+      clean.pop()
+    }
+  }
+
+  // Step 2: Bézier curve fitting to merge over-segmented curves
+  let current = clean
+  for (let pass = 0; pass < 3; pass++) {
+    const next: VectorPoint[] = []
+    let i = 0
+    while (i < current.length) {
+      const p0 = current[i]
+      if (i + 2 < current.length) {
+        const p1 = current[i + 1]
+        const p2 = current[i + 2]
+        const cp1_0 = p0.cp2 || p1
+        const cp2_0 = p1.cp1 || p0
+        const cp1_1 = p1.cp2 || p2
+        const cp2_1 = p2.cp1 || p1
+
+        const samples: { x: number; y: number }[] = []
+        const chords: number[] = [0]
+        for (let s = 0; s <= 6; s++) samples.push(evalCubic(p0, cp1_0, cp2_0, p1, s / 6))
+        for (let s = 1; s <= 6; s++) samples.push(evalCubic(p1, cp1_1, cp2_1, p2, s / 6))
+        for (let s = 1; s < samples.length; s++) {
+          chords.push(chords[s - 1] + Math.hypot(samples[s].x - samples[s - 1].x, samples[s].y - samples[s - 1].y))
+        }
+
+        let dx1 = cp1_0.x - p0.x, dy1 = cp1_0.y - p0.y
+        const len1 = Math.hypot(dx1, dy1) || 1
+        const v1 = { x: dx1 / len1, y: dy1 / len1 }
+
+        let dx2 = p2.x - cp2_1.x, dy2 = p2.y - cp2_1.y
+        const len2 = Math.hypot(dx2, dy2) || 1
+        const v2 = { x: -dx2 / len2, y: -dy2 / len2 }
+
+        const fit = fitCubic(p0, v1, p2, v2, samples, chords)
+        if (fit && fit.maxErr < maxTolerance) {
+          next.push({ ...p0, cp2: fit.cp1 })
+          current[i + 2] = { ...p2, cp1: fit.cp2 }
+          i += 2
+          continue
+        }
+      }
+      next.push(p0)
+      i++
+    }
+    current = next
+  }
+
+  return current
+}
+
+/**
+ * Simplifies an array of VectorPoints by eliminating collinear line anchors,
+ * merging coincident points, and combining over-segmented Bézier curves.
+ * Preserves subpath boundaries and curve fidelity.
+ */
+export function simplifyVectorPoints(
+  points: VectorPoint[],
+  maxTolerance: number = 0.75
+): VectorPoint[] {
+  if (!points || points.length <= 2) return points || []
+
+  // Split into subpaths
+  const subpaths: VectorPoint[][] = []
+  let currentSubpath: VectorPoint[] = []
+
+  for (let i = 0; i < points.length; i++) {
+    const pt = points[i]
+    if (i > 0 && pt.subpathStart) {
+      if (currentSubpath.length > 0) {
+        subpaths.push(currentSubpath)
+      }
+      currentSubpath = []
+    }
+    currentSubpath.push(pt)
+  }
+  if (currentSubpath.length > 0) {
+    subpaths.push(currentSubpath)
+  }
+
+  const result: VectorPoint[] = []
+  for (let s = 0; s < subpaths.length; s++) {
+    const simplified = simplifySubpath(subpaths[s], maxTolerance)
+    if (simplified.length > 0) {
+      if (s > 0) {
+        simplified[0] = { ...simplified[0], subpathStart: true }
+      }
+      result.push(...simplified)
+    }
+  }
+
+  return result
 }
 
 /**
@@ -347,6 +657,7 @@ export function tightenVectorLayer(layer: Layer): {
     cp1: pt.cp1 ? { x: round(pt.cp1.x - minX), y: round(pt.cp1.y - minY) } : undefined,
     cp2: pt.cp2 ? { x: round(pt.cp2.x - minX), y: round(pt.cp2.y - minY) } : undefined,
     mode: pt.mode,
+    subpathStart: pt.subpathStart,
   }))
 
   return {
@@ -1684,6 +1995,7 @@ export function cloneVectorPoint(pt: VectorPoint): VectorPoint {
     cp1: pt.cp1 ? { x: pt.cp1.x, y: pt.cp1.y } : undefined,
     cp2: pt.cp2 ? { x: pt.cp2.x, y: pt.cp2.y } : undefined,
     mode: pt.mode,
+    subpathStart: pt.subpathStart,
   }
 }
 
@@ -1708,22 +2020,23 @@ export function subdividePointsToCount(points: VectorPoint[], targetCount: numbe
   while (result.length < targetCount) {
     let maxDist = -1
     let splitIdx = 0
+    let splitNextIdx = 0
 
-    const numSegments = closed ? result.length : Math.max(1, result.length - 1)
-    for (let i = 0; i < numSegments; i++) {
-      const nextIdx = (i + 1) % result.length
+    for (let i = 0; i < result.length; i++) {
+      const { nextPt, nextIdx } = getAdjacentVectorPoints(result, i, closed)
+      if (nextIdx < 0 || !nextPt) continue
       const p1 = result[i]
-      const p2 = result[nextIdx]
+      const p2 = nextPt
       const d = Math.hypot(p2.x - p1.x, p2.y - p1.y)
       if (d > maxDist) {
         maxDist = d
         splitIdx = i
+        splitNextIdx = nextIdx
       }
     }
 
     const curr = result[splitIdx]
-    const nextIdx = (splitIdx + 1) % result.length
-    const next = result[nextIdx]
+    const next = result[splitNextIdx]
 
     // Calculate new midpoint
     let newX = round((curr.x + next.x) / 2)
@@ -1835,6 +2148,7 @@ export function interpolateVectorPoints(
       cp1,
       cp2,
       mode: p < 0.5 ? a.mode : b.mode,
+      subpathStart: a.subpathStart ?? b.subpathStart,
     }
   }
 

@@ -11,6 +11,7 @@ import { interpolateKeyframes } from '#/lib/keyframes'
 import {
   buildSvgPath, scaleVectorPoints, tightenVectorLayer,
   updateHandleWithMode, snapVectorAnchor, snapVectorHandle, switchPointBezierMode,
+  cloneVectorPoints, getAdjacentVectorPoints,
   type VectorAlignResult,
 } from '#/lib/vector'
 
@@ -403,6 +404,7 @@ export default function Canvas() {
     artboardSnap, vectorSnap, selectedAnchorIndices, setSelectedAnchors, toggleSelectedAnchor,
     anchorMultiSelectMode, setAnchorMultiSelectMode,
     nudge, imagePositioningId, setImagePositioningId, vectorEditingId, setVectorEditingId, timelineOpen, checkpoint,
+    eyedropper,
   } = useEditor()
   const [nudgeIncrement, setNudgeIncrement] = useState<number>(1)
   const nudgeIncrementRef = useRef<number>(1)
@@ -2015,6 +2017,7 @@ export default function Canvas() {
         fontSize: item.type === 'text' ? item.fontSize : undefined,
         crop0: item.type === 'image' && item.crop ? { ...item.crop } : undefined,
         isCroppedImage: item.type === 'image' && Boolean(item.crop),
+        origPoints: item.type === 'path' && item.points ? cloneVectorPoints(item.points) : undefined,
       }
     })
 
@@ -2104,6 +2107,16 @@ export default function Canvas() {
               h: Math.round(item.crop0.h * scaleFactor),
             },
           })
+        } else if (layer?.type === 'path' && item.origPoints) {
+          const sx = item.w > 0 ? w / item.w : 1
+          const sy = item.h > 0 ? h / item.h : 1
+          updateLayer(item.id, {
+            x,
+            y,
+            w,
+            h,
+            points: scaleVectorPoints(item.origPoints, sx, sy),
+          })
         } else {
           updateLayer(item.id, { x, y, w, h })
         }
@@ -2165,6 +2178,16 @@ export default function Canvas() {
             w: Math.round(p.crop0.w * scaleFactor),
             h: Math.round(p.crop0.h * scaleFactor),
           },
+        })
+      } else if (selected.type === 'path' && p.points0) {
+        const sx = p.w0 > 0 ? w / p.w0 : 1
+        const sy = p.h0 > 0 ? h / p.h0 : 1
+        updateLayer(p.id, {
+          x,
+          y,
+          w,
+          h,
+          points: scaleVectorPoints(p.points0, sx, sy),
         })
       } else {
         updateLayer(p.id, { x, y, w, h })
@@ -2280,6 +2303,7 @@ export default function Canvas() {
               group: info.measured,
               crop0: isCroppedImage && targetL?.crop ? { ...targetL.crop } : undefined,
               isCroppedImage,
+              points0: targetL?.type === 'path' && targetL.points ? cloneVectorPoints(targetL.points) : undefined,
             }
           } else {
             select(null)
@@ -2884,7 +2908,9 @@ export default function Canvas() {
   return (
     <div
       ref={ref}
-      className="checkerboard relative z-0 flex min-h-0 min-w-0 flex-1 touch-none items-center justify-center overflow-hidden select-none"
+      className={`checkerboard relative z-0 flex min-h-0 min-w-0 flex-1 touch-none items-center justify-center overflow-hidden select-none ${
+        eyedropper ? 'pointer-events-none' : ''
+      }`}
       onContextMenu={(e) => e.preventDefault()}
       onPointerDownCapture={(e) => {
         if (e.pointerType !== 'touch') return
@@ -2951,6 +2977,7 @@ export default function Canvas() {
             group: info.measured,
             crop0: isCroppedImage && targetL?.crop ? { ...targetL.crop } : undefined,
             isCroppedImage,
+            points0: targetL?.type === 'path' && targetL.points ? cloneVectorPoints(targetL.points) : undefined,
           }
           setPinchActive(true)
         } else {
@@ -4296,9 +4323,8 @@ export default function Canvas() {
                               e.stopPropagation()
                               const hasCp = pt.cp1 !== undefined || pt.cp2 !== undefined
                               const updated = [...pts]
-                              const prev = pts[(pIdx - 1 + pts.length) % pts.length]
-                              const next = pts[(pIdx + 1) % pts.length]
-                              updated[pIdx] = switchPointBezierMode(pt, hasCp ? 1 : 2, prev, next)
+                              const { prevPt, nextPt } = getAdjacentVectorPoints(pts, pIdx, sel.closed !== false)
+                              updated[pIdx] = switchPointBezierMode(pt, hasCp ? 1 : 2, prevPt, nextPt)
                               const isAnim = Boolean(sel.keyframes && sel.keyframes.length > 0)
                               if (isAnim) {
                                 updateLayer(sel.id, { points: updated })
@@ -5445,7 +5471,7 @@ function LayerContent({
           strokeWidth={strokeWidth}
           strokeLinecap={strokeLinecap}
           strokeLinejoin={strokeLinejoin}
-          fillRule={layer.fillRule === 'evenodd' ? 'nonzero' : (layer.fillRule || 'nonzero')}
+          fillRule={layer.fillRule || 'nonzero'}
           shapeRendering="geometricPrecision"
           style={{ transition: 'fill-opacity 0.2s ease' }}
         />

@@ -17,7 +17,7 @@ type Item = { key: string; label: string; icon: React.ReactNode; onClick?: () =>
 
 export default function Toolbar({ onExport }: { onExport?: () => void }) {
   const {
-    project, selected, selectedIds, alignSelected, openTool, deleteLayer, deleteLayers, duplicate, reorder,
+    project, selected, selectedIds, alignSelected, openTool, addLayer, deleteLayer, deleteLayers, duplicate, reorder,
     createGroup, ungroup, saveAsComponent, artboardSnap, setArtboardSnap,
     timelineOpen, toggleTimeline, updateLayer, imagePositioningId, setImagePositioningId,
     vectorEditingId, setVectorEditingId,
@@ -311,7 +311,12 @@ export default function Toolbar({ onExport }: { onExport?: () => void }) {
 
   if (!selected) {
     items = [
-      { key: 'text', label: 'Text', icon: <Type /> },
+      {
+        key: 'text',
+        label: 'Text',
+        icon: <Type />,
+        onClick: () => addLayer('text'),
+      },
       { key: 'elements', label: 'Elements', icon: <Shapes /> },
       { key: 'stickers', label: 'Stickers', icon: <Sticker /> },
       { key: 'image', label: 'Image', icon: <ImageIcon /> },
