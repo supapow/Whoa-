@@ -1655,6 +1655,8 @@ function EffectControls({
   onChange: (next: ShadowEffect) => void
 }) {
   const [pickerOpen, setPickerOpen] = useState(false)
+  // control testids share the container's `effect-{tid}` prefix so they read as one family
+  const eid = `effect-${tid}`
   // when off, the sliders/presets are hidden anyway — showing default values costs nothing
   const v = value ?? defaults
   const set = (patch: Partial<ShadowEffect>) => onChange({ ...v, ...patch })
@@ -1689,7 +1691,7 @@ function EffectControls({
           {enabled && (
             <button
               type="button"
-              data-testid={`${tid}-reset`}
+              data-testid={`${eid}-reset`}
               onClick={onReset}
               className="cursor-pointer text-xs font-medium text-txt3 transition-colors hover:text-danger active:scale-95"
             >
@@ -1701,7 +1703,7 @@ function EffectControls({
             role="switch"
             aria-checked={enabled}
             aria-label={`${title} on/off`}
-            data-testid={`${tid}-toggle`}
+            data-testid={`${eid}-toggle`}
             onClick={onToggle}
             className={`relative h-6 w-11 shrink-0 cursor-pointer rounded-full transition-colors ${enabled ? 'bg-accent' : 'border border-line bg-surface'}`}
           >
@@ -1712,11 +1714,11 @@ function EffectControls({
 
       {enabled && (
         <div className="mt-4">
-          <Slider label="Offset X" tid={`${tid}-x`} value={v.x} min={-100} max={100} suffix="px" onChange={(n: number) => set({ x: n })} />
-          <Slider label="Offset Y" tid={`${tid}-y`} value={v.y} min={-100} max={100} suffix="px" onChange={(n: number) => set({ y: n })} />
-          <Slider label="Blur" tid={`${tid}-blur`} value={v.blur} min={0} max={80} suffix="px" onChange={(n: number) => set({ blur: n })} />
-          <Slider label="Spread" tid={`${tid}-spread`} value={v.spread} min={-20} max={60} suffix="px" onChange={(n: number) => set({ spread: n })} />
-          <Slider label="Opacity" tid={`${tid}-opacity`} value={Math.round(v.opacity * 100)} min={0} max={100} suffix="%" onChange={(n: number) => set({ opacity: n / 100 })} />
+          <Slider label="Offset X" tid={`${eid}-x`} value={v.x} min={-100} max={100} suffix="px" onChange={(n: number) => set({ x: n })} />
+          <Slider label="Offset Y" tid={`${eid}-y`} value={v.y} min={-100} max={100} suffix="px" onChange={(n: number) => set({ y: n })} />
+          <Slider label="Blur" tid={`${eid}-blur`} value={v.blur} min={0} max={80} suffix="px" onChange={(n: number) => set({ blur: n })} />
+          <Slider label="Spread" tid={`${eid}-spread`} value={v.spread} min={-20} max={60} suffix="px" onChange={(n: number) => set({ spread: n })} />
+          <Slider label="Opacity" tid={`${eid}-opacity`} value={Math.round(v.opacity * 100)} min={0} max={100} suffix="%" onChange={(n: number) => set({ opacity: n / 100 })} />
 
           {/* Color: swatch row + expandable picker */}
           <div className="pb-1">
@@ -1739,7 +1741,7 @@ function EffectControls({
                 <button
                   key={c}
                   type="button"
-                  data-testid={`${tid}-color-${c}`}
+                  data-testid={`${eid}-color-${c}`}
                   onClick={() => set({ color: c })}
                   style={{ background: c }}
                   className={`aspect-square cursor-pointer rounded-full border-2 transition-transform active:scale-90 ${
@@ -1767,7 +1769,7 @@ function EffectControls({
               <button
                 key={p.label}
                 type="button"
-                data-testid={`${tid}-preset-${p.label.toLowerCase()}`}
+                data-testid={`${eid}-preset-${p.label.toLowerCase()}`}
                 onClick={() => (p.values ? onChange({ ...p.values }) : onDisable())}
                 className={`flex cursor-pointer flex-col items-center justify-center rounded-xl border px-1 py-2 text-center transition-all active:scale-95 ${
                   isSelected
