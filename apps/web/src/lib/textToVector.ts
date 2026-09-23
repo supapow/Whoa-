@@ -353,6 +353,8 @@ export async function convertTextLayerToVectors(
       groupId: textLayer.groupId,
       blur: textLayer.blur,
       blurType: textLayer.blurType,
+      dropShadow: textLayer.dropShadow,
+      innerShadow: textLayer.innerShadow,
       fill: textLayer.color || '#FFFFFF',
       stroke: undefined,
       strokeWidth: 0,
@@ -427,6 +429,9 @@ export async function convertTextLayerToVectors(
     end: textLayer.end ?? 5000,
     anim: textLayer.anim ?? 'none',
     groupId: textLayer.groupId,
+    // the group carries the effect over the letters' combined silhouette; children get none
+    dropShadow: textLayer.dropShadow,
+    innerShadow: textLayer.innerShadow,
     collapsed: false,
   }
 

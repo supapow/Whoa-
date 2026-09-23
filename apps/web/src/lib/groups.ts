@@ -732,6 +732,9 @@ export function instantiateComponent(
     start: comp.root.start ?? 0,
     end: comp.root.end ?? 5000,
     anim: comp.root.anim || 'none',
+    // only group/component root path that copies field-by-field (children spread `...l`)
+    dropShadow: comp.root.dropShadow,
+    innerShadow: comp.root.innerShadow,
     isComponent: true,
     componentId: comp.id,
     collapsed: false,

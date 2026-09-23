@@ -147,6 +147,7 @@ function applyLayerUpdate(l: Layer, patch: Partial<Layer>, currentTime: number):
     const keyframePropKeys = [
       'x', 'y', 'w', 'h', 'rotation', 'opacity', 'scale',
       'fontSize', 'fontWeight', 'color', 'fill', 'radius', 'blur',
+      'dropShadow', 'innerShadow',
       'points'
     ]
     const isKeyframeProp = keyframePropKeys.some((k) => k in patch)

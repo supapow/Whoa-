@@ -1,6 +1,6 @@
-import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react'
+import { Fragment, useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react'
 import { ArrowLeft, ArrowRight, ArrowUp, ArrowDown, Move, RotateCw } from 'lucide-react'
-import type { Layer, LayerType, VectorPoint } from '#/types'
+import type { Layer, LayerType, ShadowEffect, VectorPoint } from '#/types'
 import { useEditor } from '#/store/editor'
 import { getDescendantLayers, getTopmostGroup, computeGroupBounds } from '#/lib/groups'
 import { findCornerSizeMatch, findSizeMatch, getCandidateTargets, type SizeMatch } from '#/lib/sizeMatch'
@@ -8,6 +8,7 @@ import { findGapMatch, type GapMatchResult } from '#/lib/gapMatch'
 import { findElementAlignMatch, type ElementAlignResult } from '#/lib/elementAlign'
 import { parseImagePosition, formatImagePosition, calcImagePositionDelta } from '#/lib/imagePosition'
 import { interpolateKeyframes } from '#/lib/keyframes'
+import { layerNeedsSvgFilter, shadowFilterId, dropShadowCss, shadowFilterRegion, dropCasterFilterId, innerCasterFilterId } from '#/lib/shadows'
 import {
   buildSvgPath, scaleVectorPoints, tightenVectorLayer,
   updateHandleWithMode, snapVectorAnchor, snapVectorHandle, switchPointBezierMode,
@@ -329,6 +330,243 @@ function getCompositeAnim(
     filter: finalFilter,
     hidden: false,
   }
+}
+
+/**
+ * Primitive chain shared by every shadow <filter>.
+ *
+ * - `'full'`      → regular layer filter. Drop branch only when `drop` is passed (Step A passes
+ *                   it only for spread !== 0 — spread === 0 drops use the CSS `drop-shadow()`
+ *                   fast path, so passing both would double-paint) + inner branch, merged as
+ *                   drop → SourceGraphic → inner.
+ * - `'dropOnly'`  → group drop caster (Step B): output is the drop silhouette ONLY. SourceGraphic
+ *                   is omitted so the duplicate subtree's own pixels are discarded — only its
+ *                   alpha drives the shadow (no double-draw).
+ * - `'innerOnly'` → group inner caster (Step B): output is the inner band ONLY.
+ *
+ * `stdDeviation = blur / 2` to match CSS `drop-shadow()` radius semantics.
+ * `colorInterpolationFilters="sRGB"` must be set on every <filter> (set by the caller).
+ */
+function shadowFilterNodes(
+  drop: ShadowEffect | undefined,
+  inner: ShadowEffect | undefined,
+  mode: 'full' | 'dropOnly' | 'innerOnly',
+): React.ReactNode[] {
+  const nodes: React.ReactNode[] = []
+
+  if (drop) {
+    // spread: Figma-style. dilate grows the silhouette outward; erode pulls it inward.
+    const morph = drop.spread !== 0
+    if (morph) {
+      nodes.push(
+        <feMorphology
+          key="d-spread"
+          in="SourceAlpha"
+          operator={drop.spread > 0 ? 'dilate' : 'erode'}
+          radius={Math.abs(drop.spread)}
+          result="dspread"
+        />,
+      )
+    }
+    nodes.push(<feOffset key="d-off" in={morph ? 'dspread' : 'SourceAlpha'} dx={drop.x} dy={drop.y} result="doffset" />)
+    nodes.push(<feGaussianBlur key="d-blur" in="doffset" stdDeviation={Math.max(0, drop.blur) / 2} result="dblur" />)
+    nodes.push(<feFlood key="d-flood" floodColor={drop.color} floodOpacity={drop.opacity} result="dflood" />)
+    nodes.push(<feComposite key="d-comp" in="dflood" in2="dblur" operator="in" result="dropShadow" />)
+  }
+
+  if (inner) {
+    const morph = inner.spread !== 0
+    if (morph) {
+      nodes.push(
+        <feMorphology
+          key="i-spread"
+          in="SourceAlpha"
+          operator={inner.spread > 0 ? 'erode' : 'dilate'}
+          radius={Math.abs(inner.spread)}
+          result="ispread"
+        />,
+      )
+    }
+    nodes.push(<feOffset key="i-off" in={morph ? 'ispread' : 'SourceAlpha'} dx={inner.x} dy={inner.y} result="ioffset" />)
+    nodes.push(<feGaussianBlur key="i-blur" in="ioffset" stdDeviation={Math.max(0, inner.blur) / 2} result="iblur" />)
+    // band = inside the source silhouette but NOT covered by the offset/blurred silhouette
+    nodes.push(<feComposite key="i-band" in="SourceAlpha" in2="iblur" operator="out" result="iband" />)
+    nodes.push(<feFlood key="i-flood" floodColor={inner.color} floodOpacity={inner.opacity} result="iflood" />)
+    nodes.push(<feComposite key="i-comp" in="iflood" in2="iband" operator="in" result="innerShadow" />)
+  }
+
+  if (mode !== 'full') return nodes // last primitive's result is the filter output
+
+  nodes.push(
+    <feMerge key="merge">
+      {drop && <feMergeNode in="dropShadow" />}
+      <feMergeNode in="SourceGraphic" />
+      {inner && <feMergeNode in="innerShadow" />}
+    </feMerge>,
+  )
+  return nodes
+}
+
+/** Bigger pad wins — the region must fit whichever effect reaches furthest. */
+function shadowRegionEffect(drop: ShadowEffect | undefined, inner: ShadowEffect | undefined): ShadowEffect {
+  const pad = (e: ShadowEffect) => Math.abs(e.x) + Math.abs(e.y) + Math.abs(e.spread) + e.blur
+  if (drop && inner) return pad(inner) >= pad(drop) ? inner : drop
+  return (inner || drop)!
+}
+
+/**
+ * Geometry + animation styling for a layer's outer box. Shared by the live render loop and the
+ * group shadow-caster duplicates (Step B) — the caster silhouette must match the real render
+ * pixel-for-pixel, so this is one source of truth. Interaction-only props (cursor, touch/pointer
+ * events, backdrop filter) and the shadow/blur `filter` chain stay with each caller.
+ *
+ * `measured` is the last-rendered node for this layer; only used to centre non-keyframed
+ * centre-aligned text (its box is `max-content`, so x = 0 is not its visual position).
+ */
+function layerBoxStyle(
+  effectiveLayer: Layer,
+  a: { opacity: number; transform: string },
+  preset: { w: number; h: number },
+  measured: HTMLDivElement | undefined,
+  keyframed: boolean,
+): React.CSSProperties {
+  const centered =
+    !keyframed &&
+    effectiveLayer.type === 'text' &&
+    effectiveLayer.align === 'center' &&
+    effectiveLayer.x === 0 &&
+    effectiveLayer.w === preset.w &&
+    !effectiveLayer.paddingLeft &&
+    !effectiveLayer.paddingRight &&
+    Boolean(measured)
+  return {
+    position: 'absolute',
+    left: centered ? (preset.w - measured!.offsetWidth) / 2 : effectiveLayer.x,
+    top: effectiveLayer.y,
+    width: effectiveLayer.type === 'text' ? 'max-content' : effectiveLayer.w,
+    height: effectiveLayer.type === 'text' && effectiveLayer.h !== preset.h ? 'auto' : effectiveLayer.h,
+    fontSize: effectiveLayer.type === 'text' ? effectiveLayer.fontSize : undefined,
+    lineHeight: effectiveLayer.type === 'text' ? 0.8 : undefined,
+    paddingTop: effectiveLayer.paddingTop ? `${effectiveLayer.paddingTop}px` : undefined,
+    paddingRight: effectiveLayer.paddingRight ? `${effectiveLayer.paddingRight}px` : undefined,
+    paddingBottom: effectiveLayer.paddingBottom ? `${effectiveLayer.paddingBottom}px` : undefined,
+    paddingLeft: effectiveLayer.paddingLeft ? `${effectiveLayer.paddingLeft}px` : undefined,
+    background: effectiveLayer.type === 'text' && effectiveLayer.fill ? effectiveLayer.fill : undefined,
+    borderRadius: effectiveLayer.type === 'shape'
+      ? (effectiveLayer.shape === 'circle' || effectiveLayer.shape === 'pill'
+          ? (effectiveLayer.radius !== undefined ? `${effectiveLayer.radius}px` : '9999px')
+          : (effectiveLayer.radius !== undefined ? `${effectiveLayer.radius}px` : undefined))
+      : (effectiveLayer.type === 'text' && effectiveLayer.radius ? `${effectiveLayer.radius}px` : undefined),
+    margin: 0,
+    boxSizing: 'border-box',
+    opacity: a.opacity,
+    transform: a.transform,
+  }
+}
+
+/** Full-artboard, click-through box used by both group shadow casters. */
+const casterBoxStyle: React.CSSProperties = {
+  position: 'absolute',
+  left: 0,
+  top: 0,
+  width: '100%',
+  height: '100%',
+  pointerEvents: 'none',
+}
+
+/**
+ * One hidden <defs> per artboard holding every `wsh-*` filter the layers currently reference.
+ * Rendered first inside the artboard so filters resolve before (and independently of) the layers.
+ */
+function ShadowFilterDefs({
+  layers,
+  preset,
+  time,
+  active,
+}: {
+  layers: Layer[]
+  preset: { w: number; h: number }
+  time: number
+  active: boolean
+}) {
+  const filters: { id: string; region: ReturnType<typeof shadowFilterRegion>; nodes: React.ReactNode[] }[] = []
+
+  for (const l of layers) {
+    if (l.visible === false) continue
+    const eff: Layer = l.keyframes && l.keyframes.length > 0 ? interpolateKeyframes(l, time) : l
+    if (!layerNeedsSvgFilter(eff)) continue
+    if (getCompositeAnim(eff, time, active, layers).hidden) continue
+
+    // spread === 0 drop lives on the CSS fast path (chained after this url() on the element),
+    // so it must not be duplicated inside the filter.
+    const drop = eff.dropShadow && eff.dropShadow.spread !== 0 ? eff.dropShadow : undefined
+    const inner = eff.innerShadow
+    if (!drop && !inner) continue
+
+    // text boxes are measured (max-content / auto height) — artboard size is the safe ref
+    const refW = eff.type === 'text' || !eff.w ? preset.w : eff.w
+    const refH = eff.type === 'text' || !eff.h ? preset.h : eff.h
+
+    filters.push({
+      id: shadowFilterId(l.id),
+      region: shadowFilterRegion(refW, refH, shadowRegionEffect(drop, inner)),
+      nodes: shadowFilterNodes(drop, inner, 'full'),
+    })
+  }
+
+  // --- group shadow casters (Step B) -------------------------------------------------
+  // A group wrapper is an empty box (children render as flat siblings), so a group's effect is
+  // cast by shadow-only duplicates of its subtree. Two filters: drop (painted under the children)
+  // and inner (painted over them). Both omit SourceGraphic, so only the duplicates' alpha drives
+  // the shadow — no double-draw. Region is artboard-based because the caster box is full-artboard.
+  for (const g of layers) {
+    if (g.type !== 'group' || g.visible === false) continue
+    const effG: Layer = g.keyframes && g.keyframes.length > 0 ? interpolateKeyframes(g, time) : g
+    if (!effG.dropShadow && !effG.innerShadow) continue
+    if (getCompositeAnim(effG, time, active, layers).hidden) continue
+
+    if (effG.dropShadow) {
+      filters.push({
+        id: dropCasterFilterId(g.id),
+        region: shadowFilterRegion(preset.w, preset.h, effG.dropShadow),
+        nodes: shadowFilterNodes(effG.dropShadow, undefined, 'dropOnly'),
+      })
+    }
+    if (effG.innerShadow) {
+      filters.push({
+        id: innerCasterFilterId(g.id),
+        region: shadowFilterRegion(preset.w, preset.h, effG.innerShadow),
+        nodes: shadowFilterNodes(undefined, effG.innerShadow, 'innerOnly'),
+      })
+    }
+  }
+
+  if (filters.length === 0) return null
+
+  return (
+    <svg
+      aria-hidden="true"
+      width={0}
+      height={0}
+      style={{ position: 'absolute', left: 0, top: 0, width: 0, height: 0, overflow: 'hidden', pointerEvents: 'none' }}
+    >
+      <defs>
+        {filters.map((f) => (
+          <filter
+            key={f.id}
+            id={f.id}
+            colorInterpolationFilters="sRGB"
+            x={f.region.x}
+            y={f.region.y}
+            width={f.region.width}
+            height={f.region.height}
+          >
+            {f.nodes}
+          </filter>
+        ))}
+      </defs>
+    </svg>
+  )
 }
 
 const clampN = (v: number, lo: number, hi: number) => Math.max(lo, Math.min(v, hi))
@@ -3042,6 +3280,55 @@ export default function Canvas() {
   const eff = scale * view.scale
   const hs = eff ? 11 / eff : 11 // handle size in artboard px (constant on screen)
 
+  // --- Group shadow casters (Step B) ----------------------------------------------------
+  // Group wrappers are empty boxes (children render as flat siblings), so a group's effect can't
+  // be a filter on the wrapper — it's cast by shadow-only duplicates of the subtree. The DROP
+  // caster is spliced in right before the group's first child (⇒ paints under every child); the
+  // INNER caster renders right after the group wrapper, which sits at maxIdx + 1 (⇒ after every
+  // child, paints over them). Both are click-through and event-free.
+  const dropCasters = new Map<string, Layer[]>()
+  for (const g of project.layers) {
+    if (g.type !== 'group' || g.visible === false) continue
+    const effG: Layer = g.keyframes && g.keyframes.length > 0 ? interpolateKeyframes(g, time) : g
+    if (!effG.dropShadow) continue
+    if (getCompositeAnim(effG, time, active, project.layers).hidden) continue
+    const firstChild = project.layers.find((c) => c.groupId === g.id)
+    if (!firstChild) continue
+    const groups = dropCasters.get(firstChild.id)
+    if (groups) groups.push(g)
+    else dropCasters.set(firstChild.id, [g])
+  }
+
+  /** Duplicate of a group's subtree for use as a shadow source: same boxes, same animation,
+   *  no interaction, no selection chrome, no per-child shadow of its own. */
+  const casterChildren = (groupId: string): React.ReactNode =>
+    getDescendantLayers(groupId, project.layers)
+      .filter((c) => c.type !== 'group') // nested group wrappers are empty boxes too
+      .map((c) => {
+        const cEff: Layer = c.keyframes && c.keyframes.length > 0 ? interpolateKeyframes(c, time) : c
+        const ca = getCompositeAnim(cEff, time, active, project.layers)
+        if (ca.hidden) return null
+        return (
+          <div
+            key={c.id}
+            style={{
+              ...layerBoxStyle(cEff, ca, preset, layerRefs.current.get(c.id), Boolean(c.keyframes?.length)),
+              filter: ca.filter !== 'none' ? ca.filter : undefined,
+            }}
+          >
+            {/* editing is forced off: two live editors for one layer would fight over the DOM */}
+            <LayerContent
+              layer={cEff}
+              editing={false}
+              isVectorEditing={false}
+              eff={eff}
+              onEdit={() => {}}
+              onEndEdit={() => {}}
+            />
+          </div>
+        )
+      })
+
   return (
     <div
       ref={ref}
@@ -3459,6 +3746,7 @@ export default function Canvas() {
           style={{ width: preset.w, height: preset.h, transformOrigin: 'center', ...bgStyle }}
           data-testid="artboard"
         >
+          <ShadowFilterDefs layers={project.layers} preset={preset} time={time} active={active} />
           {snapGuides && snapGuides.active && (
             <>
               {snapGuides.xGuides.includes(preset.w / 2) && (
@@ -3669,11 +3957,35 @@ export default function Canvas() {
           {project.layers.map((l) => {
             const effectiveLayer = l.keyframes && l.keyframes.length > 0 ? interpolateKeyframes(l, time) : l
             const a = getCompositeAnim(effectiveLayer, time, active, project.layers)
-            if (l.visible === false || a.hidden) return null
-            const isSel = selectedIds.includes(l.id)
-            return (
+            // Drop casters are keyed on the group's first child, which may itself be hidden —
+            // still emit them (the group is the thing being gated, and it was gated in the map).
+            const dropCasterNode = dropCasters.get(l.id)?.map((g) => (
               <div
-                key={l.id}
+                key={`drop-caster-${g.id}`}
+                style={{ ...casterBoxStyle, filter: `url(#${dropCasterFilterId(g.id)})` }}
+              >
+                {casterChildren(g.id)}
+              </div>
+            ))
+            if (l.visible === false || a.hidden) {
+              return dropCasterNode?.length ? <Fragment key={l.id}>{dropCasterNode}</Fragment> : null
+            }
+            const isSel = selectedIds.includes(l.id)
+            // Element/ancestor blur AND the shadow filters live on an INNER wrapper: the
+            // selection border below is a sibling of that wrapper, so it stays crisp
+            // (also fixes the old bug where element blur smeared the selection border).
+            const filterParts: string[] = []
+            if (a.filter && a.filter !== 'none') filterParts.push(a.filter)
+            if (layerNeedsSvgFilter(effectiveLayer)) filterParts.push(`url(#${shadowFilterId(l.id)})`)
+            // spread === 0 drop has no SVG branch (see ShadowFilterDefs) — CSS fast path
+            if (effectiveLayer.dropShadow && effectiveLayer.dropShadow.spread === 0) {
+              filterParts.push(dropShadowCss(effectiveLayer.dropShadow))
+            }
+            const combinedFilter = filterParts.length > 0 ? filterParts.join(' ') : undefined
+            return (
+              <Fragment key={l.id}>
+                {dropCasterNode}
+                <div
                 ref={(node) => {
                   if (node) layerRefs.current.set(l.id, node)
                   else layerRefs.current.delete(l.id)
@@ -3742,30 +4054,7 @@ export default function Canvas() {
                 data-testid={`layer-${l.id}`}
                 data-layer-id={l.id}
                 style={{
-                  position: 'absolute',
-                  left: !l.keyframes?.length && effectiveLayer.type === 'text' && effectiveLayer.align === 'center' && effectiveLayer.x === 0 && effectiveLayer.w === preset.w && !effectiveLayer.paddingLeft && !effectiveLayer.paddingRight && layerRefs.current.get(l.id)
-                    ? (preset.w - layerRefs.current.get(l.id)!.offsetWidth) / 2
-                    : effectiveLayer.x,
-                  top: effectiveLayer.y,
-                  width: effectiveLayer.type === 'text' ? 'max-content' : effectiveLayer.w,
-                  height: effectiveLayer.type === 'text' && effectiveLayer.h !== preset.h ? 'auto' : effectiveLayer.h,
-                  fontSize: effectiveLayer.type === 'text' ? effectiveLayer.fontSize : undefined,
-                  lineHeight: effectiveLayer.type === 'text' ? 0.8 : undefined,
-                  paddingTop: effectiveLayer.paddingTop ? `${effectiveLayer.paddingTop}px` : undefined,
-                  paddingRight: effectiveLayer.paddingRight ? `${effectiveLayer.paddingRight}px` : undefined,
-                  paddingBottom: effectiveLayer.paddingBottom ? `${effectiveLayer.paddingBottom}px` : undefined,
-                  paddingLeft: effectiveLayer.paddingLeft ? `${effectiveLayer.paddingLeft}px` : undefined,
-                  background: effectiveLayer.type === 'text' && effectiveLayer.fill ? effectiveLayer.fill : undefined,
-                  borderRadius: effectiveLayer.type === 'shape'
-                    ? (effectiveLayer.shape === 'circle' || effectiveLayer.shape === 'pill'
-                        ? (effectiveLayer.radius !== undefined ? `${effectiveLayer.radius}px` : '9999px')
-                        : (effectiveLayer.radius !== undefined ? `${effectiveLayer.radius}px` : undefined))
-                    : (effectiveLayer.type === 'text' && effectiveLayer.radius ? `${effectiveLayer.radius}px` : undefined),
-                  margin: 0,
-                  boxSizing: 'border-box',
-                  opacity: a.opacity,
-                  transform: a.transform,
-                  filter: a.filter,
+                  ...layerBoxStyle(effectiveLayer, a, preset, layerRefs.current.get(l.id), Boolean(l.keyframes?.length)),
                   backdropFilter: (effectiveLayer.blurType === 'backdrop' && effectiveLayer.blur && effectiveLayer.blur > 0)
                     ? `blur(${effectiveLayer.blur}px)`
                     : undefined,
@@ -3811,15 +4100,27 @@ export default function Canvas() {
                     />
                   </svg>
                 )}
-                <LayerContent
-                  layer={effectiveLayer}
-                  editing={editingId === l.id}
-                  isVectorEditing={vectorEditingId === l.id && l.type === 'path'}
-                  eff={eff}
-                  onEdit={(t) => updateLayer(l.id, { text: t })}
-                  onEndEdit={() => setEditingId(null)}
-                />
+                <div style={{ width: '100%', height: '100%', filter: combinedFilter }}>
+                  <LayerContent
+                    layer={effectiveLayer}
+                    editing={editingId === l.id}
+                    isVectorEditing={vectorEditingId === l.id && l.type === 'path'}
+                    eff={eff}
+                    onEdit={(t) => updateLayer(l.id, { text: t })}
+                    onEndEdit={() => setEditingId(null)}
+                  />
+                </div>
               </div>
+              {/* inner caster: after the group wrapper (maxIdx + 1) ⇒ over every child */}
+              {l.type === 'group' && effectiveLayer.innerShadow && (
+                <div
+                  key={`inner-caster-${l.id}`}
+                  style={{ ...casterBoxStyle, filter: `url(#${innerCasterFilterId(l.id)})` }}
+                >
+                  {casterChildren(l.id)}
+                </div>
+              )}
+              </Fragment>
             )
           })}
 
