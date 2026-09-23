@@ -26,8 +26,8 @@ type Drag =
   | { kind: 'trim'; id: string; edge: 'l' | 'r'; s0: number; e0: number; sx: number }
   | { kind: 'move'; id: string; sx: number; initialStart: number; initialEnd: number; initialKeyframes?: Keyframe[] }
   | { kind: 'keyframe'; layerId: string; keyframeId: string; sx: number; initialTime: number; layerStart: number; layerEnd: number }
-  | { kind: 'trim-group'; id: string; edge: 'l' | 'r'; s0: number; e0: number; sx: number; initialStarts: Map<string, number>; initialEnds: Map<string, number> }
-  | { kind: 'move-group'; id: string; sx: number; initialStarts: Map<string, number>; initialEnds: Map<string, number> }
+  | { kind: 'trim-group'; id: string; edge: 'l' | 'r'; s0: number; e0: number; sx: number; initialStarts: Map<string, number>; initialEnds: Map<string, number>; groupStart?: number; groupEnd?: number }
+  | { kind: 'move-group'; id: string; sx: number; initialStarts: Map<string, number>; initialEnds: Map<string, number>; groupStart?: number; groupEnd?: number; groupKeyframes?: Keyframe[] }
   | null
 
 const LABEL_W = 184
@@ -158,6 +158,23 @@ export default function Timeline() {
           const newStart = Math.max(0, Math.min(duration - span, initStart + dt))
           updateLayer(childId, { start: newStart, end: newStart + span })
         }
+        if (d.groupStart !== undefined && d.groupEnd !== undefined) {
+          const span = d.groupEnd - d.groupStart
+          const newStart = Math.max(0, Math.min(duration - span, d.groupStart + dt))
+          let keyframesPatch: Keyframe[] | undefined = undefined
+          if (d.groupKeyframes && d.groupKeyframes.length > 0) {
+            const shift = Math.round(newStart - d.groupStart)
+            keyframesPatch = d.groupKeyframes.map((kf) => ({
+              ...kf,
+              time: Math.round(kf.time + shift),
+            }))
+          }
+          updateLayer(d.id, {
+            start: newStart,
+            end: newStart + span,
+            ...(keyframesPatch ? { keyframes: keyframesPatch } : {}),
+          })
+        }
       } else if (d.kind === 'trim-group') {
         const dt = (e.clientX - d.sx) / ppms
         for (const [childId, initStart] of d.initialStarts.entries()) {
@@ -168,6 +185,15 @@ export default function Timeline() {
           } else {
             const newEnd = Math.min(duration, Math.max(initStart + 100, initEnd + dt))
             updateLayer(childId, { end: newEnd })
+          }
+        }
+        if (d.groupStart !== undefined && d.groupEnd !== undefined) {
+          if (d.edge === 'l') {
+            const newStart = Math.max(0, Math.min(d.groupEnd - 100, d.groupStart + dt))
+            updateLayer(d.id, { start: newStart })
+          } else {
+            const newEnd = Math.min(duration, Math.max(d.groupStart + 100, d.groupEnd + dt))
+            updateLayer(d.id, { end: newEnd })
           }
         }
       }
@@ -197,12 +223,16 @@ export default function Timeline() {
       initialStarts.set(d.id, d.start)
       initialEnds.set(d.id, d.end)
     }
+    const groupLayer = project.layers.find((l) => l.id === groupId)
     drag.current = {
       kind: 'move-group',
       id: groupId,
       sx: e.clientX,
       initialStarts,
       initialEnds,
+      groupStart: groupLayer?.start,
+      groupEnd: groupLayer?.end,
+      groupKeyframes: groupLayer?.keyframes ? [...groupLayer.keyframes] : undefined,
     }
   }
 
@@ -215,6 +245,7 @@ export default function Timeline() {
       initialStarts.set(d.id, d.start)
       initialEnds.set(d.id, d.end)
     }
+    const groupLayer = project.layers.find((l) => l.id === groupId)
     drag.current = {
       kind: 'trim-group',
       id: groupId,
@@ -224,6 +255,8 @@ export default function Timeline() {
       sx: e.clientX,
       initialStarts,
       initialEnds,
+      groupStart: groupLayer?.start ?? s0,
+      groupEnd: groupLayer?.end ?? e0,
     }
   }
 
@@ -274,7 +307,7 @@ export default function Timeline() {
                 )}
                 <button
                   data-testid="keyframe-btn"
-                  disabled={!selectedLayer || selectedLayer.type === 'group'}
+                  disabled={!selectedLayer}
                   onClick={() => {
                     if (!selectedId) return
                     toggleKeyframe(selectedId, time)
@@ -288,7 +321,7 @@ export default function Timeline() {
                   } disabled:opacity-40`}
                   title={
                     !selectedLayer
-                      ? 'Select a layer to add keyframes'
+                      ? 'Select an element or group to add keyframes'
                       : isAtKf
                         ? `Remove keyframe at ${fmt(time)}`
                         : hasKf
@@ -439,8 +472,8 @@ export default function Timeline() {
                       keyframeId: kfId,
                       sx: e.clientX,
                       initialTime: targetKf.time,
-                      layerStart: item.layer.start,
-                      layerEnd: item.layer.end,
+                      layerStart: item.isGroup ? item.effectiveStart : item.layer.start,
+                      layerEnd: item.isGroup ? item.effectiveEnd : item.layer.end,
                     }
                   }}
                   onKeyframeClick={(kfTime) => setTime(kfTime)}
@@ -449,11 +482,13 @@ export default function Timeline() {
                     e.stopPropagation()
                     select(item.layer.id)
                     setAnimationSide(side)
+                    const animStart = item.isGroup ? item.effectiveStart : item.layer.start
+                    const animEnd = item.isGroup ? item.effectiveEnd : item.layer.end
                     if (side === 'in') {
-                      setTime(item.layer.start)
+                      setTime(animStart)
                     } else {
                       const dur = item.layer.outAnim === 'blur' ? 650 : item.layer.outAnim === 'rotate' ? (item.layer.outRotateMs ?? 150) : item.layer.outAnim === 'pulse' ? 500 : 380
-                      setTime(Math.max(0, item.layer.end - dur))
+                      setTime(Math.max(0, animEnd - dur))
                     }
                     openTool('animate')
                   }}
@@ -831,72 +866,30 @@ function TimelineRow({
 
       {/* Right track area */}
       <div className="relative h-full flex-1" style={{ touchAction: 'pan-x pan-y' }}>
-        {isGroup ? (
-          /* Group track clip */
+        {layer.keyframes && layer.keyframes.length > 0 ? (
+          /* Keyframe Layer or Group clip — seamlessly switches the element in place inside the same lane height */
           <div
-            data-testid={`clip-${layer.id}`}
-            onPointerDown={handleGroupPointerDown}
-            onPointerMove={handleGroupPointerMove}
-            onPointerUp={handleGroupPointerUp}
-            onPointerCancel={handleGroupPointerUp}
-            className={`absolute top-1.5 flex h-8 items-center overflow-hidden rounded-md border shadow-sm cursor-grab active:cursor-grabbing ${
-              selected
-                ? isComponent
-                  ? 'border-purple-400 bg-purple-950/70 ring-1 ring-purple-400'
-                  : 'border-indigo-400 bg-indigo-950/70 ring-1 ring-indigo-400'
-                : isComponent
-                  ? 'border-purple-500/40 bg-purple-950/40'
-                  : 'border-indigo-500/40 bg-indigo-950/40'
-            }`}
-            style={{
-              left: effectiveStart * ppms,
-              width: Math.max(32, (effectiveEnd - effectiveStart) * ppms),
-              touchAction: 'pan-x pan-y',
-            }}
-          >
-            <div
-              onPointerDown={(e) => onTrimGroup('l', e)}
-              data-testid={`trim-l-${layer.id}`}
-              className="absolute left-0 top-0 flex h-full w-5 cursor-ew-resize items-center justify-center bg-black/30 hover:bg-white/20"
-              style={{ touchAction: 'none' }}
-              title="Trim group start"
-            >
-              <span className="pointer-events-none h-3.5 w-0.5 rounded-full bg-white/50" />
-            </div>
-            <div className="flex w-full items-center gap-1.5 truncate px-6 select-none pointer-events-none">
-              {isComponent ? (
-                <span className="rounded bg-purple-500/30 px-1 py-0.2 text-[9px] font-bold text-purple-200">CMP</span>
-              ) : (
-                <span className="rounded bg-indigo-500/30 px-1 py-0.2 text-[9px] font-bold text-indigo-200">GRP</span>
-              )}
-              <span className="truncate text-[11px] font-semibold text-white/90">{label}</span>
-            </div>
-            <div
-              onPointerDown={(e) => onTrimGroup('r', e)}
-              data-testid={`trim-r-${layer.id}`}
-              className="absolute right-0 top-0 flex h-full w-5 cursor-ew-resize items-center justify-center bg-black/30 hover:bg-white/20"
-              style={{ touchAction: 'none' }}
-              title="Trim group end"
-            >
-              <span className="pointer-events-none h-3.5 w-0.5 rounded-full bg-white/50" />
-            </div>
-          </div>
-        ) : layer.keyframes && layer.keyframes.length > 0 ? (
-          /* Keyframe Layer clip — seamlessly switches the element in place inside the same lane height */
-          <div
-            onPointerDown={handleLayerPointerDown}
-            onPointerMove={handleLayerPointerMove}
-            onPointerUp={handleLayerPointerUp}
-            onPointerCancel={handleLayerPointerUp}
+            onPointerDown={isGroup ? handleGroupPointerDown : handleLayerPointerDown}
+            onPointerMove={isGroup ? handleGroupPointerMove : handleLayerPointerMove}
+            onPointerUp={isGroup ? handleGroupPointerUp : handleLayerPointerUp}
+            onPointerCancel={isGroup ? handleGroupPointerUp : handleLayerPointerUp}
             data-testid={`clip-${layer.id}`}
             className={`absolute top-1.5 flex h-8 items-center rounded-md border shadow-sm select-none transition-colors ${
               selected
-                ? 'border-amber-400 bg-slate-900/95 ring-1 ring-amber-400/80 shadow-[0_0_10px_rgba(251,191,36,0.18)]'
-                : 'border-amber-500/40 bg-slate-900/85 hover:border-amber-400/70'
+                ? isComponent
+                  ? 'border-purple-400 bg-slate-900/95 ring-1 ring-purple-400/80 shadow-[0_0_10px_rgba(192,132,252,0.22)]'
+                  : isGroup
+                    ? 'border-indigo-400 bg-slate-900/95 ring-1 ring-indigo-400/80 shadow-[0_0_10px_rgba(129,140,248,0.22)]'
+                    : 'border-amber-400 bg-slate-900/95 ring-1 ring-amber-400/80 shadow-[0_0_10px_rgba(251,191,36,0.18)]'
+                : isComponent
+                  ? 'border-purple-500/40 bg-slate-900/85 hover:border-purple-400/70'
+                  : isGroup
+                    ? 'border-indigo-500/40 bg-slate-900/85 hover:border-indigo-400/70'
+                    : 'border-amber-500/40 bg-slate-900/85 hover:border-amber-400/70'
             }`}
             style={{
-              left: layer.start * ppms,
-              width: Math.max(selected ? 92 : 48, (layer.end - layer.start) * ppms),
+              left: (isGroup ? effectiveStart : layer.start) * ppms,
+              width: Math.max(selected ? 92 : 48, ((isGroup ? effectiveEnd : layer.end) - (isGroup ? effectiveStart : layer.start)) * ppms),
               touchAction: 'pan-x pan-y',
             }}
           >
@@ -905,12 +898,16 @@ function TimelineRow({
               onPointerDown={(e) => {
                 e.stopPropagation()
                 e.currentTarget.setPointerCapture(e.pointerId)
-                onTrimLayer('l', e)
+                if (isGroup) {
+                  onTrimGroup('l', e)
+                } else {
+                  onTrimLayer('l', e)
+                }
               }}
               data-testid={`trim-l-${layer.id}`}
               className="absolute left-0 top-0 z-20 flex h-full w-4 cursor-ew-resize items-center justify-center bg-black/40 hover:bg-amber-400/30 transition-colors"
               style={{ touchAction: 'none' }}
-              title="Trim clip start"
+              title={isGroup ? 'Trim group start' : 'Trim clip start'}
             >
               <span className="pointer-events-none h-3 w-0.5 rounded-full bg-amber-400/80" />
             </div>
@@ -920,11 +917,12 @@ function TimelineRow({
               const times = layer.keyframes.map((k) => k.time)
               const minT = Math.min(...times)
               const maxT = Math.max(...times)
+              const clipStart = isGroup ? effectiveStart : layer.start
               return (
                 <div
                   className="absolute top-1/2 h-[2px] -translate-y-1/2 bg-amber-400/40 pointer-events-none z-10"
                   style={{
-                    left: (minT - layer.start) * ppms,
+                    left: (minT - clipStart) * ppms,
                     width: Math.max(0, (maxT - minT) * ppms),
                   }}
                 />
@@ -933,6 +931,13 @@ function TimelineRow({
 
             {/* Center label & keyframe badge */}
             <div className="pointer-events-none flex w-full items-center justify-center gap-1.5 px-5 truncate select-none z-0">
+              {isGroup && (
+                isComponent ? (
+                  <span className="rounded bg-purple-500/30 px-1 py-0.2 text-[8px] font-bold text-purple-200">CMP</span>
+                ) : (
+                  <span className="rounded bg-indigo-500/30 px-1 py-0.2 text-[8px] font-bold text-indigo-200">GRP</span>
+                )
+              )}
               <span className="truncate text-[10px] font-semibold text-white/85">{label}</span>
               <span className="rounded bg-amber-400/20 px-1 py-0.2 text-[8px] font-bold text-amber-300 tracking-wider shrink-0">
                 ◆ {layer.keyframes.length}
@@ -941,7 +946,8 @@ function TimelineRow({
 
             {/* Keyframe Diamond Markers */}
             {layer.keyframes.map((kf) => {
-              const kfX = (kf.time - layer.start) * ppms
+              const clipStart = isGroup ? effectiveStart : layer.start
+              const kfX = (kf.time - clipStart) * ppms
               const isCurrent = Math.abs(time - kf.time) <= 60
               return (
                 <button
@@ -980,15 +986,110 @@ function TimelineRow({
               onPointerDown={(e) => {
                 e.stopPropagation()
                 e.currentTarget.setPointerCapture(e.pointerId)
-                onTrimLayer('r', e)
+                if (isGroup) {
+                  onTrimGroup('r', e)
+                } else {
+                  onTrimLayer('r', e)
+                }
               }}
               data-testid={`trim-r-${layer.id}`}
               className="absolute right-0 top-0 z-20 flex h-full w-4 cursor-ew-resize items-center justify-center bg-black/40 hover:bg-amber-400/30 transition-colors"
               style={{ touchAction: 'none' }}
-              title="Trim clip end"
+              title={isGroup ? 'Trim group end' : 'Trim clip end'}
             >
               <span className="pointer-events-none h-3 w-0.5 rounded-full bg-amber-400/80" />
             </div>
+          </div>
+        ) : isGroup ? (
+          /* Group track clip (no keyframes) with In/Out animation triggers */
+          <div
+            data-testid={`clip-${layer.id}`}
+            onPointerDown={handleGroupPointerDown}
+            onPointerMove={handleGroupPointerMove}
+            onPointerUp={handleGroupPointerUp}
+            onPointerCancel={handleGroupPointerUp}
+            className={`absolute top-1.5 flex h-8 items-center overflow-hidden rounded-md border shadow-sm cursor-grab active:cursor-grabbing ${
+              selected
+                ? isComponent
+                  ? 'border-purple-400 bg-purple-950/70 ring-1 ring-purple-400'
+                  : 'border-indigo-400 bg-indigo-950/70 ring-1 ring-indigo-400'
+                : isComponent
+                  ? 'border-purple-500/40 bg-purple-950/40'
+                  : 'border-indigo-500/40 bg-indigo-950/40'
+            }`}
+            style={{
+              left: effectiveStart * ppms,
+              width: Math.max(selected ? 92 : 48, (effectiveEnd - effectiveStart) * ppms),
+              touchAction: 'pan-x pan-y',
+            }}
+          >
+            {selected && (
+              <button
+                type="button"
+                onPointerDown={(e) => onAnimation('in', e)}
+                data-testid={`anim-in-${layer.id}`}
+                aria-label={`Edit in-animation for ${label}`}
+                title={`In-animation: ${layer.inAnim || layer.anim || 'none'}`}
+                className={`absolute left-0 top-0 z-10 flex h-full w-[22px] cursor-pointer items-center justify-center border-r border-white/20 transition-colors hover:bg-emerald-300/60 ${
+                  (layer.inAnim && layer.inAnim !== 'none') || (layer.anim && layer.anim !== 'none')
+                    ? 'bg-emerald-500/40 text-emerald-100'
+                    : 'bg-black/20 text-white/70'
+                }`}
+              >
+                <span className="pointer-events-none text-[8.5px] font-bold">IN</span>
+              </button>
+            )}
+            <div
+              onPointerDown={(e) => onTrimGroup('l', e)}
+              data-testid={`trim-l-${layer.id}`}
+              className={`absolute top-0 z-20 flex h-full cursor-ew-resize items-center justify-center bg-black/30 hover:bg-white/20 ${
+                selected ? 'left-[22px] w-5 border-r border-white/10' : 'left-0 w-5'
+              }`}
+              style={{ touchAction: 'none' }}
+              title="Trim group start"
+            >
+              <span className="pointer-events-none h-3.5 w-0.5 rounded-full bg-white/50" />
+            </div>
+            <div className={`flex w-full items-center gap-1.5 truncate select-none pointer-events-none ${selected ? 'px-12' : 'px-6'}`}>
+              {isComponent ? (
+                <span className="rounded bg-purple-500/30 px-1 py-0.2 text-[9px] font-bold text-purple-200">CMP</span>
+              ) : (
+                <span className="rounded bg-indigo-500/30 px-1 py-0.2 text-[9px] font-bold text-indigo-200">GRP</span>
+              )}
+              <span className="truncate text-[11px] font-semibold text-white/90">{label}</span>
+              {(Boolean(layer.inAnim && layer.inAnim !== 'none') || Boolean(layer.anim && layer.anim !== 'none') || Boolean(layer.outAnim && layer.outAnim !== 'none')) && (
+                <span className="rounded bg-emerald-500/20 px-1 py-0.2 text-[8px] font-bold text-emerald-300 uppercase shrink-0">
+                  {layer.inAnim || layer.anim || layer.outAnim}
+                </span>
+              )}
+            </div>
+            <div
+              onPointerDown={(e) => onTrimGroup('r', e)}
+              data-testid={`trim-r-${layer.id}`}
+              className={`absolute top-0 z-20 flex h-full cursor-ew-resize items-center justify-center bg-black/30 hover:bg-white/20 ${
+                selected ? 'right-[22px] w-5 border-l border-white/10' : 'right-0 w-5'
+              }`}
+              style={{ touchAction: 'none' }}
+              title="Trim group end"
+            >
+              <span className="pointer-events-none h-3.5 w-0.5 rounded-full bg-white/50" />
+            </div>
+            {selected && (
+              <button
+                type="button"
+                onPointerDown={(e) => onAnimation('out', e)}
+                data-testid={`anim-out-${layer.id}`}
+                aria-label={`Edit out-animation for ${label}`}
+                title={`Out-animation: ${layer.outAnim || 'none'}`}
+                className={`absolute right-0 top-0 z-10 flex h-full w-[22px] cursor-pointer items-center justify-center border-l border-white/20 transition-colors hover:bg-rose-300/60 ${
+                  layer.outAnim && layer.outAnim !== 'none'
+                    ? 'bg-rose-500/40 text-rose-100'
+                    : 'bg-black/20 text-white/70'
+                }`}
+              >
+                <span className="pointer-events-none text-[8.5px] font-bold">OUT</span>
+              </button>
+            )}
           </div>
         ) : (
           /* Normal Layer clip */

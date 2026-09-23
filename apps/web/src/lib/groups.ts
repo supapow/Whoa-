@@ -65,7 +65,7 @@ export function computeGroupBounds(groupId: string, allLayers: Layer[]): {
   maxEnd: number
 } {
   const descendants = getDescendantLayers(groupId, allLayers)
-  const contentLayers = descendants.filter((l) => l.type !== 'group' && l.visible)
+  const contentLayers = descendants.filter((l) => l.type !== 'group' && l.visible !== false)
   const pool = contentLayers.length > 0 ? contentLayers : descendants
 
   if (pool.length === 0) {

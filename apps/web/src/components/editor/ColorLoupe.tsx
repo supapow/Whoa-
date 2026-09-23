@@ -1,7 +1,15 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react'
 import { Pipette, Check, X } from 'lucide-react'
 import { useEditor } from '#/store/editor'
-import type { Background, Layer } from '#/types'
+import type { Background, Layer, Preset } from '#/types'
+import { parseImagePosition } from '#/lib/imagePosition'
+
+interface ImageCanvasEntry {
+  canvas: HTMLCanvasElement
+  ctx: CanvasRenderingContext2D
+  width: number
+  height: number
+}
 
 function parseToHex(color: string | null | undefined): string | null {
   if (!color || color === 'none' || color === 'transparent') return null
@@ -38,14 +46,187 @@ function interpolateHex(hex1: string, hex2: string, t: number): string {
   return ('#' + [r, g, b].map((x) => x.toString(16).padStart(2, '0')).join('')).toUpperCase()
 }
 
+function samplePixelFromEntry(entry: ImageCanvasEntry, px: number, py: number): string | null {
+  const x = Math.max(0, Math.min(entry.width - 1, Math.floor(px)))
+  const y = Math.max(0, Math.min(entry.height - 1, Math.floor(py)))
+  try {
+    const d = entry.ctx.getImageData(x, y, 1, 1).data
+    if (d[3] > 8) {
+      return ('#' + [d[0], d[1], d[2]].map((v) => v.toString(16).padStart(2, '0')).join('')).toUpperCase()
+    }
+  } catch {
+    // If reading failed (e.g. tainted)
+  }
+  return null
+}
+
+function getPixelCoordForImageLayer(
+  layer: Layer,
+  unrotX: number,
+  unrotY: number,
+  entry: ImageCanvasEntry
+): { px: number; py: number } | null {
+  if (layer.crop) {
+    if (unrotX < 0 || unrotX > layer.w || unrotY < 0 || unrotY > layer.h) return null
+    const relX = unrotX - layer.crop.x
+    const relY = unrotY - layer.crop.y
+    if (relX < 0 || relX > layer.crop.w || relY < 0 || relY > layer.crop.h) return null
+    const px = (relX / layer.crop.w) * entry.width
+    const py = (relY / layer.crop.h) * entry.height
+    return { px, py }
+  }
+
+  if (unrotX < 0 || unrotX > layer.w || unrotY < 0 || unrotY > layer.h) return null
+  const fit = layer.imageFit || 'cover'
+  const pos = parseImagePosition(layer.imagePosition)
+
+  const nw = entry.width
+  const nh = entry.height
+  const boxW = layer.w
+  const boxH = layer.h
+
+  const scale = fit === 'contain'
+    ? Math.min(boxW / nw, boxH / nh)
+    : Math.max(boxW / nw, boxH / nh)
+
+  const renderedW = nw * scale
+  const renderedH = nh * scale
+  const overflowX = Math.max(0, renderedW - boxW)
+  const overflowY = Math.max(0, renderedH - boxH)
+
+  const imgLeft = -(overflowX * (pos.x / 100))
+  const imgTop = -(overflowY * (pos.y / 100))
+
+  const onImgX = unrotX - imgLeft
+  const onImgY = unrotY - imgTop
+  const px = onImgX / scale
+  const py = onImgY / scale
+
+  if (px < 0 || px >= nw || py < 0 || py >= nh) return null
+  return { px, py }
+}
+
+function getPixelCoordForBackgroundImage(
+  artX: number,
+  artY: number,
+  presetW: number,
+  presetH: number,
+  entry: ImageCanvasEntry
+): { px: number; py: number } | null {
+  if (artX < 0 || artX > presetW || artY < 0 || artY > presetH) return null
+  const nw = entry.width
+  const nh = entry.height
+  const scale = Math.max(presetW / nw, presetH / nh)
+  const renderedW = nw * scale
+  const renderedH = nh * scale
+  const overflowX = Math.max(0, renderedW - presetW)
+  const overflowY = Math.max(0, renderedH - presetH)
+  const imgLeft = -(overflowX * 0.5)
+  const imgTop = -(overflowY * 0.5)
+  const onImgX = artX - imgLeft
+  const onImgY = artY - imgTop
+  const px = onImgX / scale
+  const py = onImgY / scale
+  if (px < 0 || px >= nw || py < 0 || py >= nh) return null
+  return { px, py }
+}
+
+function loadAndCacheImage(
+  src: string,
+  cache: Map<string, ImageCanvasEntry>
+) {
+  if (!src || cache.has(src)) return
+
+  const img = new Image()
+  img.crossOrigin = 'anonymous'
+  img.onload = () => {
+    try {
+      const canvas = document.createElement('canvas')
+      canvas.width = img.naturalWidth
+      canvas.height = img.naturalHeight
+      const ctx = canvas.getContext('2d', { willReadFrequently: true })
+      if (ctx) {
+        ctx.drawImage(img, 0, 0)
+        const entry: ImageCanvasEntry = { canvas, ctx, width: img.naturalWidth, height: img.naturalHeight }
+        cache.set(src, entry)
+      }
+    } catch (e) {
+      console.warn('Failed to cache image for color loupe', e)
+    }
+  }
+  img.onerror = () => {
+    // Fallback: try blob fetch for CORS compatibility
+    fetch(src)
+      .then((res) => res.blob())
+      .then((blob) => {
+        const blobUrl = URL.createObjectURL(blob)
+        const blobImg = new Image()
+        blobImg.onload = () => {
+          try {
+            const canvas = document.createElement('canvas')
+            canvas.width = blobImg.naturalWidth
+            canvas.height = blobImg.naturalHeight
+            const ctx = canvas.getContext('2d', { willReadFrequently: true })
+            if (ctx) {
+              ctx.drawImage(blobImg, 0, 0)
+              cache.set(src, { canvas, ctx, width: blobImg.naturalWidth, height: blobImg.naturalHeight })
+            }
+          } finally {
+            URL.revokeObjectURL(blobUrl)
+          }
+        }
+        blobImg.src = blobUrl
+      })
+      .catch(() => {})
+  }
+  img.src = src
+}
+
+function getOrCacheImageEntry(
+  src: string,
+  cache: Map<string, ImageCanvasEntry>
+): ImageCanvasEntry | null {
+  if (!src) return null
+  if (cache.has(src)) return cache.get(src)!
+
+  // Check DOM <img> element first for instant synchronous decode
+  const domImg = Array.from(document.querySelectorAll('img')).find(
+    (el) => el.src === src || el.currentSrc === src
+  ) as HTMLImageElement | undefined
+
+  if (domImg && domImg.complete && domImg.naturalWidth > 0) {
+    try {
+      const canvas = document.createElement('canvas')
+      canvas.width = domImg.naturalWidth
+      canvas.height = domImg.naturalHeight
+      const ctx = canvas.getContext('2d', { willReadFrequently: true })
+      if (ctx) {
+        ctx.drawImage(domImg, 0, 0)
+        ctx.getImageData(0, 0, 1, 1) // Test read
+        const entry: ImageCanvasEntry = { canvas, ctx, width: domImg.naturalWidth, height: domImg.naturalHeight }
+        cache.set(src, entry)
+        if (domImg.currentSrc) cache.set(domImg.currentSrc, entry)
+        return entry
+      }
+    } catch {
+      // Tainted, fallback to async load
+    }
+  }
+
+  loadAndCacheImage(src, cache)
+  return null
+}
+
 function sampleColorAtPoint(
   clientX: number,
   clientY: number,
   artboardEl: HTMLElement | null,
+  preset: Preset,
   layers: Layer[],
-  background: Background
+  background: Background,
+  imageCache: Map<string, ImageCanvasEntry>
 ): string {
-  // 1. Elements from point
+  // 1. Check elements from point (SVG shapes, DOM layers, direct text, image layers)
   const elements = document.elementsFromPoint(clientX, clientY)
   for (const el of elements) {
     if (!(el instanceof HTMLElement || el instanceof SVGElement)) continue
@@ -56,6 +237,31 @@ function sampleColorAtPoint(
     if (layerContainer) {
       const layerId = layerContainer.getAttribute('data-layer-id')
       const layer = layers.find((l) => l.id === layerId)
+
+      // Direct image layer sampling
+      if (layer && layer.type === 'image' && layer.src) {
+        const entry = getOrCacheImageEntry(layer.src, imageCache)
+        if (entry && artboardEl) {
+          const artboardRect = artboardEl.getBoundingClientRect()
+          const effScale = artboardRect.width / preset.w
+          const artX = (clientX - artboardRect.left) / effScale
+          const artY = (clientY - artboardRect.top) / effScale
+
+          const cx = layer.x + layer.w / 2
+          const cy = layer.y + layer.h / 2
+          const rad = -((layer.rotation || 0) * Math.PI) / 180
+          const dx = artX - cx
+          const dy = artY - cy
+          const unrotX = dx * Math.cos(rad) - dy * Math.sin(rad) + layer.w / 2
+          const unrotY = dx * Math.sin(rad) + dy * Math.cos(rad) + layer.h / 2
+
+          const coord = getPixelCoordForImageLayer(layer, unrotX, unrotY, entry)
+          if (coord) {
+            const pixelHex = samplePixelFromEntry(entry, coord.px, coord.py)
+            if (pixelHex) return pixelHex
+          }
+        }
+      }
 
       // Check SVG fill / stroke
       if (el instanceof SVGElement) {
@@ -93,21 +299,98 @@ function sampleColorAtPoint(
       if (textHex && el.textContent?.trim()) return textHex
     }
 
+    // Direct <img> check on any hit element
+    if (el instanceof HTMLImageElement || el.querySelector('img')) {
+      const imgEl = (el instanceof HTMLImageElement ? el : el.querySelector('img')) as HTMLImageElement
+      const src = imgEl.currentSrc || imgEl.src
+      if (src) {
+        const entry = getOrCacheImageEntry(src, imageCache)
+        if (entry) {
+          const rect = imgEl.getBoundingClientRect()
+          if (rect.width > 0 && rect.height > 0) {
+            const fracX = Math.max(0, Math.min(1, (clientX - rect.left) / rect.width))
+            const fracY = Math.max(0, Math.min(1, (clientY - rect.top) / rect.height))
+            const color = samplePixelFromEntry(entry, fracX * entry.width, fracY * entry.height)
+            if (color) return color
+          }
+        }
+      }
+    }
+
     // Direct background check on element
     const cs = window.getComputedStyle(el)
     const bg = parseToHex(cs.backgroundColor)
     if (bg) return bg
   }
 
-  // 2. Artboard background
-  if (background.type === 'color') {
-    const hex = parseToHex(background.value)
-    if (hex) return hex
-  } else if (background.type === 'gradient') {
-    if (artboardEl) {
-      const rect = artboardEl.getBoundingClientRect()
-      const px = Math.max(0, Math.min(1, (clientX - rect.left) / rect.width))
-      const py = Math.max(0, Math.min(1, (clientY - rect.top) / rect.height))
+  // 2. Geometry check across layers from top to bottom (in case layers have pointer-events-none or transparent wrappers)
+  if (artboardEl) {
+    const artboardRect = artboardEl.getBoundingClientRect()
+    const effScale = artboardRect.width / preset.w
+    const artX = (clientX - artboardRect.left) / effScale
+    const artY = (clientY - artboardRect.top) / effScale
+
+    for (let i = layers.length - 1; i >= 0; i--) {
+      const layer = layers[i]
+      if (layer.visible === false || layer.type === 'group') continue
+
+      const cx = layer.x + layer.w / 2
+      const cy = layer.y + layer.h / 2
+      const rad = -((layer.rotation || 0) * Math.PI) / 180
+      const dx = artX - cx
+      const dy = artY - cy
+      const unrotX = dx * Math.cos(rad) - dy * Math.sin(rad) + layer.w / 2
+      const unrotY = dx * Math.sin(rad) + dy * Math.cos(rad) + layer.h / 2
+
+      if (unrotX >= 0 && unrotX <= layer.w && unrotY >= 0 && unrotY <= layer.h) {
+        if (layer.type === 'image' && layer.src) {
+          const entry = getOrCacheImageEntry(layer.src, imageCache)
+          if (entry) {
+            const coord = getPixelCoordForImageLayer(layer, unrotX, unrotY, entry)
+            if (coord) {
+              const pixelHex = samplePixelFromEntry(entry, coord.px, coord.py)
+              if (pixelHex) return pixelHex
+            }
+          }
+        } else if (layer.type === 'shape') {
+          if (layer.shape === 'circle') {
+            const rx = layer.w / 2
+            const ry = layer.h / 2
+            const normDist = Math.pow((unrotX - rx) / rx, 2) + Math.pow((unrotY - ry) / ry, 2)
+            if (normDist <= 1) {
+              const color = parseToHex(layer.fill || layer.color)
+              if (color) return color
+            }
+          } else {
+            const color = parseToHex(layer.fill || layer.color)
+            if (color) return color
+          }
+        } else if (layer.type === 'text') {
+          const color = parseToHex(layer.color || layer.fill)
+          if (color) return color
+        } else if (layer.type === 'path') {
+          const color = parseToHex(layer.fill !== 'transparent' ? layer.fill : layer.stroke)
+          if (color) return color
+        }
+      }
+    }
+
+    // 3. Artboard background check
+    if (background.type === 'image' && background.value) {
+      const entry = getOrCacheImageEntry(background.value, imageCache)
+      if (entry) {
+        const coord = getPixelCoordForBackgroundImage(artX, artY, preset.w, preset.h, entry)
+        if (coord) {
+          const pixelHex = samplePixelFromEntry(entry, coord.px, coord.py)
+          if (pixelHex) return pixelHex
+        }
+      }
+    } else if (background.type === 'color') {
+      const hex = parseToHex(background.value)
+      if (hex) return hex
+    } else if (background.type === 'gradient') {
+      const px = Math.max(0, Math.min(1, (clientX - artboardRect.left) / artboardRect.width))
+      const py = Math.max(0, Math.min(1, (clientY - artboardRect.top) / artboardRect.height))
       const progress = (px + py) / 2
       const gradColors = background.value.match(/#[0-9a-fA-F]{6}|rgba?\([^)]+\)/g)
       if (gradColors && gradColors.length >= 2) {
@@ -123,47 +406,276 @@ function sampleColorAtPoint(
   return '#007AFF'
 }
 
+const LOUPE_SIZE = 124
+const LOUPE_CANVAS_SIZE = 248
+const LOUPE_RADIUS = LOUPE_SIZE / 2
+const ZOOM = 3.2
+
+function renderLoupeLens(
+  canvas: HTMLCanvasElement | null,
+  touchPos: { x: number; y: number } | null,
+  preset: Preset,
+  layers: Layer[],
+  background: Background,
+  imageCache: Map<string, ImageCanvasEntry>
+) {
+  if (!canvas || !touchPos) return
+  const ctx = canvas.getContext('2d')
+  if (!ctx) return
+
+  const artboardEl = document.querySelector('[data-testid="artboard"]') as HTMLElement | null
+  if (!artboardEl) return
+
+  const artboardRect = artboardEl.getBoundingClientRect()
+  const effScale = artboardRect.width / preset.w
+  const artX = (touchPos.x - artboardRect.left) / effScale
+  const artY = (touchPos.y - artboardRect.top) / effScale
+
+  ctx.save()
+  // Clear lens canvas
+  ctx.clearRect(0, 0, LOUPE_CANVAS_SIZE, LOUPE_CANVAS_SIZE)
+
+  // Default neutral backdrop
+  ctx.fillStyle = '#18181b'
+  ctx.fillRect(0, 0, LOUPE_CANVAS_SIZE, LOUPE_CANVAS_SIZE)
+
+  // Set transform:
+  // Center of canvas is (LOUPE_CANVAS_SIZE / 2, LOUPE_CANVAS_SIZE / 2)
+  // Artboard coordinate (artX, artY) maps directly to center
+  const zoomScale = ZOOM * 2 * effScale
+  const centerX = LOUPE_CANVAS_SIZE / 2
+  const centerY = LOUPE_CANVAS_SIZE / 2
+
+  ctx.translate(centerX, centerY)
+  ctx.scale(zoomScale, zoomScale)
+  ctx.translate(-artX, -artY)
+
+  // 1. Draw artboard background
+  if (background.type === 'color') {
+    ctx.fillStyle = background.value || '#000000'
+    ctx.fillRect(0, 0, preset.w, preset.h)
+  } else if (background.type === 'image' && background.value) {
+    const bgDomImg = Array.from(document.querySelectorAll('img')).find(
+      (el) => el.src === background.value || el.currentSrc === background.value
+    ) as HTMLImageElement | undefined
+    const bgSource = (bgDomImg && bgDomImg.complete && bgDomImg.naturalWidth > 0)
+      ? bgDomImg
+      : imageCache.get(background.value)?.canvas
+
+    if (bgSource) {
+      const nw = (bgSource as any).naturalWidth || (bgSource as any).width
+      const nh = (bgSource as any).naturalHeight || (bgSource as any).height
+      const scale = Math.max(preset.w / nw, preset.h / nh)
+      const rw = nw * scale
+      const rh = nh * scale
+      const ox = (rw - preset.w) * 0.5
+      const oy = (rh - preset.h) * 0.5
+      ctx.drawImage(bgSource, -ox, -oy, rw, rh)
+    } else {
+      ctx.fillStyle = '#000000'
+      ctx.fillRect(0, 0, preset.w, preset.h)
+    }
+  } else if (background.type === 'gradient') {
+    const grad = ctx.createLinearGradient(0, 0, preset.w, preset.h)
+    const gradColors = background.value.match(/#[0-9a-fA-F]{6}|rgba?\([^)]+\)/g)
+    if (gradColors && gradColors.length >= 2) {
+      grad.addColorStop(0, gradColors[0])
+      grad.addColorStop(1, gradColors[gradColors.length - 1])
+      ctx.fillStyle = grad
+      ctx.fillRect(0, 0, preset.w, preset.h)
+    } else {
+      ctx.fillStyle = '#111827'
+      ctx.fillRect(0, 0, preset.w, preset.h)
+    }
+  }
+
+  // 2. Draw all visible layers
+  for (const layer of layers) {
+    if (layer.visible === false || layer.type === 'group') continue
+
+    ctx.save()
+
+    if (layer.opacity !== undefined && layer.opacity < 1) {
+      ctx.globalAlpha = layer.opacity
+    }
+
+    const cx = layer.x + layer.w / 2
+    const cy = layer.y + layer.h / 2
+    ctx.translate(cx, cy)
+    if (layer.rotation) {
+      ctx.rotate((layer.rotation * Math.PI) / 180)
+    }
+    ctx.translate(-layer.w / 2, -layer.h / 2)
+
+    if (layer.type === 'image' && layer.src) {
+      const domImg = Array.from(document.querySelectorAll('img')).find(
+        (el) => el.src === layer.src || el.currentSrc === layer.src
+      ) as HTMLImageElement | undefined
+
+      const imgSource = (domImg && domImg.complete && domImg.naturalWidth > 0)
+        ? domImg
+        : imageCache.get(layer.src)?.canvas
+
+      if (imgSource) {
+        ctx.beginPath()
+        if (layer.radius) {
+          ctx.roundRect(0, 0, layer.w, layer.h, layer.radius)
+        } else {
+          ctx.rect(0, 0, layer.w, layer.h)
+        }
+        ctx.clip()
+
+        if (layer.crop) {
+          ctx.drawImage(imgSource, layer.crop.x, layer.crop.y, layer.crop.w, layer.crop.h)
+        } else {
+          const nw = (imgSource as any).naturalWidth || (imgSource as any).width
+          const nh = (imgSource as any).naturalHeight || (imgSource as any).height
+          const fit = layer.imageFit || 'cover'
+          const pos = parseImagePosition(layer.imagePosition)
+          const scale = fit === 'contain'
+            ? Math.min(layer.w / nw, layer.h / nh)
+            : Math.max(layer.w / nw, layer.h / nh)
+          const renderedW = nw * scale
+          const renderedH = nh * scale
+          const overflowX = Math.max(0, renderedW - layer.w)
+          const overflowY = Math.max(0, renderedH - layer.h)
+          const imgLeft = -(overflowX * (pos.x / 100))
+          const imgTop = -(overflowY * (pos.y / 100))
+          ctx.drawImage(imgSource, imgLeft, imgTop, renderedW, renderedH)
+        }
+      }
+    } else if (layer.type === 'shape') {
+      const fillColor = layer.fill || layer.color || '#3b82f6'
+      ctx.fillStyle = fillColor
+
+      if (layer.shape === 'circle') {
+        ctx.beginPath()
+        ctx.ellipse(layer.w / 2, layer.h / 2, layer.w / 2, layer.h / 2, 0, 0, Math.PI * 2)
+        ctx.fill()
+      } else {
+        ctx.beginPath()
+        ctx.roundRect(0, 0, layer.w, layer.h, layer.radius || 0)
+        ctx.fill()
+      }
+
+      if (layer.stroke && layer.strokeWidth) {
+        ctx.strokeStyle = layer.stroke
+        ctx.lineWidth = layer.strokeWidth
+        ctx.stroke()
+      }
+    } else if (layer.type === 'text') {
+      if (layer.fill) {
+        ctx.fillStyle = layer.fill
+        if (layer.radius) {
+          ctx.beginPath()
+          ctx.roundRect(0, 0, layer.w, layer.h, layer.radius)
+          ctx.fill()
+        } else {
+          ctx.fillRect(0, 0, layer.w, layer.h)
+        }
+      }
+      ctx.fillStyle = layer.color || '#FFFFFF'
+      ctx.font = `${layer.fontWeight || 600} ${layer.fontSize || 40}px ${layer.fontFamily || 'Inter, sans-serif'}`
+      ctx.textBaseline = 'top'
+      ctx.fillText(layer.text || '', 0, 0)
+    } else if (layer.type === 'path') {
+      const d = layer.pathData
+      if (d) {
+        const path = new Path2D(d)
+        if (layer.fill && layer.fill !== 'transparent') {
+          ctx.fillStyle = layer.fill
+          ctx.fill(path)
+        }
+        if (layer.stroke && layer.strokeWidth) {
+          ctx.strokeStyle = layer.stroke
+          ctx.lineWidth = layer.strokeWidth
+          ctx.stroke(path)
+        }
+      }
+    }
+
+    ctx.restore()
+  }
+
+  ctx.restore()
+}
+
 export default function ColorLoupe() {
   const { eyedropper, updateEyedropperColor, cancelEyedropper, finishEyedropper, project } = useEditor()
   const [touchPos, setTouchPos] = useState<{ x: number; y: number } | null>(null)
   const [isHolding, setIsHolding] = useState(false)
-  const [artboardSnapshot, setArtboardSnapshot] = useState<{
-    html: string
-    rect: { left: number; top: number; width: number; height: number }
-    bg: string
-  } | null>(null)
 
   const activeColor = eyedropper?.currentColor || '#007AFF'
   const isHoldingRef = useRef(false)
   isHoldingRef.current = isHolding
 
-  // Capture artboard snapshot when eyedropper opens or layers update
+  const imageCacheRef = useRef<Map<string, ImageCanvasEntry>>(new Map())
+  const lensCanvasRef = useRef<HTMLCanvasElement | null>(null)
+
+  // Pre-cache all project images when eyedropper opens or layers change
   useEffect(() => {
     if (!eyedropper) return
-    const updateSnapshot = () => {
-      const artboardEl = document.querySelector('[data-testid="artboard"]') as HTMLElement | null
-      if (artboardEl) {
-        const r = artboardEl.getBoundingClientRect()
-        setArtboardSnapshot({
-          html: artboardEl.innerHTML,
-          rect: { left: r.left, top: r.top, width: r.width, height: r.height },
-          bg: window.getComputedStyle(artboardEl).background || '',
-        })
+
+    for (const l of project.layers) {
+      if (l.type === 'image' && l.src) {
+        getOrCacheImageEntry(l.src, imageCacheRef.current)
       }
     }
-    updateSnapshot()
+
+    if (project.background.type === 'image' && project.background.value) {
+      getOrCacheImageEntry(project.background.value, imageCacheRef.current)
+    }
+
+    document.querySelectorAll('img').forEach((img) => {
+      if (img.src) {
+        getOrCacheImageEntry(img.src, imageCacheRef.current)
+      }
+    })
   }, [eyedropper, project.layers, project.background])
+
+  // Re-render lens when touchPos or project layers change
+  useEffect(() => {
+    if (lensCanvasRef.current && touchPos) {
+      renderLoupeLens(
+        lensCanvasRef.current,
+        touchPos,
+        project.preset,
+        project.layers,
+        project.background,
+        imageCacheRef.current
+      )
+    }
+  }, [touchPos, project.preset, project.layers, project.background])
 
   const handlePointer = useCallback(
     (clientX: number, clientY: number) => {
-      setTouchPos({ x: clientX, y: clientY })
+      const pos = { x: clientX, y: clientY }
+      setTouchPos(pos)
       const artboardEl = document.querySelector('[data-testid="artboard"]') as HTMLElement | null
-      const sampled = sampleColorAtPoint(clientX, clientY, artboardEl, project.layers, project.background)
+      const sampled = sampleColorAtPoint(
+        clientX,
+        clientY,
+        artboardEl,
+        project.preset,
+        project.layers,
+        project.background,
+        imageCacheRef.current
+      )
       if (sampled) {
         updateEyedropperColor(sampled)
       }
+      if (lensCanvasRef.current) {
+        renderLoupeLens(
+          lensCanvasRef.current,
+          pos,
+          project.preset,
+          project.layers,
+          project.background,
+          imageCacheRef.current
+        )
+      }
     },
-    [project.layers, project.background, updateEyedropperColor]
+    [project.preset, project.layers, project.background, updateEyedropperColor]
   )
 
   const onPointerDown = useCallback(
@@ -233,11 +745,6 @@ export default function ColorLoupe() {
 
   if (!eyedropper) return null
 
-  // Loupe dimensions
-  const LOUPE_SIZE = 124
-  const LOUPE_RADIUS = LOUPE_SIZE / 2
-  const ZOOM = 2.8
-
   // Calculate loupe position offset to left or right of finger
   let loupeX = 0
   let loupeY = 0
@@ -260,14 +767,6 @@ export default function ColorLoupe() {
       // If near the top, flip below the finger
       loupeY = touchPos.y + 95
     }
-  }
-
-  // Artboard position for magnifying lens
-  let artX = 0
-  let artY = 0
-  if (touchPos && artboardSnapshot?.rect) {
-    artX = touchPos.x - artboardSnapshot.rect.left
-    artY = touchPos.y - artboardSnapshot.rect.top
   }
 
   return (
@@ -404,24 +903,28 @@ export default function ColorLoupe() {
                 boxShadow: '0 0 0 2px rgba(255,255,255,0.95), 0 0 0 3px rgba(0,0,0,0.3)',
               }}
             >
-              {/* Magnified Artboard Mirror */}
-              {artboardSnapshot && (
-                <div className="absolute inset-0 overflow-hidden rounded-full pointer-events-none">
-                  <div
-                    style={{
-                      position: 'absolute',
-                      width: `${artboardSnapshot.rect.width}px`,
-                      height: `${artboardSnapshot.rect.height}px`,
-                      left: 0,
-                      top: 0,
-                      transformOrigin: '0 0',
-                      transform: `translate(${LOUPE_RADIUS - artX * ZOOM}px, ${LOUPE_RADIUS - artY * ZOOM}px) scale(${ZOOM})`,
-                      background: artboardSnapshot.bg,
-                    }}
-                    dangerouslySetInnerHTML={{ __html: artboardSnapshot.html }}
-                  />
-                </div>
-              )}
+              {/* Magnified Artboard Canvas */}
+              <canvas
+                id="loupe-lens-canvas"
+                data-testid="loupe-lens-canvas"
+                ref={(node) => {
+                  lensCanvasRef.current = node
+                  if (node && touchPos) {
+                    renderLoupeLens(
+                      node,
+                      touchPos,
+                      project.preset,
+                      project.layers,
+                      project.background,
+                      imageCacheRef.current
+                    )
+                  }
+                }}
+                width={LOUPE_CANVAS_SIZE}
+                height={LOUPE_CANVAS_SIZE}
+                className="w-full h-full block"
+                style={{ imageRendering: 'pixelated' }}
+              />
 
               {/* Precision Reticle Crosshair */}
               <div className="absolute inset-0 pointer-events-none flex items-center justify-center">

@@ -73,7 +73,7 @@ export const STOCK_IMAGES = [
 
 export const STICKERS = ['🔥', '⭐', '✨', '❤️', '👍', '🎉', '💯', '🏷️', '🛒', '⚡', '🎁', '📣', '💥', '✅', '👑', '🚀']
 
-export const SHAPES = ['rect', 'circle', 'triangle', 'star', 'line'] as const
+export const SHAPES = ['rectangle', 'rect', 'pill', 'circle', 'triangle', 'star', 'line'] as const
 
 export function createLayer(type: LayerType, preset: Preset, extra: Partial<Layer> = {}): Layer {
   const base: Layer = {
@@ -107,16 +107,20 @@ export function createLayer(type: LayerType, preset: Preset, extra: Partial<Laye
       anim: 'rise',
     })
   } else if (type === 'shape') {
+    const isPill = extra?.shape === 'pill'
+    const isRectShape = extra?.shape === 'rectangle'
     const s = preset.w * 0.35
+    const w = isPill ? Math.round(preset.w * 0.48) : isRectShape ? Math.round(preset.w * 0.5) : s
+    const h = isPill ? Math.round(w * 0.34) : isRectShape ? Math.round(w * 0.62) : s
     Object.assign(base, {
-      name: 'Shape',
-      shape: 'rect',
+      name: isPill ? 'Pill Button' : isRectShape ? 'Rectangle' : (extra?.shape === 'rect' ? 'Square' : 'Shape'),
+      shape: extra?.shape || 'rect',
       fill: '#007AFF',
-      radius: 16,
-      w: s,
-      h: s,
-      x: (preset.w - s) / 2,
-      y: (preset.h - s) / 2,
+      radius: isPill ? (extra?.radius ?? 9999) : (extra?.radius ?? 0),
+      w,
+      h,
+      x: (preset.w - w) / 2,
+      y: (preset.h - h) / 2,
       anim: 'pop',
     })
   } else if (type === 'path') {

@@ -1,9 +1,9 @@
-import { useRef, useState, useEffect, useSyncExternalStore } from 'react'
+import { useRef, useState, useEffect, useMemo, useSyncExternalStore } from 'react'
 import {
   X, Upload, Type as TypeIcon, Folder, FolderPlus,
   Component as ComponentIcon, ChevronRight, ChevronLeft, ChevronDown, Plus, Trash2,
   Lock, Unlock, CircleDot, Diamond, Droplet, PenTool, Spline, Magnet, Check, CheckSquare,
-  Wand2, Globe, FileUp, Pipette,
+  Wand2, Globe, FileUp, Pipette, Search,
 } from 'lucide-react'
 import ColorPicker from '#/components/editor/ColorPicker'
 import { useEditor } from '#/store/editor'
@@ -15,12 +15,14 @@ import {
 import {
   getAllFonts, getAvailableWeightsForFont, getClosestAvailableWeight,
   registerUploadedFontFile, addGoogleFontFamily, subscribeFonts,
+  parseGoogleFontsInput, verifyGoogleFontExists,
 } from '#/lib/fonts'
+import GoogleFontsSearchView from '#/components/editor/GoogleFontsSearchView'
 import { getLibraryComponents, deleteComponentFromLibrary, type ComponentItem } from '#/lib/groups'
 import {
   VECTOR_PRESETS, convertShapeToVector, buildSvgPath, tightenVectorLayer, simplifyVectorPoints,
   createShapeVectorPoints, fitVectorPointsToBounds, getPointBezierMode, switchPointBezierMode,
-  getAdjacentVectorPoints,
+  getAdjacentVectorPoints, getVectorBoundingBox,
 } from '#/lib/vector'
 
 const TITLES: Record<string, string> = {
@@ -36,29 +38,64 @@ const TITLES: Record<string, string> = {
 
 export default function ToolSheet() {
   const { tool, openTool } = useEditor()
+  const [fontSubView, setFontSubView] = useState<'standard' | 'googleSearch'>('standard')
+
+  useEffect(() => {
+    if (tool !== 'font') {
+      setFontSubView('standard')
+    }
+  }, [tool])
+
   if (!tool) return null
   if (tool === 'vector') return <VectorToolPanel />
+
   const isFont = tool === 'font'
+  const isFullHeightFont = isFont && fontSubView === 'googleSearch'
+  const sheetHeightClass = isFont && !isFullHeightFont ? 'max-h-[40vh] max-h-[40%] pb-4' : 'max-h-[85vh] h-[82vh] pb-8'
+
   return (
     <div className="absolute inset-0 z-60 flex flex-col justify-end" data-testid="tool-sheet">
       <div className="absolute inset-0 bg-black/40 animate-fade" onClick={() => openTool(null)} />
-      <div className={`animate-sheet relative ${isFont ? 'max-h-[40vh] max-h-[40%] pb-4' : 'max-h-[82vh] pb-8'} overflow-y-auto rounded-t-3xl border-t border-line bg-surface no-scrollbar`}>
-        <div className={`sticky top-0 flex items-center justify-between bg-surface px-5 ${isFont ? 'pt-3 pb-2' : 'pt-4 pb-3'} z-10`}>
-          <h3 className="text-lg font-bold">{TITLES[tool] || 'Options'}</h3>
+      <div className={`animate-sheet relative ${sheetHeightClass} overflow-y-auto rounded-t-3xl border-t border-line bg-surface no-scrollbar`}>
+        <div className={`sticky top-0 flex items-center justify-between bg-surface px-5 ${isFont && !isFullHeightFont ? 'pt-3 pb-2' : 'pt-4 pb-3'} z-10 border-b border-line/40`}>
+          <div className="flex items-center gap-2">
+            {isFullHeightFont && (
+              <button
+                type="button"
+                data-testid="font-google-back-btn"
+                onClick={() => setFontSubView('standard')}
+                className="grid h-8 w-8 place-items-center rounded-full bg-surface2 text-txt2 hover:text-white transition-colors cursor-pointer"
+                title="Back to Font list"
+              >
+                <ChevronLeft className="h-4 w-4" />
+              </button>
+            )}
+            <h3 className="text-lg font-bold">
+              {isFullHeightFont ? 'Search Google Fonts' : (TITLES[tool] || 'Options')}
+            </h3>
+          </div>
           <button onClick={() => openTool(null)} data-testid="sheet-close" className="grid h-8 w-8 place-items-center rounded-full bg-surface2 text-txt2">
             <X className="h-4 w-4" />
           </button>
         </div>
         <div className="px-5">
-          <PanelBody tool={tool} />
+          <PanelBody tool={tool} fontSubView={fontSubView} setFontSubView={setFontSubView} />
         </div>
       </div>
     </div>
   )
 }
 
-function PanelBody({ tool }: { tool: string }) {
-  const { selected } = useEditor()
+function PanelBody({
+  tool,
+  fontSubView = 'standard',
+  setFontSubView,
+}: {
+  tool: string
+  fontSubView?: 'standard' | 'googleSearch'
+  setFontSubView?: (v: 'standard' | 'googleSearch') => void
+}) {
+  const { selected, updateLayer } = useEditor()
   const needsLayer = ['font', 'color', 'blur', 'style', 'align', 'shape', 'radius', 'animate', 'mask', 'crop', 'vector', 'convertText']
   if (needsLayer.includes(tool) && !selected) {
     return <MockPanel text="Select a layer on the canvas first." />
@@ -71,7 +108,28 @@ function PanelBody({ tool }: { tool: string }) {
     case 'components': return <ComponentsPanel />
     case 'background': return <BackgroundPanel />
     case 'layers': return <LayersPanel />
-    case 'font': return <FontPanel />
+    case 'font': {
+      if (fontSubView === 'googleSearch') {
+        return (
+          <GoogleFontsSearchView
+            key="google-fonts-search-view"
+            onBack={() => setFontSubView?.('standard')}
+            selectedLayer={selected!}
+            onApplyFont={(family, weight) => {
+              if (selected) {
+                updateLayer(selected.id, { fontFamily: family, fontWeight: weight || 700 })
+              }
+            }}
+          />
+        )
+      }
+      return (
+        <FontPanel
+          key="font-panel-standard"
+          onOpenGoogleSearch={() => setFontSubView?.('googleSearch')}
+        />
+      )
+    }
     case 'color': return <ColorPanel />
     case 'blur': return <BlurPanel />
     case 'style': return <StylePanel />
@@ -121,7 +179,15 @@ function TextAdd() {
 function Elements() {
   const { addLayer, openTool } = useEditor()
   const [filter, setFilter] = useState<'all' | 'basic' | 'geometric' | 'symbol' | 'arrow' | 'organic'>('all')
-  const labels: Record<ShapeKind, string> = { rect: 'Square', circle: 'Circle', triangle: 'Triangle', star: 'Star', line: 'Line' }
+  const labels: Record<ShapeKind, string> = {
+    rectangle: 'Rectangle',
+    rect: 'Square',
+    pill: 'Pill Shape',
+    circle: 'Circle',
+    triangle: 'Triangle',
+    star: 'Star',
+    line: 'Line',
+  }
 
   const filteredVectorPresets = filter === 'all'
     ? VECTOR_PRESETS
@@ -135,7 +201,7 @@ function Elements() {
         <div className="sticky top-0 self-start">
           <div className="mb-2.5 flex items-center justify-between">
             <span className="text-xs font-bold uppercase tracking-wider text-txt3">CSS Shapes</span>
-            <span className="text-[10px] text-txt3">5</span>
+            <span className="text-[10px] text-txt3">{SHAPES.length}</span>
           </div>
 
           <div className="grid grid-cols-2 gap-2">
@@ -146,7 +212,38 @@ function Elements() {
                 id={`add-shape-${s}`}
                 aria-label={labels[s]}
                 title={labels[s]}
-                onClick={() => addLayer('shape', { shape: s })}
+                onClick={() => {
+                  if (s === 'pill') {
+                    addLayer('shape', {
+                      shape: 'pill',
+                      w: 220,
+                      h: 64,
+                      radius: 9999,
+                      anim: 'pop',
+                      name: 'Pill Button',
+                    })
+                  } else if (s === 'rectangle') {
+                    addLayer('shape', {
+                      shape: 'rectangle',
+                      w: 220,
+                      h: 140,
+                      radius: 0,
+                      anim: 'pop',
+                      name: 'Rectangle',
+                    })
+                  } else if (s === 'rect') {
+                    addLayer('shape', {
+                      shape: 'rect',
+                      w: 160,
+                      h: 160,
+                      radius: 0,
+                      anim: 'pop',
+                      name: 'Square',
+                    })
+                  } else {
+                    addLayer('shape', { shape: s })
+                  }
+                }}
                 className={`grid place-items-center rounded-2xl bg-surface2 transition-all hover:bg-surface2/75 active:scale-90 cursor-pointer ${
                   s === 'line' ? 'col-span-2 h-14' : 'aspect-square'
                 }`}
@@ -193,46 +290,65 @@ function Elements() {
 
           {/* Grid of Vector Shapes without borders or text names */}
           <div className="grid grid-cols-2 gap-2">
-            {filteredVectorPresets.map((vp) => (
-              <button
-                key={vp.id}
-                data-testid={`add-vector-${vp.id}`}
-                id={`add-vector-${vp.id}`}
-                aria-label={vp.name}
-                title={vp.name}
-                onClick={() => {
-                  const isSquare = vp.defaultW === vp.defaultH || (!vp.defaultW && (vp.isBasic || vp.id === 'heart' || vp.id === 'shield' || vp.id === 'sparkle' || vp.id === 'flower'))
-                  const w = vp.defaultW || (isSquare ? 160 : 180)
-                  const h = vp.defaultH || (isSquare ? 160 : (vp.id === 'line' ? 30 : 135))
-                  addLayer('path', {
-                    name: vp.name,
-                    w,
-                    h,
-                    closed: vp.closed,
-                    stroke: vp.strokeWidth ? '#007AFF' : undefined,
-                    strokeWidth: vp.strokeWidth || 0,
-                    fill: vp.closed ? '#007AFF' : 'transparent',
-                    points: vp.getPoints(w, h),
-                  })
-                  openTool(null)
-                }}
-                className={`grid place-items-center rounded-2xl bg-surface2 transition-all hover:bg-surface2/75 active:scale-90 cursor-pointer ${
-                  vp.id === 'line' ? 'col-span-2 h-14' : 'aspect-square'
-                }`}
-              >
-                <svg viewBox="0 0 100 100" className="h-8 w-8">
-                  <path
-                    d={buildSvgPath(vp.getPoints(80, 80), vp.closed, 80, 80)}
-                    transform="translate(10, 10)"
-                    fill={vp.closed ? '#818cf8' : 'none'}
-                    stroke="#818cf8"
-                    strokeWidth={vp.strokeWidth ? 6 : 2.5}
-                    strokeLinecap="round"
-                    strokeLinejoin="round"
-                  />
-                </svg>
-              </button>
-            ))}
+            {filteredVectorPresets.map((vp) => {
+              const baseW = vp.defaultW || 160
+              const baseH = vp.defaultH || (vp.id === 'line' ? 30 : 160)
+              const previewPts = vp.getPoints(baseW, baseH)
+              const bbox = getVectorBoundingBox(previewPts, vp.closed)
+              const padX = bbox.width * 0.12
+              const padY = bbox.height * 0.12
+              const vbMinX = bbox.minX - padX
+              const vbMinY = bbox.minY - padY
+              const vbW = Math.max(1, bbox.width + padX * 2)
+              const vbH = Math.max(1, bbox.height + padY * 2)
+              const pathD = buildSvgPath(previewPts, vp.closed, baseW, baseH)
+
+              return (
+                <button
+                  key={vp.id}
+                  data-testid={`add-vector-${vp.id}`}
+                  id={`add-vector-${vp.id}`}
+                  aria-label={vp.name}
+                  title={vp.name}
+                  onClick={() => {
+                    const isSquare = vp.defaultW === vp.defaultH || (!vp.defaultW && (vp.isBasic || vp.id === 'heart' || vp.id === 'shield' || vp.id === 'sparkle' || vp.id === 'flower'))
+                    const w = vp.defaultW || (isSquare ? 160 : 180)
+                    const h = vp.defaultH || (isSquare ? 160 : (vp.id === 'line' ? 30 : 135))
+                    addLayer('path', {
+                      name: vp.name,
+                      w,
+                      h,
+                      shape: vp.id === 'rectangle' ? 'rectangle' : vp.id === 'rect' ? 'rect' : vp.id === 'pill' ? 'pill' : undefined,
+                      closed: vp.closed,
+                      stroke: vp.strokeWidth ? '#007AFF' : undefined,
+                      strokeWidth: vp.strokeWidth || 0,
+                      fill: vp.closed ? '#007AFF' : 'transparent',
+                      points: vp.getPoints(w, h),
+                      radius: vp.id === 'rectangle' || vp.id === 'rect' ? 0 : (vp.id === 'pill' ? Math.min(w, h) / 2 : undefined),
+                    })
+                    openTool(null)
+                  }}
+                  className={`grid place-items-center rounded-2xl bg-surface2 transition-all hover:bg-surface2/75 active:scale-90 cursor-pointer ${
+                    vp.id === 'line' ? 'col-span-2 h-14' : 'aspect-square'
+                  }`}
+                >
+                  <svg
+                    viewBox={`${vbMinX} ${vbMinY} ${vbW} ${vbH}`}
+                    className={vp.id === 'line' ? 'h-5 w-24' : 'h-8 w-8'}
+                    preserveAspectRatio="xMidYMid meet"
+                  >
+                    <path
+                      d={pathD}
+                      fill={vp.closed ? '#818cf8' : 'none'}
+                      stroke="#818cf8"
+                      strokeWidth={vp.strokeWidth ? Math.max(2, vbH * 0.1) : Math.max(1.5, Math.min(vbW, vbH) * 0.04)}
+                      strokeLinecap="round"
+                      strokeLinejoin="round"
+                    />
+                  </svg>
+                </button>
+              )
+            })}
           </div>
         </div>
       </div>
@@ -241,12 +357,14 @@ function Elements() {
 }
 
 function ShapeGlyph({ kind }: { kind: ShapeKind }) {
-  const c = 'h-8 w-8 bg-white'
-  if (kind === 'circle') return <div className={`${c} rounded-full`} />
-  if (kind === 'triangle') return <div style={{ width: 0, height: 0, borderLeft: '16px solid transparent', borderRight: '16px solid transparent', borderBottom: '28px solid #fff' }} />
-  if (kind === 'star') return <div className="h-8 w-8 bg-white" style={{ clipPath: 'polygon(50% 0%, 61% 35%, 98% 35%, 68% 57%, 79% 91%, 50% 70%, 21% 91%, 32% 57%, 2% 35%, 39% 35%)' }} />
-  if (kind === 'line') return <div className="h-1.5 w-12 rounded-full bg-white" />
-  return <div className={`${c} rounded-lg`} />
+  if (kind === 'rectangle') return <div className="h-5 w-9 rounded-none bg-white shadow-sm" />
+  if (kind === 'rect') return <div className="h-7 w-7 rounded-none bg-white" />
+  if (kind === 'pill') return <div className="h-4 w-9 rounded-full bg-white shadow-sm" />
+  if (kind === 'circle') return <div className="h-7 w-7 rounded-full bg-white" />
+  if (kind === 'triangle') return <div style={{ width: 0, height: 0, borderLeft: '14px solid transparent', borderRight: '14px solid transparent', borderBottom: '24px solid #fff' }} />
+  if (kind === 'star') return <div className="h-7 w-7 bg-white" style={{ clipPath: 'polygon(50% 0%, 61% 35%, 98% 35%, 68% 57%, 79% 91%, 50% 70%, 21% 91%, 32% 57%, 2% 35%, 39% 35%)' }} />
+  if (kind === 'line') return <div className="h-1.5 w-11 rounded-full bg-white" />
+  return <div className="h-7 w-7 rounded-none bg-white" />
 }
 
 function Stickers() {
@@ -829,7 +947,13 @@ function useSel() {
   return { l: selected!, up: (patch: any) => selected && updateLayer(selected.id, patch) }
 }
 
-function FontPanel() {
+interface FontPanelProps {
+  onOpenGoogleSearch?: () => void
+}
+
+function FontPanel({
+  onOpenGoogleSearch,
+}: FontPanelProps) {
   const { l, up } = useSel()
   const { openTool } = useEditor()
   const fileInputRef = useRef<HTMLInputElement>(null)
@@ -843,9 +967,25 @@ function FontPanel() {
   // Reactive subscription to dynamic fonts and uploaded fonts
   const allFonts = useSyncExternalStore(subscribeFonts, getAllFonts, getAllFonts)
 
-  const selectedFamily = l.fontFamily || 'Manrope'
-  const availableWeights = getAvailableWeightsForFont(selectedFamily)
-  const currentWeight = getClosestAvailableWeight(selectedFamily, l.fontWeight || 700)
+  const selectedFamily = l?.fontFamily || 'Manrope'
+  const availableWeights = useMemo(() => getAvailableWeightsForFont(selectedFamily), [selectedFamily])
+  const currentWeight = getClosestAvailableWeight(selectedFamily, l?.fontWeight || 700)
+
+  // Filter fonts by tab and search (deduplicated by family)
+  const filteredFonts = useMemo(() => {
+    const seen = new Set<string>()
+    return allFonts.filter((f) => {
+      const norm = f.family.toLowerCase()
+      if (seen.has(norm)) return false
+      seen.add(norm)
+      if (activeTab === 'google' && f.source !== 'google') return false
+      if (activeTab === 'custom' && f.source !== 'custom') return false
+      if (searchQuery) {
+        return norm.includes(searchQuery.toLowerCase())
+      }
+      return true
+    })
+  }, [allFonts, activeTab, searchQuery])
 
   // Handle font upload from user's device (TTF / OTF / WOFF)
   const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -873,36 +1013,42 @@ function FontPanel() {
   }
 
   const handleAddGoogleFont = async () => {
-    const name = googleFontInput.trim()
-    if (!name) return
+    const raw = googleFontInput.trim()
+    if (!raw) return
     setIsUploading(true)
     setUploadFeedback(null)
     try {
-      const def = await addGoogleFontFamily(name, [400, 700])
+      const parsed = parseGoogleFontsInput(raw)
+      if (parsed.length === 0) {
+        setUploadFeedback('Could not read font name. Try typing it directly.')
+        setTimeout(() => setUploadFeedback(null), 3000)
+        return
+      }
+
+      const item = parsed[0]
+      const exists = await verifyGoogleFontExists(item.family)
+      if (!exists) {
+        setUploadFeedback(`"${item.family}" was not found on Google Fonts.`)
+        setTimeout(() => setUploadFeedback(null), 3500)
+        return
+      }
+
+      const def = await addGoogleFontFamily(item.family, item.weights)
       if (def) {
-        up({ fontFamily: def.family, fontWeight: def.variants[0].weight })
-        setUploadFeedback(`Added Google Font "${def.family}"`)
+        const nextWeight = getClosestAvailableWeight(def.family, l.fontWeight || 700)
+        up({ fontFamily: def.family, fontWeight: nextWeight })
+        setUploadFeedback(`Added Google Font "${def.family}" (${nextWeight})`)
         setGoogleFontInput('')
         setShowAddGoogle(false)
         setTimeout(() => setUploadFeedback(null), 3000)
       }
     } catch {
-      setUploadFeedback(`Failed to load "${name}". Check the exact name.`)
+      setUploadFeedback(`Failed to load font. Check your connection.`)
       setTimeout(() => setUploadFeedback(null), 4000)
     } finally {
       setIsUploading(false)
     }
   }
-
-  // Filter fonts by tab and search
-  const filteredFonts = allFonts.filter((f) => {
-    if (activeTab === 'google' && f.source !== 'google') return false
-    if (activeTab === 'custom' && f.source !== 'custom') return false
-    if (searchQuery) {
-      return f.family.toLowerCase().includes(searchQuery.toLowerCase())
-    }
-    return true
-  })
 
   return (
     <div className="space-y-1.5 pb-2">
@@ -947,15 +1093,25 @@ function FontPanel() {
 
           <button
             type="button"
+            data-testid="font-browse-google-btn"
+            onClick={onOpenGoogleSearch}
+            title="Search & browse Google Fonts catalog (expands full panel)"
+            className="flex items-center gap-1 rounded bg-accent/20 hover:bg-accent/30 text-accent px-2 py-0.5 text-[10px] font-semibold transition-colors cursor-pointer border border-accent/30"
+          >
+            <Search className="h-3 w-3" />
+            <span>Search Google Fonts</span>
+          </button>
+
+          <button
+            type="button"
             data-testid="font-add-google-btn"
             onClick={() => setShowAddGoogle((v) => !v)}
-            title="Add any font from Google Fonts"
+            title="Quick paste Google Fonts link, @import, or name"
             className={`flex items-center gap-1 rounded px-1.5 py-0.5 text-[10px] font-medium transition-colors cursor-pointer ${
               showAddGoogle ? 'bg-accent text-white' : 'bg-surface2/90 hover:bg-surface2 text-txt hover:text-white'
             }`}
           >
-            <Globe className="h-3 w-3" />
-            <span>+ Google</span>
+            <span>+ Paste</span>
           </button>
         </div>
       </div>
@@ -966,7 +1122,7 @@ function FontPanel() {
           type="text"
           value={searchQuery}
           onChange={(e) => setSearchQuery(e.target.value)}
-          placeholder="Search fonts..."
+          placeholder="Search installed fonts..."
           className="w-full rounded-md bg-surface2/80 px-2 py-1 text-[11px] text-txt placeholder:text-txt3 outline-none focus:ring-1 focus:ring-accent"
         />
         {searchQuery && (
@@ -982,23 +1138,53 @@ function FontPanel() {
 
       {/* Quick Google Font input dialog */}
       {showAddGoogle && (
-        <div className="flex items-center gap-1.5 rounded-lg bg-surface2 p-1.5 animate-in fade-in">
-          <input
-            type="text"
-            placeholder="e.g. Space Grotesk, Syne, Outfit"
-            value={googleFontInput}
-            onChange={(e) => setGoogleFontInput(e.target.value)}
-            onKeyDown={(e) => e.key === 'Enter' && handleAddGoogleFont()}
-            className="flex-1 rounded bg-surface px-2 py-1 text-xs text-white placeholder:text-txt3 outline-none"
-            autoFocus
-          />
+        <div className="space-y-1.5 rounded-xl bg-surface2 p-2 animate-in fade-in border border-line">
+          <div className="flex items-center justify-between text-[10px] text-txt3">
+            <span>Paste Google Fonts link, @import, URL, or name:</span>
+            <button
+              type="button"
+              onClick={onOpenGoogleSearch}
+              className="text-accent hover:underline font-semibold cursor-pointer"
+            >
+              Search 130+ Library →
+            </button>
+          </div>
+          <div className="flex items-center gap-1.5">
+            <input
+              type="text"
+              placeholder="e.g. <link href='...'>, fonts.google.com/..., or Outfit"
+              value={googleFontInput}
+              onChange={(e) => setGoogleFontInput(e.target.value)}
+              onKeyDown={(e) => e.key === 'Enter' && handleAddGoogleFont()}
+              className="flex-1 rounded bg-surface px-2 py-1 text-xs text-white placeholder:text-txt3 outline-none"
+              autoFocus
+            />
+            <button
+              type="button"
+              onClick={handleAddGoogleFont}
+              disabled={!googleFontInput.trim() || isUploading}
+              className="rounded bg-accent px-2.5 py-1 text-xs font-semibold text-white disabled:opacity-50 cursor-pointer shrink-0"
+            >
+              {isUploading ? 'Loading...' : 'Import'}
+            </button>
+          </div>
+        </div>
+      )}
+
+      {/* Dedicated Google Fonts banner when on Google tab */}
+      {activeTab === 'google' && !showAddGoogle && (
+        <div className="flex items-center justify-between rounded-xl bg-accent/10 border border-accent/25 px-2.5 py-1.5 text-[11px]">
+          <div className="flex items-center gap-1.5 text-accent font-medium">
+            <Globe className="h-3.5 w-3.5" />
+            <span>Search 130+ Google Fonts</span>
+          </div>
           <button
             type="button"
-            onClick={handleAddGoogleFont}
-            disabled={!googleFontInput.trim() || isUploading}
-            className="rounded bg-accent px-2.5 py-1 text-xs font-semibold text-white disabled:opacity-50 cursor-pointer"
+            onClick={onOpenGoogleSearch}
+            className="rounded bg-accent px-2 py-0.5 text-[10px] font-bold text-white hover:bg-accent/90 transition-colors cursor-pointer flex items-center gap-1"
           >
-            Add
+            <Search className="h-3 w-3" />
+            <span>Search Catalog</span>
           </button>
         </div>
       )}
@@ -1042,7 +1228,7 @@ function FontPanel() {
           const isSelected = selectedFamily.toLowerCase() === f.family.toLowerCase()
           return (
             <button
-              key={f.family}
+              key={`${f.source || 'font'}-${f.family}`}
               data-testid={`font-${f.family}`}
               onClick={() => {
                 const nextWeight = getClosestAvailableWeight(f.family, l.fontWeight || 700)
@@ -1578,8 +1764,9 @@ function ConvertTextPanel() {
         >
           {selected.text || 'Text'}
         </div>
-        <div className="mt-2 flex items-center gap-3 text-xs text-txt3">
+        <div className="mt-2 flex flex-wrap items-center gap-3 text-xs text-txt3">
           <span>Font: <strong className="text-txt">{selected.fontFamily || 'Manrope'}</strong></span>
+          <span>Weight: <strong className="text-txt">{selected.fontWeight || 700}</strong></span>
           <span>Size: <strong className="text-txt">{selected.fontSize || 40}px</strong></span>
           <span>Chars: <strong className="text-txt">{selected.text?.length || 0}</strong></span>
         </div>
@@ -1652,24 +1839,91 @@ function ShapePanel() {
   const { l, up } = useSel()
   const { updateLayer, openTool } = useEditor()
   const isPath = l.type === 'path'
+  const shapeLabels: Record<ShapeKind, string> = {
+    rectangle: 'Rectangle',
+    rect: 'Square',
+    pill: 'Pill',
+    circle: 'Circle',
+    triangle: 'Triangle',
+    star: 'Star',
+    line: 'Line',
+  }
+
   return (
     <div className="space-y-4 pb-4">
-      <Grid cols={3}>
-        {SHAPES.map((s) => (
-          <button key={s} data-testid={`swap-shape-${s}`} onClick={() => {
+      {/* Format & Mode Switcher: Div Shape (CSS) vs Vector Path (SVG) */}
+      <div className="flex items-center justify-between rounded-2xl border border-line bg-surface2/60 px-3.5 py-2.5">
+        <div className="flex items-center gap-2">
+          <span className="text-xs text-txt3">Current Format:</span>
+          <span className={`rounded-lg px-2 py-0.5 text-xs font-bold ${
+            isPath ? 'bg-indigo-500/20 text-indigo-300' : 'bg-emerald-500/20 text-emerald-300'
+          }`}>
+            {isPath ? 'Vector Shape (SVG)' : 'Div Shape (CSS)'}
+          </span>
+        </div>
+        <button
+          type="button"
+          data-testid="toggle-shape-format-btn"
+          onClick={() => {
             if (isPath) {
-              const rawPts = createShapeVectorPoints(s, l.w, l.h, l.radius || 0)
-              const pts = fitVectorPointsToBounds(rawPts, s !== 'line', l.w, l.h)
-              up({ points: pts, closed: s !== 'line', shape: s })
+              updateLayer(l.id, {
+                type: 'shape',
+                shape: l.shape || 'rectangle',
+                radius: l.shape === 'pill' ? (l.radius ?? 9999) : (l.radius ?? 0),
+              })
             } else {
-              up({ shape: s })
+              const patch = convertShapeToVector(l)
+              updateLayer(l.id, patch)
             }
           }}
-            className={`flex aspect-square items-center justify-center rounded-2xl border ${l.shape === s ? 'border-accent bg-accent/10' : 'border-line bg-surface2'}`}>
-            <ShapeGlyph kind={s} />
-          </button>
-        ))}
-      </Grid>
+          className="text-xs font-semibold text-accent hover:underline cursor-pointer"
+        >
+          Convert to {isPath ? 'Div Shape' : 'Vector'}
+        </button>
+      </div>
+
+      <div>
+        <div className="mb-2 flex items-center justify-between">
+          <span className="text-xs font-bold uppercase tracking-wider text-txt3">Shape Presets</span>
+          <span className="text-[10px] text-txt3 font-medium">Buttons & Icons</span>
+        </div>
+        <Grid cols={3}>
+          {SHAPES.map((s) => {
+            const isSelected = l.shape === s || (!l.shape && s === 'rect')
+            return (
+              <button
+                key={s}
+                data-testid={`swap-shape-${s}`}
+                title={shapeLabels[s]}
+                onClick={() => {
+                  if (isPath) {
+                    const defaultRad = s === 'pill'
+                      ? Math.min(l.w, l.h) / 2
+                      : (l.radius ?? 0)
+                    const rawPts = createShapeVectorPoints(s, l.w, l.h, defaultRad)
+                    const pts = fitVectorPointsToBounds(rawPts, s !== 'line', l.w, l.h)
+                    up({ points: pts, closed: s !== 'line', shape: s, radius: defaultRad })
+                  } else {
+                    const patch: Partial<Layer> = { shape: s }
+                    if (s === 'pill') {
+                      patch.radius = 9999
+                    } else if (s === 'rectangle' || s === 'rect') {
+                      patch.radius = l.radius ?? 0
+                    }
+                    up(patch)
+                  }
+                }}
+                className={`flex flex-col items-center justify-center gap-1.5 rounded-2xl border p-2.5 transition-all cursor-pointer aspect-square ${
+                  isSelected ? 'border-accent bg-accent/15 ring-1 ring-accent/30 shadow-sm' : 'border-line bg-surface2 hover:border-white/20'
+                }`}
+              >
+                <ShapeGlyph kind={s} />
+                <span className="text-[10px] font-semibold text-txt2 truncate max-w-full">{shapeLabels[s]}</span>
+              </button>
+            )
+          })}
+        </Grid>
+      </div>
 
       {!isPath ? (
         <div className="rounded-2xl border border-line bg-surface2/60 p-3.5">
@@ -1726,7 +1980,27 @@ function ShapePanel() {
 
 function RadiusPanel() {
   const { l, up } = useSel()
-  return <div className="pb-4"><Slider label="Corner radius" tid="slider-radius" value={l.radius || 0} min={0} max={200} onChange={(v: number) => up({ radius: v })} /></div>
+  return (
+    <div className="pb-4">
+      <Slider
+        label="Corner radius"
+        tid="slider-radius"
+        value={l.radius ?? 0}
+        min={0}
+        max={200}
+        onChange={(v: number) => {
+          if (l.type === 'path') {
+            const sh = l.shape || 'rectangle'
+            const rawPts = createShapeVectorPoints(sh, l.w, l.h, v)
+            const pts = fitVectorPointsToBounds(rawPts, l.closed !== false, l.w, l.h)
+            up({ radius: v, points: pts })
+          } else {
+            up({ radius: v })
+          }
+        }}
+      />
+    </div>
+  )
 }
 
 
@@ -1857,12 +2131,12 @@ function RadiusPanel() {
 
     const anims = [
       { k: 'none', label: 'None' },
+      { k: 'pulse', label: animationSide === 'in' ? 'Pulse In' : 'Pulse Out' },
+      { k: 'pop', label: animationSide === 'in' ? 'Pop In' : 'Pop Out' },
       { k: 'fade', label: animationSide === 'in' ? 'Fade In' : 'Fade Out' },
       { k: 'rise', label: animationSide === 'in' ? 'Rise Up' : 'Rise Out' },
-      { k: 'pop', label: animationSide === 'in' ? 'Pop In' : 'Pop Out' },
       { k: 'slide', label: animationSide === 'in' ? 'Slide In' : 'Slide Out' },
       { k: 'blur', label: animationSide === 'in' ? 'Blur In' : 'Blur Out' },
-      { k: 'pulse', label: animationSide === 'in' ? 'Pulse In' : 'Pulse Out' },
       { k: 'rotate', label: 'Rotate' },
     ]
     const current = animationSide === 'in' ? (l.inAnim || l.anim || 'none') : (l.outAnim || 'none')
@@ -1872,18 +2146,79 @@ function RadiusPanel() {
     const endDeg = animationSide === 'in' ? (l.inRotateEnd ?? 30) : (l.outRotateEnd ?? 30)
     const msVal = animationSide === 'in' ? (l.inRotateMs ?? 150) : (l.outRotateMs ?? 150)
 
+    const layerStart = l.start ?? 0
+    const layerEnd = l.end ?? 5000
+
     const previewAnim = (animType: string, customMs?: number) => {
       setMode('animated')
       if (animationSide === 'in') {
-        setTime(l.start)
+        setTime(layerStart)
       } else {
         const dur = animType === 'blur' ? 650 : animType === 'rotate' ? (customMs ?? msVal) : animType === 'pulse' ? 500 : 380
-        setTime(Math.max(0, l.end - dur))
+        setTime(Math.max(0, layerEnd - dur))
       }
     }
 
     return (
       <div className="pb-4">
+        {/* Quick Button Shapes (Pill & Rectangle) for quick button workflow */}
+        {(l.type === 'shape' || l.type === 'path') && (
+          <div className="mb-3 rounded-2xl border border-line bg-surface2/80 p-2.5">
+            <div className="mb-1.5 flex items-center justify-between">
+              <span className="text-[11px] font-bold uppercase tracking-wider text-txt3">Button Shape</span>
+              <span className="text-[10px] text-txt3 font-medium">Quick Button ({l.type === 'path' ? 'Vector' : 'Div'})</span>
+            </div>
+            <div className="grid grid-cols-2 gap-2">
+              <button
+                type="button"
+                data-testid="anim-pill-shape-btn"
+                title="Pill Shape for Buttons"
+                onClick={() => {
+                  if (l.type === 'path') {
+                    const rawPts = createShapeVectorPoints('pill', l.w, l.h, Math.min(l.w, l.h) / 2)
+                    const pts = fitVectorPointsToBounds(rawPts, true, l.w, l.h)
+                    up({ points: pts, closed: true, shape: 'pill' })
+                  } else {
+                    up({ shape: 'pill', radius: 9999 })
+                  }
+                }}
+                className={`flex items-center justify-center gap-2 rounded-xl py-2 px-3 text-xs font-semibold border transition-all cursor-pointer ${
+                  l.shape === 'pill'
+                    ? 'border-accent bg-accent/20 text-white ring-1 ring-accent/40 shadow-sm'
+                    : 'border-line bg-surface1 text-txt2 hover:border-white/20 hover:text-white'
+                }`}
+              >
+                <div className="h-3.5 w-7 rounded-full bg-current" />
+                <span>Pill Shape</span>
+              </button>
+
+              <button
+                type="button"
+                data-testid="anim-rectangle-shape-btn"
+                title="Rectangle Shape for Buttons"
+                onClick={() => {
+                  if (l.type === 'path') {
+                    const rad = l.radius ?? 0
+                    const rawPts = createShapeVectorPoints('rectangle', l.w, l.h, rad)
+                    const pts = fitVectorPointsToBounds(rawPts, true, l.w, l.h)
+                    up({ points: pts, closed: true, shape: 'rectangle', radius: rad })
+                  } else {
+                    up({ shape: 'rectangle', radius: l.radius ?? 0 })
+                  }
+                }}
+                className={`flex items-center justify-center gap-2 rounded-xl py-2 px-3 text-xs font-semibold border transition-all cursor-pointer ${
+                  l.shape === 'rectangle'
+                    ? 'border-accent bg-accent/20 text-white ring-1 ring-accent/40 shadow-sm'
+                    : 'border-line bg-surface1 text-txt2 hover:border-white/20 hover:text-white'
+                }`}
+              >
+                <div className="h-3.5 w-7 rounded-md bg-current" />
+                <span>Rectangle Shape</span>
+              </button>
+            </div>
+          </div>
+        )}
+
         <div className="mb-3 flex rounded-xl bg-surface2 p-1">
           {(['in', 'out'] as const).map((side) => (
             <button
@@ -1892,11 +2227,11 @@ function RadiusPanel() {
               onClick={() => {
                 setAnimationSide(side)
                 if (side === 'in') {
-                  setTime(l.start)
+                  setTime(layerStart)
                 } else {
                   const outType = l.outAnim || 'none'
                   const dur = outType === 'blur' ? 650 : outType === 'rotate' ? (l.outRotateMs ?? 150) : outType === 'pulse' ? 500 : 380
-                  setTime(Math.max(0, l.end - dur))
+                  setTime(Math.max(0, layerEnd - dur))
                 }
               }}
               className={`flex-1 rounded-lg py-2 text-xs font-semibold transition-colors ${
@@ -2382,7 +2717,7 @@ export function VectorFloatingPanel() {
 }
 
 export function TextFloatingPanel() {
-  const { selected, tool, openTool, updateLayer } = useEditor()
+  const { selected, tool, openTool, updateLayer, startEyedropper } = useEditor()
   const [expanded, setExpanded] = useState(true)
 
   if (!selected || selected.type !== 'text' || tool) return null
@@ -2443,6 +2778,27 @@ export function TextFloatingPanel() {
               className="h-3.5 w-3.5 rounded-full border border-white/40 shadow-xs"
               style={{ backgroundColor: l.color || '#FFFFFF' }}
             />
+          </button>
+
+          {/* 3b. Color picker loupe icon beside color icon */}
+          <button
+            type="button"
+            data-testid="text-floating-picker-btn"
+            id="text-floating-picker-btn"
+            onClick={() => {
+              startEyedropper({
+                target: 'layer',
+                layerId: l.id,
+                key: 'color',
+                initialColor: l.color || '#FFFFFF',
+                currentColor: l.color || '#FFFFFF',
+              })
+            }}
+            aria-label="Color Loupe Eyedropper"
+            title="Pick text color from screen"
+            className={inactiveBtnClass}
+          >
+            <Pipette className="size-3.5" />
           </button>
 
           {/* 4. Text alignment cycle */}

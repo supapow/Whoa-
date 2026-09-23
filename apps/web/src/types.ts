@@ -1,5 +1,5 @@
 export type LayerType = 'text' | 'shape' | 'path' | 'image' | 'sticker' | 'group'
-export type ShapeKind = 'rect' | 'circle' | 'triangle' | 'star' | 'line'
+export type ShapeKind = 'rect' | 'rectangle' | 'pill' | 'circle' | 'triangle' | 'star' | 'line'
 export type BgType = 'color' | 'gradient' | 'image'
 
 export interface VectorPoint {

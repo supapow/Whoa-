@@ -2,7 +2,7 @@ import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react
 import { ArrowLeft, ArrowRight, ArrowUp, ArrowDown, Move, RotateCw } from 'lucide-react'
 import type { Layer, LayerType, VectorPoint } from '#/types'
 import { useEditor } from '#/store/editor'
-import { getDescendantLayers, getTopmostGroup } from '#/lib/groups'
+import { getDescendantLayers, getTopmostGroup, computeGroupBounds } from '#/lib/groups'
 import { findCornerSizeMatch, findSizeMatch, getCandidateTargets, type SizeMatch } from '#/lib/sizeMatch'
 import { findGapMatch, type GapMatchResult } from '#/lib/gapMatch'
 import { findElementAlignMatch, type ElementAlignResult } from '#/lib/elementAlign'
@@ -58,8 +58,18 @@ function anim(layer: Layer, time: number, active: boolean, allLayers?: Layer[]) 
     return { opacity: layer.opacity, transform: baseTransform, filter: baseBlur, hidden: false }
   }
 
+  let layerStart = layer.start
+  let layerEnd = layer.end
+  if (layer.type === 'group' && (layerStart === undefined || layerEnd === undefined) && allLayers) {
+    const b = computeGroupBounds(layer.id, allLayers)
+    if (layerStart === undefined) layerStart = b.minStart
+    if (layerEnd === undefined) layerEnd = b.maxEnd
+  }
+  if (layerStart === undefined) layerStart = 0
+  if (layerEnd === undefined) layerEnd = 5000
+
   // Outside layer lifespan, completely hidden
-  if (time < layer.start || time > layer.end) {
+  if (time < layerStart || time > layerEnd) {
     return { opacity: 0, transform: '', filter: 'none', hidden: true }
   }
 
@@ -70,7 +80,7 @@ function anim(layer: Layer, time: number, active: boolean, allLayers?: Layer[]) 
 
   const inAnimType = layer.inAnim || layer.anim || 'none'
   const outAnimType = layer.outAnim || 'none'
-  const layerDuration = Math.max(1, layer.end - layer.start)
+  const layerDuration = Math.max(1, layerEnd - layerStart)
 
   // Determine standard or custom duration for animations
   const defaultInDur = inAnimType === 'blur' ? 650 : inAnimType === 'rotate' ? (layer.inRotateMs ?? 150) : inAnimType === 'pulse' ? 500 : 380
@@ -79,8 +89,8 @@ function anim(layer: Layer, time: number, active: boolean, allLayers?: Layer[]) 
   const inDur = Math.min(defaultInDur, Math.max(50, layerDuration / 2))
   const outDur = Math.min(defaultOutDur, Math.max(50, layerDuration / 2))
 
-  const inElapsed = time - layer.start
-  const outRemaining = layer.end - time
+  const inElapsed = time - layerStart
+  const outRemaining = layerEnd - time
 
   const isInActive = inAnimType !== 'none' && inElapsed < inDur
   const isOutActive = outAnimType !== 'none' && outRemaining < outDur
@@ -211,7 +221,114 @@ function anim(layer: Layer, time: number, active: boolean, allLayers?: Layer[]) 
   }
 
   // 3. Resting state
-  return { opacity: layer.opacity, transform: baseRot, filter: baseBlur, hidden: false }
+  return { opacity: layer.opacity, transform: baseTransform, filter: baseBlur, hidden: false }
+}
+
+interface CompositeAnimResult {
+  opacity: number
+  transform: string
+  filter: string
+  hidden: boolean
+}
+
+function getCompositeAnim(
+  layer: Layer,
+  time: number,
+  active: boolean,
+  allLayers: Layer[]
+): CompositeAnimResult {
+  if (layer.visible === false) {
+    return { opacity: 0, transform: '', filter: 'none', hidden: true }
+  }
+
+  // Collect all ancestor groups from outermost (root) to innermost (parent)
+  const ancestors: Layer[] = []
+  let currGroupId = layer.groupId
+  while (currGroupId) {
+    const parent = allLayers.find((item) => item.id === currGroupId)
+    if (!parent) break
+    ancestors.unshift(parent)
+    currGroupId = parent.groupId
+  }
+
+  // If any ancestor group is hidden or outside its lifespan, hide this layer
+  for (const group of ancestors) {
+    if (group.visible === false) {
+      return { opacity: 0, transform: '', filter: 'none', hidden: true }
+    }
+    const effG = group.keyframes && group.keyframes.length > 0 ? interpolateKeyframes(group, time) : group
+    const gA = anim(effG, time, active, allLayers)
+    if (gA.hidden) {
+      return { opacity: 0, transform: '', filter: 'none', hidden: true }
+    }
+  }
+
+  const effectiveLayer = layer.keyframes && layer.keyframes.length > 0 ? interpolateKeyframes(layer, time) : layer
+  const selfAnim = anim(effectiveLayer, time, active, allLayers)
+  if (selfAnim.hidden) {
+    return { opacity: 0, transform: '', filter: 'none', hidden: true }
+  }
+
+  let finalOpacity = selfAnim.opacity
+  const transformParts: string[] = []
+  const filterParts: string[] = []
+
+  // Compound transforms, opacities, and filters from ancestor groups (outermost to innermost)
+  for (const group of ancestors) {
+    const effG = group.keyframes && group.keyframes.length > 0 ? interpolateKeyframes(group, time) : group
+    const gA = anim(effG, time, active, allLayers)
+
+    finalOpacity *= gA.opacity
+
+    if (gA.filter && gA.filter !== 'none') {
+      filterParts.push(gA.filter)
+    }
+
+    const gb = computeGroupBounds(group.id, allLayers)
+    const gCenterX = (group.x || gb.x) + (group.w || gb.w) / 2
+    const gCenterY = (group.y || gb.y) + (group.h || gb.h) / 2
+    const originX = gCenterX - effectiveLayer.x
+    const originY = gCenterY - effectiveLayer.y
+
+    if (group.keyframes && group.keyframes.length > 0) {
+      const kfDx = effG.x - (group.x || gb.x)
+      const kfDy = effG.y - (group.y || gb.y)
+      const kfScale = effG.scale !== undefined && Math.abs(effG.scale - 1) > 0.005 ? effG.scale : 1
+      const kfRot = effG.rotation || 0
+
+      if (Math.abs(kfDx) > 0.05 || Math.abs(kfDy) > 0.05 || Math.abs(kfScale - 1) > 0.005 || Math.abs(kfRot) > 0.05) {
+        transformParts.push(
+          `translate(${(kfDx + originX).toFixed(1)}px, ${(kfDy + originY).toFixed(1)}px) rotate(${kfRot.toFixed(2)}deg) scale(${kfScale.toFixed(3)}) translate(${(-originX).toFixed(1)}px, ${(-originY).toFixed(1)}px)`
+        )
+      }
+    } else if (gA.transform && gA.transform.trim() !== '') {
+      if (gA.transform.includes('scale') || gA.transform.includes('rotate')) {
+        transformParts.push(
+          `translate(${originX.toFixed(1)}px, ${originY.toFixed(1)}px) ${gA.transform} translate(${(-originX).toFixed(1)}px, ${(-originY).toFixed(1)}px)`
+        )
+      } else {
+        transformParts.push(gA.transform)
+      }
+    }
+  }
+
+  if (selfAnim.filter && selfAnim.filter !== 'none') {
+    filterParts.push(selfAnim.filter)
+  }
+
+  if (selfAnim.transform && selfAnim.transform.trim() !== '') {
+    transformParts.push(selfAnim.transform)
+  }
+
+  const finalTransform = transformParts.filter(Boolean).join(' ')
+  const finalFilter = filterParts.length > 0 ? filterParts.join(' ') : 'none'
+
+  return {
+    opacity: Math.max(0, Math.min(1, finalOpacity)),
+    transform: finalTransform,
+    filter: finalFilter,
+    hidden: false,
+  }
 }
 
 const clampN = (v: number, lo: number, hi: number) => Math.max(lo, Math.min(v, hi))
@@ -2600,18 +2717,38 @@ export default function Canvas() {
       }
       itemsToMove = project.layers.filter((item) => allIds.has(item.id) && !item.locked)
     } else if (target.type === 'group') {
-      const desc = getDescendantLayers(target.id, project.layers)
-      itemsToMove = [target, ...desc.filter((item) => !item.locked)]
+      const hasKf = Boolean(target.keyframes && target.keyframes.length > 0)
+      if (hasKf) {
+        itemsToMove = [target]
+      } else {
+        const desc = getDescendantLayers(target.id, project.layers)
+        itemsToMove = [target, ...desc.filter((item) => !item.locked)]
+      }
     } else {
       itemsToMove = [target]
     }
 
     const node = layerRefs.current.get(target.id)
-    const currentX = (target.type === 'text' && target.align === 'center' && target.x === 0 && target.w === preset.w && node)
+    let currentX = (target.type === 'text' && target.align === 'center' && target.x === 0 && target.w === preset.w && node)
       ? (preset.w - node.offsetWidth) / 2
       : target.x
-    const currentW = (target.type === 'text' && node ? node.offsetWidth : node?.offsetWidth) || target.w
-    const currentH = (target.type === 'text' && node ? node.offsetHeight : node?.offsetHeight) || target.h
+    let currentY = target.y
+    let currentW = (target.type === 'text' && node ? node.offsetWidth : node?.offsetWidth) || target.w
+    let currentH = (target.type === 'text' && node ? node.offsetHeight : node?.offsetHeight) || target.h
+
+    if (target.type === 'group' && (!currentW || !currentH)) {
+      const b = computeGroupBounds(target.id, project.layers)
+      currentX = target.x || b.x
+      currentY = target.y || b.y
+      currentW = target.w || b.w
+      currentH = target.h || b.h
+    }
+
+    if (target.keyframes && target.keyframes.length > 0) {
+      const effTarget = interpolateKeyframes(target, time)
+      currentX = effTarget.x
+      currentY = effTarget.y
+    }
 
     const group = itemsToMove.length > 1
       ? itemsToMove.map((item) => {
@@ -2631,7 +2768,7 @@ export default function Canvas() {
       sx: e.clientX,
       sy: e.clientY,
       ox: currentX,
-      oy: target.y,
+      oy: currentY,
       ow: currentW,
       oh: currentH,
       fromCanvas: false,
@@ -3531,7 +3668,7 @@ export default function Canvas() {
           )}
           {project.layers.map((l) => {
             const effectiveLayer = l.keyframes && l.keyframes.length > 0 ? interpolateKeyframes(l, time) : l
-            const a = anim(effectiveLayer, time, active, project.layers)
+            const a = getCompositeAnim(effectiveLayer, time, active, project.layers)
             if (l.visible === false || a.hidden) return null
             const isSel = selectedIds.includes(l.id)
             return (
@@ -3620,7 +3757,9 @@ export default function Canvas() {
                   paddingLeft: effectiveLayer.paddingLeft ? `${effectiveLayer.paddingLeft}px` : undefined,
                   background: effectiveLayer.type === 'text' && effectiveLayer.fill ? effectiveLayer.fill : undefined,
                   borderRadius: effectiveLayer.type === 'shape'
-                    ? (effectiveLayer.shape === 'circle' ? '9999px' : effectiveLayer.radius ? `${effectiveLayer.radius}px` : undefined)
+                    ? (effectiveLayer.shape === 'circle' || effectiveLayer.shape === 'pill'
+                        ? (effectiveLayer.radius !== undefined ? `${effectiveLayer.radius}px` : '9999px')
+                        : (effectiveLayer.radius !== undefined ? `${effectiveLayer.radius}px` : undefined))
                     : (effectiveLayer.type === 'text' && effectiveLayer.radius ? `${effectiveLayer.radius}px` : undefined),
                   margin: 0,
                   boxSizing: 'border-box',
@@ -3659,7 +3798,9 @@ export default function Canvas() {
                       width="100%"
                       height="100%"
                       rx={effectiveLayer.type === 'shape'
-                        ? (effectiveLayer.shape === 'circle' ? 9999 : (effectiveLayer.radius || 0))
+                        ? (effectiveLayer.shape === 'circle' || effectiveLayer.shape === 'pill'
+                            ? (effectiveLayer.radius !== undefined ? effectiveLayer.radius : 9999)
+                            : (effectiveLayer.radius || 0))
                         : (effectiveLayer.type === 'text' && effectiveLayer.radius ? effectiveLayer.radius : 0)}
                       fill="none"
                       stroke={imagePositioningId === l.id && l.type === 'image'
@@ -3779,19 +3920,28 @@ export default function Canvas() {
             }) : undefined
             const isImagePositioning = Boolean(imagePositioningId && imagePositioningId === sel.id && sel.type === 'image')
             const isVectorEditing = Boolean(vectorEditingId && vectorEditingId === sel.id && sel.type === 'path')
-            const effSel = (isVectorEditing && sel.keyframes && sel.keyframes.length > 0)
+            const effSel = (sel.keyframes && sel.keyframes.length > 0)
               ? interpolateKeyframes(sel, time)
               : sel
+            const isSingleGroup = selected.length === 1 && sel.type === 'group'
+            const groupKfDx = (isSingleGroup && sel.keyframes?.length) ? effSel.x - sel.x : 0
+            const groupKfDy = (isSingleGroup && sel.keyframes?.length) ? effSel.y - sel.y : 0
+            const boxRot = (selected.length === 1 && !isGroup && effSel.rotation)
+              ? effSel.rotation
+              : (isSingleGroup && effSel.rotation)
+                ? effSel.rotation
+                : undefined
+
             return (
               <div
                 style={{
                   position: 'absolute',
-                  left: isVectorEditing ? effSel.x : bounds.left,
-                  top: isVectorEditing ? effSel.y : bounds.top,
+                  left: isVectorEditing ? effSel.x : bounds.left + groupKfDx,
+                  top: isVectorEditing ? effSel.y : bounds.top + groupKfDy,
                   width: isVectorEditing ? effSel.w : boxW,
                   height: isVectorEditing ? effSel.h : boxH,
-                  transform: (selected.length === 1 && !isGroup && effSel.rotation)
-                    ? `rotate(${effSel.rotation}deg)`
+                  transform: boxRot
+                    ? `rotate(${boxRot}deg)`
                     : (rotationSnap?.active && rotationSnap.deltaAngle)
                       ? `rotate(${rotationSnap.deltaAngle}deg)`
                       : undefined,
@@ -5432,6 +5582,72 @@ function LayerContent({
             <line x1={0} y1={layer.h / 2} x2={layer.w} y2={layer.h / 2} stroke={fill} strokeWidth={Math.max(2, layer.h * 0.12)} strokeLinecap="round" shapeRendering="geometricPrecision" />
           </svg>
         )
+      case 'pill':
+        return (
+          <svg viewBox={`0 0 ${layer.w} ${layer.h}`} width="100%" height="100%" style={{ display: 'block', overflow: 'visible' }} shapeRendering="geometricPrecision">
+            <rect
+              x={0}
+              y={0}
+              width={layer.w}
+              height={layer.h}
+              rx={Math.min(layer.w, layer.h) / 2}
+              ry={Math.min(layer.w, layer.h) / 2}
+              fill={fill}
+              fillOpacity={fillOpacity}
+              stroke={stroke}
+              strokeWidth={strokeWidth}
+              shapeRendering="geometricPrecision"
+              style={{ transition: 'fill-opacity 0.2s ease' }}
+            />
+            {isVectorEditing && (
+              <rect
+                x={0}
+                y={0}
+                width={layer.w}
+                height={layer.h}
+                rx={Math.min(layer.w, layer.h) / 2}
+                ry={Math.min(layer.w, layer.h) / 2}
+                fill="none"
+                stroke="#d1d5db"
+                strokeWidth={1 / eff}
+                shapeRendering="geometricPrecision"
+              />
+            )}
+          </svg>
+        )
+      case 'rectangle':
+        return (
+          <svg viewBox={`0 0 ${layer.w} ${layer.h}`} width="100%" height="100%" style={{ display: 'block', overflow: 'visible' }} shapeRendering="geometricPrecision">
+            <rect
+              x={0}
+              y={0}
+              width={layer.w}
+              height={layer.h}
+              rx={layer.radius !== undefined ? layer.radius : 0}
+              ry={layer.radius !== undefined ? layer.radius : 0}
+              fill={fill}
+              fillOpacity={fillOpacity}
+              stroke={stroke}
+              strokeWidth={strokeWidth}
+              shapeRendering="geometricPrecision"
+              style={{ transition: 'fill-opacity 0.2s ease' }}
+            />
+            {isVectorEditing && (
+              <rect
+                x={0}
+                y={0}
+                width={layer.w}
+                height={layer.h}
+                rx={layer.radius !== undefined ? layer.radius : 0}
+                ry={layer.radius !== undefined ? layer.radius : 0}
+                fill="none"
+                stroke="#d1d5db"
+                strokeWidth={1 / eff}
+                shapeRendering="geometricPrecision"
+              />
+            )}
+          </svg>
+        )
       default:
         return (
           <svg viewBox={`0 0 ${layer.w} ${layer.h}`} width="100%" height="100%" style={{ display: 'block', overflow: 'visible' }} shapeRendering="geometricPrecision">
@@ -5506,6 +5722,7 @@ function LayerContent({
           }}
         >
           <img
+            crossOrigin="anonymous"
             src={layer.src}
             alt=""
             draggable={false}
@@ -5539,6 +5756,7 @@ function LayerContent({
     }
     return (
       <img
+        crossOrigin="anonymous"
         src={layer.src}
         alt=""
         draggable={false}

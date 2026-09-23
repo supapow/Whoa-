@@ -145,7 +145,7 @@ function applyLayerUpdate(l: Layer, patch: Partial<Layer>, currentTime: number):
   // If layer has keyframes and a transform, style, or points property is patched, update/upsert keyframe at currentTime
   if (l.keyframes && l.keyframes.length > 0 && !('keyframes' in patch)) {
     const keyframePropKeys = [
-      'x', 'y', 'w', 'h', 'rotation', 'opacity',
+      'x', 'y', 'w', 'h', 'rotation', 'opacity', 'scale',
       'fontSize', 'fontWeight', 'color', 'fill', 'radius', 'blur',
       'points'
     ]
@@ -753,6 +753,20 @@ function innerReducer(state: State, a: Action): State {
       } else {
         // Convert existing animation presets into editable keyframes, ensuring a keyframe at targetTime
         let layerToConvert = targetLayer
+
+        // If targetLayer is a group, ensure its visual coordinates and span match its descendant elements
+        if (targetLayer.type === 'group') {
+          const b = computeGroupBounds(targetLayer.id, p.layers)
+          layerToConvert = {
+            ...targetLayer,
+            x: targetLayer.x || b.x,
+            y: targetLayer.y || b.y,
+            w: targetLayer.w || b.w,
+            h: targetLayer.h || b.h,
+            start: targetLayer.start ?? b.minStart,
+            end: targetLayer.end ?? b.maxEnd,
+          }
+        }
 
         // If targetLayer is a centered text with template coordinates (x === 0 && (w === p.preset.w || w >= 800)),
         // normalize its x and w to its real visual artboard coordinates before converting

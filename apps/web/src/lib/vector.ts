@@ -681,10 +681,64 @@ export function createShapeVectorPoints(shape: ShapeKind, w: number, h: number, 
         { x: w, y: h / 2 },
       ]
     }
+    case 'pill': {
+      const maxR = Math.min(w, h) / 2
+      const r = radius !== undefined ? Math.min(Math.max(0, radius), maxR) : maxR
+      if (r <= 0) {
+        return [
+          { x: 0, y: 0 },
+          { x: w, y: 0 },
+          { x: w, y: h },
+          { x: 0, y: h },
+        ]
+      }
+      const k = 0.5522847498 * r
+      if (w >= h) {
+        return [
+          { x: r, y: 0, cp1: { x: r - k, y: 0 } },
+          { x: w - r, y: 0, cp2: { x: w - r + k, y: 0 } },
+          { x: w, y: r, cp1: { x: w, y: r - k }, cp2: { x: w, y: r + k } },
+          { x: w - r, y: h, cp1: { x: w - r + k, y: h } },
+          { x: r, y: h, cp2: { x: r - k, y: h } },
+          { x: 0, y: r, cp1: { x: 0, y: r + k }, cp2: { x: 0, y: r - k } },
+        ]
+      }
+      return [
+        { x: r, y: 0, cp1: { x: r - k, y: 0 }, cp2: { x: r + k, y: 0 } },
+        { x: w, y: r, cp1: { x: w, y: r - k } },
+        { x: w, y: h - r, cp2: { x: w, y: h - r + k } },
+        { x: r, y: h, cp1: { x: r + k, y: h }, cp2: { x: r - k, y: h } },
+        { x: 0, y: h - r, cp1: { x: 0, y: h - r + k } },
+        { x: 0, y: r, cp2: { x: 0, y: r - k } },
+      ]
+    }
+    case 'rectangle': {
+      const maxR = Math.min(w, h) / 2
+      const r = Math.min(Math.max(0, radius || 0), maxR)
+      if (r <= 0) {
+        return [
+          { x: 0, y: 0 },
+          { x: w, y: 0 },
+          { x: w, y: h },
+          { x: 0, y: h },
+        ]
+      }
+      const k = 0.5522847498 * r
+      return [
+        { x: r, y: 0, cp1: { x: r - k, y: 0 } },
+        { x: w - r, y: 0, cp2: { x: w - r + k, y: 0 } },
+        { x: w, y: r, cp1: { x: w, y: r - k } },
+        { x: w, y: h - r, cp2: { x: w, y: h - r + k } },
+        { x: w - r, y: h, cp1: { x: w - r + k, y: h } },
+        { x: r, y: h, cp2: { x: r - k, y: h } },
+        { x: 0, y: h - r, cp1: { x: 0, y: h - r + k } },
+        { x: 0, y: r, cp2: { x: 0, y: r - k } },
+      ]
+    }
     case 'rect':
     default: {
       const maxR = Math.min(w, h) / 2
-      const r = Math.min(radius, maxR)
+      const r = Math.min(Math.max(0, radius || 0), maxR)
       if (r <= 0) {
         return [
           { x: 0, y: 0 },
@@ -790,6 +844,16 @@ export interface VectorPreset {
 export const VECTOR_PRESETS: VectorPreset[] = [
   /* ---------------- BASIC SHAPES (Vector Versions) ---------------- */
   {
+    id: 'rectangle',
+    name: 'Rectangle',
+    closed: true,
+    category: 'basic',
+    isBasic: true,
+    defaultW: 220,
+    defaultH: 140,
+    getPoints: (w, h) => createShapeVectorPoints('rectangle', w, h, 0),
+  },
+  {
     id: 'rect',
     name: 'Square',
     closed: true,
@@ -803,6 +867,16 @@ export const VECTOR_PRESETS: VectorPreset[] = [
       { x: w, y: h },
       { x: 0, y: h },
     ],
+  },
+  {
+    id: 'pill',
+    name: 'Pill Shape',
+    closed: true,
+    category: 'basic',
+    isBasic: true,
+    defaultW: 220,
+    defaultH: 64,
+    getPoints: (w, h) => createShapeVectorPoints('pill', w, h, Math.min(w, h) / 2),
   },
   {
     id: 'circle',
@@ -1360,17 +1434,25 @@ export const VECTOR_PRESETS: VectorPreset[] = [
  */
 export function convertShapeToVector(shapeLayer: Layer): Partial<Layer> {
   const isClosed = shapeLayer.shape !== 'line'
+  const isPill = shapeLayer.shape === 'pill'
+  const isCircle = shapeLayer.shape === 'circle'
+  // If shapeLayer.radius is defined (e.g. 0, 10, etc.), respect it even if 0!
+  const effectiveRad = shapeLayer.radius !== undefined
+    ? Math.max(0, shapeLayer.radius)
+    : (isPill || isCircle ? Math.min(shapeLayer.w, shapeLayer.h) / 2 : 0)
   const rawPts = createShapeVectorPoints(
     shapeLayer.shape || 'rect',
     shapeLayer.w,
     shapeLayer.h,
-    shapeLayer.radius || 0
+    effectiveRad
   )
   const pts = fitVectorPointsToBounds(rawPts, isClosed, shapeLayer.w, shapeLayer.h)
   return {
     type: 'path',
     points: pts,
     closed: isClosed,
+    shape: shapeLayer.shape,
+    radius: effectiveRad,
     fill: shapeLayer.shape === 'line' ? 'transparent' : (shapeLayer.fill || '#007AFF'),
     stroke: shapeLayer.shape === 'line' ? (shapeLayer.fill || '#007AFF') : undefined,
     strokeWidth: shapeLayer.shape === 'line' ? Math.max(3, shapeLayer.h * 0.12) : 0,

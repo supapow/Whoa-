@@ -8,7 +8,7 @@ import {
   AlignHorizontalDistributeCenter, AlignVerticalDistributeCenter,
   Magnet, ChevronUp, ChevronDown, Lock, Unlock,
   Move, ArrowUpToLine, ArrowDownToLine, ArrowLeftToLine, ArrowRightToLine, Maximize2, Expand,
-  Droplet, PenTool, Download, Spline,
+  Droplet, PenTool, Download, Spline, Pipette,
 } from 'lucide-react'
 import { useEditor, type AlignMode } from '#/store/editor'
 import { parseImagePosition } from '#/lib/imagePosition'
@@ -20,8 +20,22 @@ export default function Toolbar({ onExport }: { onExport?: () => void }) {
     project, selected, selectedIds, alignSelected, openTool, addLayer, deleteLayer, deleteLayers, duplicate, reorder,
     createGroup, ungroup, saveAsComponent, artboardSnap, setArtboardSnap,
     timelineOpen, toggleTimeline, updateLayer, imagePositioningId, setImagePositioningId,
-    vectorEditingId, setVectorEditingId,
+    vectorEditingId, setVectorEditingId, startEyedropper,
   } = useEditor()
+
+  const handleStartEyedropper = () => {
+    if (!selected) return
+    const isPath = selected.type === 'path'
+    const key = isPath ? 'fill' : selected.type === 'shape' ? 'fill' : 'color'
+    const cur = (selected as any)[key] || '#007AFF'
+    startEyedropper({
+      target: 'layer',
+      layerId: selected.id,
+      key: key as any,
+      initialColor: cur === 'transparent' ? '#007AFF' : cur,
+      currentColor: cur === 'transparent' ? '#007AFF' : cur,
+    })
+  }
 
   const [isAlignExpanded, setIsAlignExpanded] = useState(false)
   const [positionMode, setPositionMode] = useState<string | null>(null)
@@ -390,6 +404,7 @@ export default function Toolbar({ onExport }: { onExport?: () => void }) {
           onClick: handleToggleLockProportions,
         },
         { key: 'shape', label: 'Shape', icon: <Square /> },
+        { key: 'radius', label: 'Corners', icon: <Square /> },
         { key: 'mask', label: 'Mask', icon: <Scissors /> },
         { key: 'color', label: 'Color', icon: <PaintBucket /> },
         ...common,
@@ -801,7 +816,7 @@ export default function Toolbar({ onExport }: { onExport?: () => void }) {
             >
               {floatingItems.map((it) => {
                 const isLockProp = it.key === 'lock-proportions'
-                return (
+                const btn = (
                   <button
                     key={it.key}
                     type="button"
@@ -823,6 +838,28 @@ export default function Toolbar({ onExport }: { onExport?: () => void }) {
                     <span className="[&>svg]:h-3.5 [&>svg]:w-3.5">{it.icon}</span>
                   </button>
                 )
+
+                if (it.key === 'color') {
+                  return (
+                    <Fragment key={it.key}>
+                      {btn}
+                      <button
+                        type="button"
+                        id="floating-tool-picker"
+                        data-testid="floating-tool-picker"
+                        data-floating-tool="picker"
+                        aria-label="Color Picker Loupe"
+                        title="Pick color from canvas with circular magnifier"
+                        onClick={handleStartEyedropper}
+                        className="grid h-6 w-6 place-items-center rounded-full text-white/90 hover:bg-white/20 hover:text-white transition-all active:scale-90 focus:outline-none"
+                      >
+                        <Pipette className="h-3.5 w-3.5" />
+                      </button>
+                    </Fragment>
+                  )
+                }
+
+                return btn
               })}
             </div>
           )}
