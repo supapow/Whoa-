@@ -1,7 +1,20 @@
 # Implementation Plan — Drop Shadow & Inner Shadow
 
-> **Status:** Steps **A–E code complete and lint-verified** (2026-09-24, second agent). `tsc --noEmit` exit 0; dev server `:3000` → 200 and all touched modules transform clean. **Step E's manual checklist is NOT done** — no desktop browser was connected to the session, so it needs Ola (or a connected browser). Committed on `feature/outer-and-inner-shadows`: `f1e55a4` (feat) + `613017c` (docs).
-> **Handoff note (2026-09-24):** first session hit 73% context at Step A; second session implemented A–D. `file:line` refs below predate this session's edits (Canvas grew by ~+130 lines) — re-verify after edits anyway. See **Deviations** section for the four places implementation intentionally differs from the literal plan text.
+> **Status:** Steps **A–E code complete, lint-verified and smoke-tested in-browser** (2026-09-24, second agent). `tsc --noEmit` exit 0; dev server `:3000` → 200. Commits on `feature/outer-and-inner-shadows`: `f1e55a4` (feat) + docs commits. **Remaining:** the bulk of Step E's manual checklist (see Handoff below) — group casters, multi-select, keyframes, parity, visual pass.
+> **Handoff (session 2 → session 3, 2026-09-24):**
+>
+> **✅ Already verified in-browser** (browser tool now connected; tab ids don't survive a session): drop `spread===0` → CSS fast path only, `drop-shadow(rgba(0,0,0,0.35) 0px 4px 12px)` on the **inner** wrapper; inner shadow → `url(#wsh-{id})` chained *before* the CSS drop; `spread!==0` → SVG-only (`feMorphology dilate`, radius tracks the slider, e.g. 18) with no CSS duplicate; filter merge = `dropShadow → SourceGraphic → innerShadow`; `color-interpolation-filters=sRGB` present; region `-25% / 150%`; **outer wrapper and selection-border parent both `filter: none`** (blur-smear fix confirmed); sliders + preset buttons both write through to the store; `effects` floats right after `blur` and is absent from the base toolbar; control testids all `effect-{drop,inner}-*`.
+>
+> **⬜ Still to run** (rest of the checklist at the bottom): group casters (Step B — drop under children / inner over, combined silhouette), multi-select propagation, keyframe interpolation + undo coalescing + toggle-off-with-keyframes, convert-to-vectors (single AND group), duplicate/group/ungroup/insert-component survival, silhouettes for every element type (circle/triangle/star inner band), visual sRGB eyeball, final console-error sweep.
+>
+> **Browser-driving notes for the next agent** (the previous session learned these the hard way):
+> - Server: `~/.bun/bin/bun run dev` (bun is **not** on PATH in non-interactive shells), port 3000 strict.
+> - **`browser.snapshot` and `browser.find` return an empty a11y tree on this app** — drive everything through `browser.evaluate` + `data-testid`.
+> - Navigation: `new-project-btn` → `preset-ig-post` → `tool-text` → `floating-tool-effects`. **Renders land one call late** — click, then read in a *separate* evaluate (a click + read in the same script often reports the pre-click DOM).
+> - Range sliders: **never read `.value` before dispatching** — React's value tracker syncs on read and then swallows the change. Set with `Object.getOwnPropertyDescriptor(HTMLInputElement.prototype,'value').set`, dispatch `input`, and inspect on the next call.
+> - Read the filter's interpolation as **kebab-case**: `getAttribute('color-interpolation-filters')`. The camelCase form returns `null` and looks like a missing attribute — it isn't.
+> - **Vite HMR websocket is broken** (`wss://localhost/` instead of :3000) → **reload the tab after any source edit**; state is in-memory, so a reload returns you to the home screen.
+> - Testids: `panel-effects`, `effect-drop|inner` (+ `-toggle -reset -x -y -blur -spread -opacity -color-* -preset-*`), `floating-tool-effects`, `layer-{id}`, `layer-vector-border-{id}`, `artboard`.
 
 ## Feature
 
@@ -105,7 +118,7 @@ Files: `components/editor/Panels.tsx`, `components/editor/Toolbar.tsx`
    - `groupLayer` (L413-431): copy both too (group carries the effect over the letters' combined silhouette — matches group philosophy; children get none).
 2. `lib/groups.ts` `instantiateComponent` → `rootLayer` (L720-738) is built **field-by-field** and currently DROPS shadows: add `dropShadow: comp.root.dropShadow, innerShadow: comp.root.innerShadow`. (childLayers spread `...l` ✓, save spreads ✓.)
 
-### Step E — Verify ⬜ (lint + dev-server done; **manual checklist outstanding**)
+### Step E — Verify 🟡 (lint ✅ · dev-server ✅ · **smoke test ✅** · rest of manual checklist ⬜ — see Handoff at top)
 ```sh
 bun run lint                         # from repo root: tsc --noEmit — ✅ exit 0 (2026-09-24)
 cd apps/web && bun run dev           # http://localhost:3000 (strictPort) — ✅ 200, touched modules transform clean
@@ -145,11 +158,11 @@ Manual checklist (mobile viewport first) — unchanged from below; note selectio
 
 - [ ] Drop shadow renders on text, each shape kind, path, image, sticker
 - [ ] Inner shadow follows the *silhouette* (circle + triangle + star, not just rectangle)
-- [ ] Both effects active simultaneously on one layer
+- [x] Both effects active simultaneously on one layer
 - [ ] Multi-select 2+ elements → one change applies to all
-- [ ] Selection outline / handles are **not** shadowed (and element blur no longer smears the border)
+- [x] Selection outline / handles are **not** shadowed (and element blur no longer smears the border) — outer wrapper + border parent both `filter: none` in-browser
 - [ ] Group shadow uses combined silhouette; shadow behind children, inner band over children
-- [ ] `spread > 0` renders (SVG path); `spread === 0` drop stays on CSS fast path (inspect `filter` style)
+- [x] `spread > 0` renders (SVG path); `spread === 0` drop stays on CSS fast path (inspect `filter` style) — `url(#wsh-*)` only vs `drop-shadow(...)`, no double-paint
 - [ ] Keyframe: effect interpolates across playhead; slider drags coalesce to one undo entry; toggle-off with keyframes present writes `undefined`
 - [ ] Convert text → vectors: effect survives (single AND group mode)
 - [ ] Duplicate / group / ungroup / insert-component: effect survives
