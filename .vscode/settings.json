@@ -16,5 +16,7 @@
 	},
 	"[typescript]": {
 		"editor.defaultFormatter": "biomejs.biome"
-	}
+	},
+	"npm.packageManager": "bun",
+	"npm.scriptRunner": "bun"
 }
