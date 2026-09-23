@@ -750,10 +750,10 @@ export default function Toolbar({ onExport }: { onExport?: () => void }) {
                 aria-label={vectorEditingId === selected.id ? 'Finish editing vector' : 'Edit vector path'}
                 title={vectorEditingId === selected.id ? 'Finish editing vector (Done)' : 'Edit vector path'}
                 onClick={() => setVectorEditingId(vectorEditingId === selected.id ? null : selected.id)}
-                className={`grid h-9 w-9 place-items-center rounded-full border border-white/10 bg-black/60 shadow-lg backdrop-blur-md transition-all active:scale-90 focus:outline-none ${
+                className={`grid h-9 w-9 place-items-center rounded-full border border-line bg-surface/85 shadow-lg backdrop-blur-md transition-all active:scale-90 focus:outline-none cursor-pointer ${
                   vectorEditingId === selected.id
                     ? 'bg-accent text-white ring-1 ring-accent/60'
-                    : 'text-white/90 hover:bg-white/20 hover:text-white'
+                    : 'text-txt hover:bg-surface2'
                 }`}
               >
                 <PenTool className="h-4 w-4" />
@@ -768,7 +768,7 @@ export default function Toolbar({ onExport }: { onExport?: () => void }) {
             aria-label="Layer order controls"
             onPointerDown={(e) => e.stopPropagation()}
             onClick={(e) => e.stopPropagation()}
-            className="pointer-events-auto flex flex-col items-center gap-1 rounded-full border border-white/10 bg-black/60 px-1.5 py-1.5 text-xs font-semibold text-white shadow-lg backdrop-blur-md"
+            className="pointer-events-auto flex flex-col items-center gap-1 rounded-full border border-line bg-surface/85 px-1.5 py-1.5 text-xs font-semibold text-txt shadow-lg backdrop-blur-md"
           >
             <button
               type="button"
@@ -778,10 +778,10 @@ export default function Toolbar({ onExport }: { onExport?: () => void }) {
               title="Bring forward"
               disabled={!canMoveForward}
               onClick={() => handleReorder(1)}
-              className={`grid h-6 w-6 place-items-center rounded-full transition-all focus:outline-none ${
+              className={`grid h-6 w-6 place-items-center rounded-full transition-all focus:outline-none cursor-pointer ${
                 !canMoveForward
-                  ? 'opacity-40 cursor-not-allowed text-white/40'
-                  : 'text-white/90 hover:bg-white/20 hover:text-white active:scale-90'
+                  ? 'opacity-40 cursor-not-allowed text-txt3'
+                  : 'text-txt hover:bg-surface2 active:scale-90'
               }`}
             >
               <ArrowUp className="h-3.5 w-3.5" />
@@ -794,10 +794,10 @@ export default function Toolbar({ onExport }: { onExport?: () => void }) {
               title="Send backward"
               disabled={!canMoveBackward}
               onClick={() => handleReorder(-1)}
-              className={`grid h-6 w-6 place-items-center rounded-full transition-all focus:outline-none ${
+              className={`grid h-6 w-6 place-items-center rounded-full transition-all focus:outline-none cursor-pointer ${
                 !canMoveBackward
-                  ? 'opacity-40 cursor-not-allowed text-white/40'
-                  : 'text-white/90 hover:bg-white/20 hover:text-white active:scale-90'
+                  ? 'opacity-40 cursor-not-allowed text-txt3'
+                  : 'text-txt hover:bg-surface2 active:scale-90'
               }`}
             >
               <ArrowDown className="h-3.5 w-3.5" />
@@ -812,7 +812,7 @@ export default function Toolbar({ onExport }: { onExport?: () => void }) {
               aria-label="Layer actions"
               onPointerDown={(e) => e.stopPropagation()}
               onClick={(e) => e.stopPropagation()}
-              className="pointer-events-auto flex items-center gap-1 rounded-full border border-white/10 bg-black/60 px-2 py-1.5 text-xs font-semibold text-white shadow-lg backdrop-blur-md"
+              className="pointer-events-auto flex items-center gap-1 rounded-full border border-line bg-surface/85 px-2 py-1.5 text-xs font-semibold text-txt shadow-lg backdrop-blur-md"
             >
               {floatingItems.map((it) => {
                 const isLockProp = it.key === 'lock-proportions'
@@ -827,12 +827,12 @@ export default function Toolbar({ onExport }: { onExport?: () => void }) {
                     aria-pressed={isLockProp ? Boolean(it.active) : undefined}
                     title={it.label}
                     onClick={() => (it.onClick ? it.onClick() : openTool(it.key))}
-                    className={`grid h-6 w-6 place-items-center rounded-full transition-all active:scale-90 focus:outline-none ${
+                    className={`grid h-6 w-6 place-items-center rounded-full transition-all active:scale-90 focus:outline-none cursor-pointer ${
                       it.danger
                         ? 'text-danger hover:bg-danger/20 hover:text-red-400'
                         : it.active
                           ? 'bg-accent text-white shadow-sm ring-1 ring-accent/60'
-                          : 'text-white/90 hover:bg-white/20 hover:text-white'
+                          : 'text-txt hover:bg-surface2'
                     }`}
                   >
                     <span className="[&>svg]:h-3.5 [&>svg]:w-3.5">{it.icon}</span>
@@ -851,7 +851,7 @@ export default function Toolbar({ onExport }: { onExport?: () => void }) {
                         aria-label="Color Picker Loupe"
                         title="Pick color from canvas with circular magnifier"
                         onClick={handleStartEyedropper}
-                        className="grid h-6 w-6 place-items-center rounded-full text-white/90 hover:bg-white/20 hover:text-white transition-all active:scale-90 focus:outline-none"
+                        className="grid h-6 w-6 place-items-center rounded-full text-txt hover:bg-surface2 transition-all active:scale-90 focus:outline-none cursor-pointer"
                       >
                         <Pipette className="h-3.5 w-3.5" />
                       </button>

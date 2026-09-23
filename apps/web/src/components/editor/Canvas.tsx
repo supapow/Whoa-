@@ -5286,7 +5286,7 @@ export default function Canvas() {
         <div
           data-testid="nudge-controls"
           id="nudge-controls"
-          className="flex h-9 items-center gap-1 rounded-full bg-black/60 px-2 py-1.5 text-xs font-semibold text-white backdrop-blur-md border border-white/10 shadow-lg"
+          className="flex h-9 items-center gap-1 rounded-full bg-surface/85 px-2 py-1.5 text-xs font-semibold text-txt backdrop-blur-md border border-line shadow-lg"
         >
           <button
             data-testid="nudge-left"
@@ -5297,7 +5297,7 @@ export default function Canvas() {
             aria-label={`Nudge left (${nudgeIncrement}px)`}
             title={`Nudge left (${nudgeIncrement}px)`}
             onClick={() => handleNudge(-1, 0)}
-            className="grid h-6 w-6 place-items-center rounded-full text-white/90 hover:text-white hover:bg-white/20 active:scale-90 transition-all focus:outline-none"
+            className="grid h-6 w-6 place-items-center rounded-full text-txt/90 hover:text-txt hover:bg-surface2 active:scale-90 transition-all focus:outline-none cursor-pointer"
           >
             <ArrowLeft className="h-3.5 w-3.5" />
             <span className="sr-only">Nudge left</span>
@@ -5311,7 +5311,7 @@ export default function Canvas() {
             aria-label={`Nudge right (${nudgeIncrement}px)`}
             title={`Nudge right (${nudgeIncrement}px)`}
             onClick={() => handleNudge(1, 0)}
-            className="grid h-6 w-6 place-items-center rounded-full text-white/90 hover:text-white hover:bg-white/20 active:scale-90 transition-all focus:outline-none"
+            className="grid h-6 w-6 place-items-center rounded-full text-txt/90 hover:text-txt hover:bg-surface2 active:scale-90 transition-all focus:outline-none cursor-pointer"
           >
             <ArrowRight className="h-3.5 w-3.5" />
             <span className="sr-only">Nudge right</span>
@@ -5325,7 +5325,7 @@ export default function Canvas() {
             aria-label={`Nudge up (${nudgeIncrement}px)`}
             title={`Nudge up (${nudgeIncrement}px)`}
             onClick={() => handleNudge(0, -1)}
-            className="grid h-6 w-6 place-items-center rounded-full text-white/90 hover:text-white hover:bg-white/20 active:scale-90 transition-all focus:outline-none"
+            className="grid h-6 w-6 place-items-center rounded-full text-txt/90 hover:text-txt hover:bg-surface2 active:scale-90 transition-all focus:outline-none cursor-pointer"
           >
             <ArrowUp className="h-3.5 w-3.5" />
             <span className="sr-only">Nudge up</span>
@@ -5339,7 +5339,7 @@ export default function Canvas() {
             aria-label={`Nudge down (${nudgeIncrement}px)`}
             title={`Nudge down (${nudgeIncrement}px)`}
             onClick={() => handleNudge(0, 1)}
-            className="grid h-6 w-6 place-items-center rounded-full text-white/90 hover:text-white hover:bg-white/20 active:scale-90 transition-all focus:outline-none"
+            className="grid h-6 w-6 place-items-center rounded-full text-txt/90 hover:text-txt hover:bg-surface2 active:scale-90 transition-all focus:outline-none cursor-pointer"
           >
             <ArrowDown className="h-3.5 w-3.5" />
             <span className="sr-only">Nudge down</span>
@@ -5358,7 +5358,7 @@ export default function Canvas() {
               setCustomNudgeInput(String(nudgeIncrement))
               setEditingNudgeIncrement((prev) => !prev)
             }}
-            className="flex h-9 min-w-[36px] px-2 items-center justify-center rounded-full bg-black/60 text-[11px] font-semibold text-white backdrop-blur-md border border-white/10 shadow-lg hover:bg-white/20 hover:text-white active:scale-90 transition-all focus:outline-none tabular-nums whitespace-nowrap"
+            className="flex h-9 min-w-[36px] px-2 items-center justify-center rounded-full bg-surface/85 text-[11px] font-semibold text-txt backdrop-blur-md border border-line shadow-lg hover:bg-surface2 hover:text-txt active:scale-90 transition-all focus:outline-none tabular-nums whitespace-nowrap cursor-pointer"
           >
             {nudgeIncrement}px
           </button>
@@ -5367,11 +5367,11 @@ export default function Canvas() {
             <div
               data-testid="nudge-increment-popover"
               id="nudge-increment-popover"
-              className="absolute bottom-full left-0 mb-2 flex flex-col gap-1.5 rounded-2xl border border-white/10 bg-black/85 p-2.5 shadow-2xl backdrop-blur-lg text-white z-50 min-w-[140px]"
+              className="absolute bottom-full left-0 mb-2 flex flex-col gap-1.5 rounded-2xl border border-line bg-surface/95 p-2.5 shadow-2xl backdrop-blur-lg text-txt z-50 min-w-[140px]"
               onPointerDown={(e) => e.stopPropagation()}
               onClick={(e) => e.stopPropagation()}
             >
-              <div className="text-[10px] font-medium text-white/60 px-1 uppercase tracking-wider">
+              <div className="text-[10px] font-medium text-txt3 px-1 uppercase tracking-wider">
                 Nudge Step
               </div>
               <div className="grid grid-cols-4 gap-1">
@@ -5385,17 +5385,17 @@ export default function Canvas() {
                       setCustomNudgeInput(String(step))
                       setEditingNudgeIncrement(false)
                     }}
-                    className={`h-7 rounded-lg text-xs font-semibold transition-all ${
+                    className={`h-7 rounded-lg text-xs font-semibold transition-all cursor-pointer ${
                       nudgeIncrement === step
-                        ? 'bg-white text-black shadow'
-                        : 'bg-white/10 text-white/90 hover:bg-white/20 hover:text-white'
+                        ? 'bg-accent text-white shadow-xs'
+                        : 'bg-surface2 text-txt hover:bg-surface2/80'
                     }`}
                   >
                     {step}
                   </button>
                 ))}
               </div>
-              <div className="flex items-center gap-1.5 pt-1 border-t border-white/10">
+              <div className="flex items-center gap-1.5 pt-1 border-t border-line">
                 <input
                   data-testid="nudge-custom-input"
                   id="nudge-custom-input"
@@ -5416,7 +5416,7 @@ export default function Canvas() {
                       setEditingNudgeIncrement(false)
                     }
                   }}
-                  className="h-7 w-16 rounded-lg border border-white/20 bg-white/10 px-2 text-xs font-medium text-white placeholder-white/40 focus:border-white/50 focus:outline-none tabular-nums"
+                  className="h-7 w-16 rounded-lg border border-line bg-surface2 px-2 text-xs font-medium text-txt placeholder:text-txt3 focus:border-accent focus:outline-none tabular-nums"
                   placeholder="px"
                 />
                 <button
@@ -5430,7 +5430,7 @@ export default function Canvas() {
                     }
                     setEditingNudgeIncrement(false)
                   }}
-                  className="flex-1 h-7 rounded-lg bg-white/20 hover:bg-white/30 text-xs font-medium text-white transition-colors flex items-center justify-center"
+                  className="flex-1 h-7 rounded-lg bg-surface2 hover:bg-line text-xs font-medium text-txt transition-colors flex items-center justify-center cursor-pointer"
                 >
                   Set
                 </button>
@@ -5444,7 +5444,7 @@ export default function Canvas() {
         <button
           data-testid="reset-zoom"
           onClick={() => setView({ scale: 1, x: 0, y: 0 })}
-          className="absolute bottom-3 right-3 z-40 rounded-full bg-black/60 px-3 py-1.5 text-xs font-semibold text-white backdrop-blur-md active:scale-95"
+          className="absolute bottom-3 right-3 z-40 rounded-full bg-surface/85 px-3 py-1.5 text-xs font-semibold text-txt backdrop-blur-md border border-line shadow-lg active:scale-95 cursor-pointer"
         >
           {Math.round(view.scale * 100)}% · Reset
         </button>
@@ -5452,7 +5452,7 @@ export default function Canvas() {
 
       {project.layers.length === 0 && (
         <div className="pointer-events-none absolute inset-0 flex items-center justify-center">
-          <p className="rounded-full bg-black/50 px-4 py-2 text-sm text-white/70">
+          <p className="rounded-full bg-surface/80 border border-line px-4 py-2 text-sm text-txt2 backdrop-blur-md shadow-md">
             Tap a tool below to add elements
           </p>
         </div>

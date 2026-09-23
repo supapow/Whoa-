@@ -8,6 +8,7 @@ import Timeline from '#/components/editor/Timeline'
 import ToolSheet, { VectorFloatingPanel, TextFloatingPanel } from '#/components/editor/Panels'
 import ExportSheet from '#/components/editor/ExportSheet'
 import ColorLoupe from '#/components/editor/ColorLoupe'
+import SettingsModal from '#/components/SettingsModal'
 
 export default function Editor({ project, onExit }: { project: Project; onExit: () => void }) {
   return (
@@ -19,6 +20,7 @@ export default function Editor({ project, onExit }: { project: Project; onExit: 
 
 function EditorInner({ onExit }: { onExit: () => void }) {
   const [exportOpen, setExportOpen] = useState(false)
+  const [settingsOpen, setSettingsOpen] = useState(false)
   const { playing, time, setTime, project, undo, redo, canUndo, canRedo } = useEditor()
   const raf = useRef(0)
   const last = useRef(0)
@@ -72,7 +74,7 @@ function EditorInner({ onExit }: { onExit: () => void }) {
   }, [undo, redo])
 
   return (
-    <div className="relative flex h-full w-full flex-col overflow-hidden bg-bg select-none">
+    <div className="relative flex h-full w-full flex-col overflow-hidden bg-bg text-txt select-none">
       {/* Floating Back Button in top-left corner */}
       <button
         type="button"
@@ -82,7 +84,7 @@ function EditorInner({ onExit }: { onExit: () => void }) {
         id="editor-back-btn"
         aria-label="Back"
         title="Back"
-        className="absolute top-3 left-3 z-40 grid h-9 w-9 place-items-center rounded-full bg-black/60 text-white backdrop-blur-md border border-white/10 shadow-lg hover:bg-black/80 hover:text-white active:scale-90 transition-all focus:outline-none"
+        className="absolute top-3 left-3 z-40 grid h-9 w-9 place-items-center rounded-full bg-surface/85 text-txt backdrop-blur-md border border-line shadow-lg hover:bg-surface2 active:scale-90 transition-all focus:outline-none cursor-pointer"
       >
         <ChevronLeft className="h-5 w-5" />
       </button>
@@ -104,7 +106,7 @@ function EditorInner({ onExit }: { onExit: () => void }) {
           id="undo-btn"
           aria-label="Undo"
           title="Undo (Ctrl+Z)"
-          className="grid h-9 w-9 place-items-center rounded-full bg-black/60 text-white backdrop-blur-md border border-white/10 shadow-lg hover:bg-white/20 hover:text-white active:scale-90 transition-all focus:outline-none disabled:pointer-events-none disabled:opacity-30"
+          className="grid h-9 w-9 place-items-center rounded-full bg-surface/85 text-txt backdrop-blur-md border border-line shadow-lg hover:bg-surface2 active:scale-90 transition-all focus:outline-none disabled:pointer-events-none disabled:opacity-30 cursor-pointer"
         >
           <Undo2 className="h-4 w-4" />
         </button>
@@ -118,23 +120,24 @@ function EditorInner({ onExit }: { onExit: () => void }) {
           id="redo-btn"
           aria-label="Redo"
           title="Redo (Ctrl+Shift+Z)"
-          className="grid h-9 w-9 place-items-center rounded-full bg-black/60 text-white backdrop-blur-md border border-white/10 shadow-lg hover:bg-white/20 hover:text-white active:scale-90 transition-all focus:outline-none disabled:pointer-events-none disabled:opacity-30"
+          className="grid h-9 w-9 place-items-center rounded-full bg-surface/85 text-txt backdrop-blur-md border border-line shadow-lg hover:bg-surface2 active:scale-90 transition-all focus:outline-none disabled:pointer-events-none disabled:opacity-30 cursor-pointer"
         >
           <Redo2 className="h-4 w-4" />
         </button>
 
-        {/* User Avatar */}
-        <div
+        {/* User Avatar - opens Settings menu */}
+        <button
+          type="button"
+          onClick={() => setSettingsOpen(true)}
           data-testid="user-avatar"
           id="user-avatar"
           role="button"
-          tabIndex={0}
-          aria-label="User avatar"
-          title="User Profile"
-          className="grid h-9 w-9 place-items-center rounded-full bg-linear-to-tr from-accent to-purple-500 text-white backdrop-blur-md border border-white/20 shadow-lg ring-1 ring-white/20 font-bold text-xs select-none transition-transform active:scale-95 cursor-pointer"
+          aria-label="User avatar and settings"
+          title="Settings & Appearance"
+          className="grid h-9 w-9 place-items-center rounded-full bg-linear-to-tr from-accent to-purple-500 text-white backdrop-blur-md border border-white/20 shadow-lg ring-1 ring-white/20 font-bold text-xs select-none transition-transform active:scale-95 cursor-pointer focus:outline-none"
         >
-          <User className="h-4 w-4" />
-        </div>
+          <User className="h-4.5 w-4.5" />
+        </button>
       </div>
 
       <div className="relative min-h-0 flex flex-1">
@@ -147,6 +150,7 @@ function EditorInner({ onExit }: { onExit: () => void }) {
       <ToolSheet />
       <ColorLoupe />
       {exportOpen && <ExportSheet onClose={() => setExportOpen(false)} />}
+      <SettingsModal isOpen={settingsOpen} onClose={() => setSettingsOpen(false)} />
     </div>
   )
 }

@@ -1,9 +1,18 @@
 import { useState, useCallback, useEffect } from 'react'
 import type { Project } from '#/types'
+import { ThemeProvider } from '#/store/theme'
 import Home from '#/screens/Home'
 import Editor from '#/screens/Editor'
 
 export default function App() {
+  return (
+    <ThemeProvider>
+      <AppInner />
+    </ThemeProvider>
+  )
+}
+
+function AppInner() {
   const [project, setProject] = useState<Project | null>(null)
 
   const open = useCallback((p: Project) => setProject(p), [])
@@ -24,9 +33,9 @@ export default function App() {
   }, [])
 
   return (
-    <div className="flex h-[100dvh] min-h-[100dvh] w-full items-stretch justify-center overflow-hidden bg-black sm:py-4">
+    <div className="flex h-[100dvh] min-h-[100dvh] w-full items-stretch justify-center overflow-hidden bg-[var(--color-outer-bg,#000000)] sm:py-4 transition-colors duration-200">
       {/* Mobile device frame — mobile-first, centered on larger screens */}
-      <div className="relative h-[100dvh] min-h-0 w-full max-w-[440px] overflow-hidden bg-bg text-txt shadow-2xl sm:h-[900px] sm:max-h-full sm:rounded-[2.2rem] sm:ring-1 sm:ring-white/10">
+      <div className="relative h-[100dvh] min-h-0 w-full max-w-[440px] overflow-hidden bg-bg text-txt shadow-2xl sm:h-[900px] sm:max-h-full sm:rounded-[2.2rem] sm:ring-1 sm:ring-line transition-colors duration-200">
         {project ? (
           <Editor key={project.id} project={project} onExit={close} />
         ) : (

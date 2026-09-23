@@ -33,8 +33,8 @@ export default function ExportSheet({ onClose }: { onClose: () => void }) {
       <div className="absolute inset-0 bg-black/60 animate-fade" onClick={onClose} />
       <div className="animate-sheet relative rounded-t-3xl border-t border-line bg-surface pb-8">
         <div className="flex items-center justify-between px-5 pt-4 pb-3">
-          <h3 className="text-xl">Export</h3>
-          <button onClick={onClose} data-testid="export-close" className="grid h-8 w-8 place-items-center rounded-full bg-surface2 text-txt2">
+          <h3 className="text-xl font-bold text-txt">Export</h3>
+          <button onClick={onClose} data-testid="export-close" className="grid h-8 w-8 place-items-center rounded-full bg-surface2 text-txt2 hover:text-txt transition-colors cursor-pointer">
             <X className="h-4 w-4" />
           </button>
         </div>
@@ -45,7 +45,7 @@ export default function ExportSheet({ onClose }: { onClose: () => void }) {
               <span className="rounded bg-black/40 px-1.5 py-0.5 text-[10px] text-white/90">{project.preset.ratio}</span>
             </div>
             <div>
-              <p className="font-bold">{project.name}</p>
+              <p className="font-bold text-txt">{project.name}</p>
               <p className="text-sm text-txt2">{project.preset.label} · {project.preset.w}×{project.preset.h}</p>
               <p className="text-xs text-txt3 capitalize">{mode} banner</p>
             </div>
@@ -56,9 +56,9 @@ export default function ExportSheet({ onClose }: { onClose: () => void }) {
               <div className="grid h-14 w-14 place-items-center rounded-full bg-track-image/20">
                 <Check className="h-7 w-7 text-[var(--color-track-image)]" strokeWidth={3} />
               </div>
-              <p className="font-bold">Export ready</p>
+              <p className="font-bold text-txt">Export ready</p>
               <p className="text-center text-sm text-txt2">Your {fmt} banner has been rendered.<br /><span className="text-txt3">(Saving is mocked — hook up in the backend phase.)</span></p>
-              <button onClick={onClose} data-testid="export-done" className="mt-2 w-full rounded-xl bg-surface2 py-3 font-semibold">Done</button>
+              <button onClick={onClose} data-testid="export-done" className="mt-2 w-full rounded-xl bg-surface2 py-3 font-semibold text-txt hover:bg-surface2/80 transition-colors cursor-pointer">Done</button>
             </div>
           ) : (
             <>
@@ -66,7 +66,7 @@ export default function ExportSheet({ onClose }: { onClose: () => void }) {
               <div className="mb-5 flex gap-2">
                 {formats.map((f) => (
                   <button key={f} data-testid={`fmt-${f}`} onClick={() => setFmt(f)}
-                    className={`flex-1 rounded-xl border py-3 text-sm font-bold ${fmt === f ? 'border-accent bg-accent/10 text-white' : 'border-line bg-surface2 text-txt2'}`}>{f}</button>
+                    className={`flex-1 rounded-xl border py-3 text-sm font-bold transition-all cursor-pointer ${fmt === f ? 'border-accent bg-accent text-white shadow-xs' : 'border-line bg-surface2 text-txt2 hover:text-txt'}`}>{f}</button>
                 ))}
               </div>
 
@@ -74,7 +74,7 @@ export default function ExportSheet({ onClose }: { onClose: () => void }) {
               <div className="mb-6 flex gap-2">
                 {['SD', 'HD', '4K'].map((q) => (
                   <button key={q} data-testid={`q-${q}`} onClick={() => setQuality(q)}
-                    className={`flex-1 rounded-xl border py-3 text-sm font-bold ${quality === q ? 'border-accent bg-accent/10 text-white' : 'border-line bg-surface2 text-txt2'}`}>{q}</button>
+                    className={`flex-1 rounded-xl border py-3 text-sm font-bold transition-all cursor-pointer ${quality === q ? 'border-accent bg-accent text-white shadow-xs' : 'border-line bg-surface2 text-txt2 hover:text-txt'}`}>{q}</button>
                 ))}
               </div>
 

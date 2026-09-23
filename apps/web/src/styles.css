@@ -29,6 +29,42 @@
   --color-track-sticker: #EC4899;
 }
 
+:root {
+  --color-bg: #0A0A0A;
+  --color-surface: #111111;
+  --color-surface2: #18181A;
+  --color-timeline: #151517;
+  --color-toolbar: #18181A;
+  --color-line: rgba(255, 255, 255, 0.10);
+  --color-line-strong: rgba(255, 255, 255, 0.18);
+  --color-txt: #FFFFFF;
+  --color-txt2: #A1A1AA;
+  --color-txt3: #71717A;
+  --color-checker-bg: #0d0d0d;
+  --color-checker-pat: #1a1a1a;
+  --color-outer-bg: #000000;
+  color-scheme: dark;
+}
+
+:root[data-theme="light"],
+html.light,
+.light {
+  --color-bg: #F5F6F8;
+  --color-surface: #FFFFFF;
+  --color-surface2: #ECEEF2;
+  --color-timeline: #F0F2F6;
+  --color-toolbar: #FFFFFF;
+  --color-line: rgba(0, 0, 0, 0.08);
+  --color-line-strong: rgba(0, 0, 0, 0.16);
+  --color-txt: #0F172A;
+  --color-txt2: #475569;
+  --color-txt3: #94A3B8;
+  --color-checker-bg: #E2E4E9;
+  --color-checker-pat: #F1F3F7;
+  --color-outer-bg: #E4E6EB;
+  color-scheme: light;
+}
+
 @layer base {
   html,
   body,
@@ -66,12 +102,12 @@
   .no-scrollbar { scrollbar-width: none; -ms-overflow-style: none; }
 
   .checkerboard {
-    background-color: #0d0d0d;
+    background-color: var(--color-checker-bg, #0d0d0d);
     background-image:
-      linear-gradient(45deg, #1a1a1a 25%, transparent 25%),
-      linear-gradient(-45deg, #1a1a1a 25%, transparent 25%),
-      linear-gradient(45deg, transparent 75%, #1a1a1a 75%),
-      linear-gradient(-45deg, transparent 75%, #1a1a1a 75%);
+      linear-gradient(45deg, var(--color-checker-pat, #1a1a1a) 25%, transparent 25%),
+      linear-gradient(-45deg, var(--color-checker-pat, #1a1a1a) 25%, transparent 25%),
+      linear-gradient(45deg, transparent 75%, var(--color-checker-pat, #1a1a1a) 75%),
+      linear-gradient(-45deg, transparent 75%, var(--color-checker-pat, #1a1a1a) 75%);
     background-size: 22px 22px;
     background-position: 0 0, 0 11px, 11px -11px, -11px 0;
   }

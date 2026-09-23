@@ -271,13 +271,14 @@ export default function Timeline() {
       aria-hidden={!timelineOpen}
     >
       {/* controls header */}
-      <div className="flex h-11 items-center gap-2 px-3 border-b border-white/[0.06] bg-timeline">
+      <div className="flex h-11 items-center gap-2 px-3 border-b border-line bg-timeline">
         <button
           onClick={() => setPlaying(!playing)}
           data-testid="play-btn"
-          className="grid h-8 w-8 place-items-center rounded-full bg-white text-black transition-transform active:scale-90"
+          aria-label={playing ? 'Pause' : 'Play'}
+          className="grid h-8 w-8 place-items-center rounded-full bg-txt text-bg transition-transform active:scale-90 cursor-pointer shadow-xs"
         >
-          {playing ? <Pause className="h-4 w-4" fill="black" /> : <Play className="h-4 w-4" fill="black" />}
+          {playing ? <Pause className="h-4 w-4" fill="currentColor" /> : <Play className="h-4 w-4" fill="currentColor" />}
         </button>
         <span className="font-mono text-xs tabular-nums text-txt2" data-testid="time-display">
           {fmt(time)} <span className="text-txt3">/ {fmt(duration)}</span>
@@ -299,7 +300,7 @@ export default function Timeline() {
                     data-testid="keyframe-prev-btn"
                     disabled={!prevKf}
                     onClick={() => prevKf && setTime(prevKf.time)}
-                    className="grid h-8 w-6 place-items-center rounded-lg text-txt2 hover:text-white disabled:opacity-30 disabled:pointer-events-none transition-colors"
+                    className="grid h-8 w-6 place-items-center rounded-lg text-txt2 hover:text-txt disabled:opacity-30 disabled:pointer-events-none transition-colors cursor-pointer"
                     title={prevKf ? `Jump to previous keyframe (${fmt(prevKf.time)})` : 'No previous keyframe'}
                   >
                     <ChevronLeft className="h-3.5 w-3.5" />
@@ -725,8 +726,8 @@ function TimelineRow({
 
   return (
     <div
-      className={`group/row flex h-11 items-center border-b border-white/[0.04] transition-colors ${
-        selected ? 'bg-white/[0.06]' : 'hover:bg-white/[0.02]'
+      className={`group/row flex h-11 items-center border-b border-line/40 transition-colors ${
+        selected ? 'bg-accent/15' : 'hover:bg-line/20'
       }`}
       style={{ touchAction: 'pan-x pan-y' }}
     >
@@ -744,7 +745,7 @@ function TimelineRow({
               e.stopPropagation()
               onToggleCollapse()
             }}
-            className="flex h-4 w-4 shrink-0 items-center justify-center rounded text-txt3 hover:bg-white/10 hover:text-white"
+            className="flex h-4 w-4 shrink-0 items-center justify-center rounded text-txt3 hover:bg-surface2 hover:text-txt cursor-pointer"
             title={collapsed ? 'Expand group' : 'Collapse group'}
           >
             {collapsed ? <ChevronRight className="h-3 w-3" /> : <ChevronDown className="h-3 w-3" />}

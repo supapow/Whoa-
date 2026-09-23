@@ -422,7 +422,7 @@ export default function ColorPicker({ color, onChange, onClose, className = '' }
               data-testid="color-picker-eyedropper-btn"
               onClick={handleEyeDropper}
               title="Sample screen color with Eyedropper"
-              className="grid h-8 w-8 place-items-center rounded-xl bg-surface2 hover:bg-surface2/80 text-txt2 hover:text-white transition-colors cursor-pointer"
+              className="grid h-8 w-8 place-items-center rounded-xl bg-surface2 hover:bg-surface2/80 text-txt2 hover:text-txt transition-colors cursor-pointer"
             >
               <Pipette className="h-4 w-4" />
             </button>
@@ -434,7 +434,7 @@ export default function ColorPicker({ color, onChange, onClose, className = '' }
             data-testid="color-picker-native-btn"
             onClick={() => nativeColorInputRef.current?.click()}
             title="System color picker"
-            className="grid h-8 w-8 place-items-center rounded-xl bg-surface2 hover:bg-surface2/80 text-txt2 hover:text-white transition-colors cursor-pointer"
+            className="grid h-8 w-8 place-items-center rounded-xl bg-surface2 hover:bg-surface2/80 text-txt2 hover:text-txt transition-colors cursor-pointer"
           >
             <Sliders className="h-3.5 w-3.5" />
             <input
@@ -477,7 +477,7 @@ export default function ColorPicker({ color, onChange, onClose, className = '' }
             data-testid="color-picker-copy-btn"
             onClick={handleCopyHex}
             title={copied ? 'Copied!' : 'Copy Hex'}
-            className="p-1 text-txt3 hover:text-white transition-colors cursor-pointer"
+            className="p-1 text-txt3 hover:text-txt transition-colors cursor-pointer"
           >
             {copied ? <Check className="h-3 w-3 text-emerald-400" /> : <Copy className="h-3 w-3" />}
           </button>
@@ -597,7 +597,7 @@ export default function ColorPicker({ color, onChange, onClose, className = '' }
             id="color-picker-done-btn"
             data-testid="color-picker-done-btn"
             onClick={onClose}
-            className="rounded-lg bg-surface2 hover:bg-surface2/80 px-3 py-1 text-xs font-semibold text-txt2 hover:text-white transition-colors cursor-pointer"
+            className="rounded-lg bg-surface2 hover:bg-surface2/80 px-3 py-1 text-xs font-semibold text-txt2 hover:text-txt transition-colors cursor-pointer"
           >
             Done
           </button>

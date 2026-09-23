@@ -184,7 +184,7 @@ export default function GoogleFontsSearchView({
             type="button"
             onClick={onBack}
             data-testid="google-search-back-btn"
-            className="flex items-center gap-1 rounded-xl bg-surface2 px-2.5 py-2 text-xs font-semibold text-txt2 hover:text-white transition-colors cursor-pointer border border-line/60 shrink-0"
+            className="flex items-center gap-1 rounded-xl bg-surface2 px-2.5 py-2 text-xs font-semibold text-txt2 hover:text-txt transition-colors cursor-pointer border border-line/60 shrink-0"
             title="Back to Font list"
           >
             <ChevronLeft className="h-4 w-4" />
@@ -199,13 +199,13 @@ export default function GoogleFontsSearchView({
               value={searchQuery}
               onChange={(e) => setSearchQuery(e.target.value)}
               placeholder="Search 130+ Google fonts or type any font name..."
-              className="w-full rounded-xl bg-surface2/90 pl-9 pr-8 py-2 text-xs text-white placeholder:text-txt3 outline-none focus:ring-1 focus:ring-accent border border-line/60"
+              className="w-full rounded-xl bg-surface2/90 pl-9 pr-8 py-2 text-xs text-txt placeholder:text-txt3 outline-none focus:ring-1 focus:ring-accent border border-line/60"
             />
             {searchQuery && (
               <button
                 type="button"
                 onClick={() => setSearchQuery('')}
-                className="absolute right-2.5 top-1/2 -translate-y-1/2 text-txt3 hover:text-white text-xs"
+                className="absolute right-2.5 top-1/2 -translate-y-1/2 text-txt3 hover:text-txt text-xs"
               >
                 ×
               </button>
@@ -219,7 +219,7 @@ export default function GoogleFontsSearchView({
             className={`flex items-center gap-1 rounded-xl px-2.5 py-2 text-xs font-medium transition-colors cursor-pointer border shrink-0 ${
               showPasteBox
                 ? 'bg-accent text-white border-accent'
-                : 'bg-surface2 text-txt2 hover:text-white border-line/60'
+                : 'bg-surface2 text-txt2 hover:text-txt border-line/60'
             }`}
           >
             <Sparkles className="h-3.5 w-3.5 text-accent" />
@@ -249,7 +249,7 @@ export default function GoogleFontsSearchView({
                 onChange={(e) => setPasteInput(e.target.value)}
                 onKeyDown={(e) => e.key === 'Enter' && handleImportPasted()}
                 placeholder="e.g. <link href='...'>, fonts.google.com/..., or Outfit"
-                className="flex-1 rounded-lg bg-surface px-2.5 py-1.5 text-xs text-white placeholder:text-txt3 outline-none border border-line"
+                className="flex-1 rounded-lg bg-surface px-2.5 py-1.5 text-xs text-txt placeholder:text-txt3 outline-none border border-line"
               />
               <button
                 type="button"
@@ -275,12 +275,12 @@ export default function GoogleFontsSearchView({
                 onBlur={() => setIsEditingSample(false)}
                 onKeyDown={(e) => e.key === 'Enter' && setIsEditingSample(false)}
                 autoFocus
-                className="flex-1 bg-surface px-2 py-0.5 rounded text-white text-[11px] outline-none border border-accent"
+                className="flex-1 bg-surface px-2 py-0.5 rounded text-txt text-[11px] outline-none border border-accent"
               />
             ) : (
               <span
                 onClick={() => setIsEditingSample(true)}
-                className="truncate text-white font-medium cursor-pointer hover:underline"
+                className="truncate text-txt font-medium cursor-pointer hover:underline"
                 title="Click to edit sample text"
               >
                 "{sampleText}"
@@ -303,7 +303,7 @@ export default function GoogleFontsSearchView({
             <button
               type="button"
               onClick={() => setIsEditingSample((v) => !v)}
-              className="text-[10px] text-txt3 hover:text-white px-1 py-0.5 rounded bg-surface/60 cursor-pointer"
+              className="text-[10px] text-txt3 hover:text-txt px-1 py-0.5 rounded bg-surface/60 cursor-pointer"
             >
               {isEditingSample ? 'Done' : 'Edit'}
             </button>
@@ -398,7 +398,7 @@ export default function GoogleFontsSearchView({
               >
                 {/* Top header row */}
                 <div className="flex items-center justify-between gap-1.5 mb-1.5">
-                  <span className="text-xs font-bold text-white group-hover:text-accent transition-colors truncate">
+                  <span className="text-xs font-bold text-txt group-hover:text-accent transition-colors truncate">
                     {f.family}
                   </span>
                   <div className="flex items-center gap-1.5 shrink-0">
@@ -441,7 +441,7 @@ export default function GoogleFontsSearchView({
                         className={`rounded px-1.5 py-0.5 text-[9px] font-medium transition-colors cursor-pointer ${
                           isWeightActive
                             ? 'bg-accent text-white font-bold shadow-sm'
-                            : 'bg-surface/80 text-txt3 hover:text-white hover:bg-surface border border-line/40'
+                            : 'bg-surface/80 text-txt3 hover:text-txt hover:bg-surface border border-line/40'
                         }`}
                       >
                         {w}
