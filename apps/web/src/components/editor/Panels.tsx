@@ -3,11 +3,12 @@ import {
   X, Upload, Type as TypeIcon, Folder, FolderPlus,
   Component as ComponentIcon, ChevronRight, ChevronLeft, ChevronDown, Plus, Trash2,
   Lock, Unlock, CircleDot, Diamond, Droplet, PenTool, Spline, Magnet, Check, CheckSquare,
-  Wand2, Globe, FileUp, Pipette, Search,
+  Wand2, Globe, FileUp, Pipette, Search, Sparkles, Contrast,
 } from 'lucide-react'
 import ColorPicker from '#/components/editor/ColorPicker'
+import { DEFAULT_DROP_SHADOW, DEFAULT_INNER_SHADOW } from '#/lib/shadows'
 import { useEditor } from '#/store/editor'
-import type { ShapeKind, Layer, VectorPoint } from '#/types'
+import type { ShapeKind, Layer, ShadowEffect, VectorPoint } from '#/types'
 import { hasKeyframeAt, getAdjacentKeyframes, interpolateKeyframes } from '#/lib/keyframes'
 import {
   PALETTE, GRADIENTS, BG_IMAGES, STOCK_IMAGES, STICKERS, SHAPES,
@@ -30,6 +31,7 @@ const TITLES: Record<string, string> = {
   components: 'Components Library',
   background: 'Background', layers: 'Layers', font: 'Font', color: 'Color',
   blur: 'Blur & Effects',
+  effects: 'Effects',
   style: 'Text Style', align: 'Alignment', shape: 'Shape', radius: 'Corner Radius',
   animate: 'Animation', mask: 'Mask & Cut', crop: 'Crop',
   vector: 'Vector Path & Béziers',
@@ -96,7 +98,7 @@ function PanelBody({
   setFontSubView?: (v: 'standard' | 'googleSearch') => void
 }) {
   const { selected, updateLayer } = useEditor()
-  const needsLayer = ['font', 'color', 'blur', 'style', 'align', 'shape', 'radius', 'animate', 'mask', 'crop', 'vector', 'convertText']
+  const needsLayer = ['font', 'color', 'blur', 'effects', 'style', 'align', 'shape', 'radius', 'animate', 'mask', 'crop', 'vector', 'convertText']
   if (needsLayer.includes(tool) && !selected) {
     return <MockPanel text="Select a layer on the canvas first." />
   }
@@ -132,6 +134,7 @@ function PanelBody({
     }
     case 'color': return <ColorPanel />
     case 'blur': return <BlurPanel />
+    case 'effects': return <EffectsPanel />
     case 'style': return <StylePanel />
     case 'convertText': return <ConvertTextPanel />
     case 'align': return <AlignPanel />
@@ -1619,6 +1622,242 @@ function BlurPanel() {
   )
 }
 
+type EffectPreset = { label: string; desc: string; values: ShadowEffect | null }
+
+/**
+ * One shadow effect's controls: status header with enable toggle + reset, then (when on)
+ * offset/blur/spread/opacity sliders, a swatch row with an expandable ColorPicker, and quick
+ * presets. Both effects in the panel are rendered through this so they can't drift apart.
+ */
+function EffectControls({
+  title,
+  tid,
+  icon,
+  enabled,
+  value,
+  defaults,
+  presets,
+  onToggle,
+  onDisable,
+  onReset,
+  onChange,
+}: {
+  title: string
+  tid: string
+  icon: React.ReactNode
+  enabled: boolean
+  value: ShadowEffect | undefined
+  defaults: ShadowEffect
+  presets: EffectPreset[]
+  onToggle: () => void
+  onDisable: () => void
+  onReset: () => void
+  onChange: (next: ShadowEffect) => void
+}) {
+  const [pickerOpen, setPickerOpen] = useState(false)
+  // control testids share the container's `effect-{tid}` prefix so they read as one family
+  const eid = `effect-${tid}`
+  // when off, the sliders/presets are hidden anyway — showing default values costs nothing
+  const v = value ?? defaults
+  const set = (patch: Partial<ShadowEffect>) => onChange({ ...v, ...patch })
+
+  const matches = (p: EffectPreset) =>
+    p.values
+      ? enabled &&
+        v.x === p.values.x &&
+        v.y === p.values.y &&
+        v.blur === p.values.blur &&
+        v.spread === p.values.spread &&
+        v.color === p.values.color &&
+        Number(v.opacity.toFixed(3)) === p.values.opacity
+      : !enabled
+
+  return (
+    <div className="rounded-xl bg-surface2 px-3.5 py-3" data-testid={`effect-${tid}`}>
+      {/* Status / Reset / Enable */}
+      <div className="flex items-center justify-between gap-3">
+        <div className="flex items-center gap-2.5">
+          <div className={`grid h-8 w-8 shrink-0 place-items-center rounded-lg ${enabled ? 'bg-accent/15 text-accent' : 'bg-surface text-txt3'}`}>
+            {icon}
+          </div>
+          <div>
+            <div className="text-xs font-semibold text-txt">{title}</div>
+            <div className="text-[11px] text-txt3">
+              {enabled ? `X ${v.x} · Y ${v.y} · ${Math.round(v.opacity * 100)}%` : 'Off'}
+            </div>
+          </div>
+        </div>
+        <div className="flex shrink-0 items-center gap-3">
+          {enabled && (
+            <button
+              type="button"
+              data-testid={`${eid}-reset`}
+              onClick={onReset}
+              className="cursor-pointer text-xs font-medium text-txt3 transition-colors hover:text-danger active:scale-95"
+            >
+              Reset
+            </button>
+          )}
+          <button
+            type="button"
+            role="switch"
+            aria-checked={enabled}
+            aria-label={`${title} on/off`}
+            data-testid={`${eid}-toggle`}
+            onClick={onToggle}
+            className={`relative h-6 w-11 shrink-0 cursor-pointer rounded-full transition-colors ${enabled ? 'bg-accent' : 'border border-line bg-surface'}`}
+          >
+            <span className={`absolute top-0.5 h-5 w-5 rounded-full bg-white shadow transition-all ${enabled ? 'left-[22px]' : 'left-0.5'}`} />
+          </button>
+        </div>
+      </div>
+
+      {enabled && (
+        <div className="mt-4">
+          <Slider label="Offset X" tid={`${eid}-x`} value={v.x} min={-100} max={100} suffix="px" onChange={(n: number) => set({ x: n })} />
+          <Slider label="Offset Y" tid={`${eid}-y`} value={v.y} min={-100} max={100} suffix="px" onChange={(n: number) => set({ y: n })} />
+          <Slider label="Blur" tid={`${eid}-blur`} value={v.blur} min={0} max={80} suffix="px" onChange={(n: number) => set({ blur: n })} />
+          <Slider label="Spread" tid={`${eid}-spread`} value={v.spread} min={-20} max={60} suffix="px" onChange={(n: number) => set({ spread: n })} />
+          <Slider label="Opacity" tid={`${eid}-opacity`} value={Math.round(v.opacity * 100)} min={0} max={100} suffix="%" onChange={(n: number) => set({ opacity: n / 100 })} />
+
+          {/* Color: swatch row + expandable picker */}
+          <div className="pb-1">
+            <div className="mb-2 flex items-center justify-between text-sm">
+              <span className="text-txt2">Color</span>
+              <button
+                type="button"
+                onClick={() => setPickerOpen((p) => !p)}
+                aria-expanded={pickerOpen}
+                aria-label="Manual hex & sliders"
+                className="flex cursor-pointer items-center gap-1.5 text-[11px] text-txt3 transition-colors hover:text-txt2"
+              >
+                <span className="h-3.5 w-3.5 rounded-full border border-line" style={{ background: v.color }} />
+                {v.color}
+                <ChevronDown className={`h-3.5 w-3.5 transition-transform ${pickerOpen ? 'rotate-180' : ''}`} />
+              </button>
+            </div>
+            <Grid cols={6}>
+              {PALETTE.map((c) => (
+                <button
+                  key={c}
+                  type="button"
+                  data-testid={`${eid}-color-${c}`}
+                  onClick={() => set({ color: c })}
+                  style={{ background: c }}
+                  className={`aspect-square cursor-pointer rounded-full border-2 transition-transform active:scale-90 ${
+                    v.color?.toLowerCase() === c.toLowerCase() ? 'border-accent ring-2 ring-accent/40' : 'border-line'
+                  }`}
+                />
+              ))}
+            </Grid>
+            {pickerOpen && (
+              <div className="mt-1 border-t border-line/60 pt-3">
+                <ColorPicker color={v.color} onChange={(hex: string) => set({ color: hex })} onClose={() => setPickerOpen(false)} />
+              </div>
+            )}
+          </div>
+        </div>
+      )}
+
+      {/* Quick Presets */}
+      <div className={enabled ? 'pt-3' : 'pt-4'}>
+        <div className="mb-2.5 text-xs font-medium text-txt2">Quick Presets</div>
+        <div className="grid grid-cols-2 gap-2">
+          {presets.map((p) => {
+            const isSelected = matches(p)
+            return (
+              <button
+                key={p.label}
+                type="button"
+                data-testid={`${eid}-preset-${p.label.toLowerCase()}`}
+                onClick={() => (p.values ? onChange({ ...p.values }) : onDisable())}
+                className={`flex cursor-pointer flex-col items-center justify-center rounded-xl border px-1 py-2 text-center transition-all active:scale-95 ${
+                  isSelected
+                    ? 'border-accent bg-accent/10 font-semibold text-accent shadow-xs'
+                    : 'border-line bg-surface2 text-txt hover:bg-surface2/80'
+                }`}
+              >
+                <span className="text-xs">{p.label}</span>
+                <span className="text-[10px] text-txt3">{p.desc}</span>
+              </button>
+            )
+          })}
+        </div>
+      </div>
+    </div>
+  )
+}
+
+function EffectsPanel() {
+  const { selected, selectedIds, updateLayers, updateLayer, time } = useEditor()
+  const l = selected!
+  // read interpolated values so keyframed effects show what the playhead says (both imports used)
+  const effective = l && l.keyframes && l.keyframes.length > 0 ? interpolateKeyframes(l, time) : l
+  const drop = effective?.dropShadow
+  const inner = effective?.innerShadow
+
+  // multi-select: one change applies to ALL selected layers (BlurPanel's `up`, not the
+  // single-select-only variants elsewhere in this file)
+  const up = (patch: Partial<Layer>) => {
+    if (selectedIds.length > 1) {
+      updateLayers(selectedIds, patch)
+    } else if (selected) {
+      updateLayer(selected.id, patch)
+    }
+  }
+
+  const dropPresets: EffectPreset[] = [
+    { label: 'Off', desc: 'none', values: null },
+    { label: 'Subtle', desc: '6px', values: { x: 0, y: 2, blur: 6, spread: 0, color: '#000000', opacity: 0.25 } },
+    { label: 'Soft', desc: '16px', values: { x: 0, y: 6, blur: 16, spread: 0, color: '#000000', opacity: 0.35 } },
+    { label: 'Deep', desc: '32px', values: { x: 0, y: 12, blur: 32, spread: 2, color: '#000000', opacity: 0.45 } },
+  ]
+
+  const innerPresets: EffectPreset[] = [
+    { label: 'Off', desc: 'none', values: null },
+    { label: 'Top', desc: '4px', values: { x: 0, y: -2, blur: 4, spread: 0, color: '#000000', opacity: 0.35 } },
+    { label: 'Inset', desc: '8px', values: { x: 0, y: 4, blur: 8, spread: 0, color: '#000000', opacity: 0.4 } },
+    { label: 'Carve', desc: 'tight', values: { x: 0, y: 2, blur: 2, spread: 3, color: '#000000', opacity: 0.5 } },
+  ]
+
+  return (
+    <div className="space-y-4 pb-6" data-testid="panel-effects">
+      <div className="px-0.5">
+        <p className="text-[11px] leading-relaxed text-txt3">
+          Shadows cast by this layer's shape. Effects stack — turn on both to use them together.
+        </p>
+      </div>
+
+      <EffectControls
+        title="Drop Shadow"
+        tid="drop"
+        icon={<Sparkles className="h-4 w-4" />}
+        enabled={Boolean(drop)}
+        value={drop}
+        defaults={DEFAULT_DROP_SHADOW}
+        presets={dropPresets}
+        onToggle={() => up({ dropShadow: drop ? undefined : { ...DEFAULT_DROP_SHADOW } })}
+        onDisable={() => up({ dropShadow: undefined })}
+        onReset={() => up({ dropShadow: { ...DEFAULT_DROP_SHADOW } })}
+        onChange={(next) => up({ dropShadow: next })}
+      />
+
+      <EffectControls
+        title="Inner Shadow"
+        tid="inner"
+        icon={<Contrast className="h-4 w-4" />}
+        enabled={Boolean(inner)}
+        value={inner}
+        defaults={DEFAULT_INNER_SHADOW}
+        presets={innerPresets}
+        onToggle={() => up({ innerShadow: inner ? undefined : { ...DEFAULT_INNER_SHADOW } })}
+        onDisable={() => up({ innerShadow: undefined })}
+        onReset={() => up({ innerShadow: { ...DEFAULT_INNER_SHADOW } })}
+        onChange={(next) => up({ innerShadow: next })}
+      />
+    </div>
+  )
+}
 
 function Slider({ label, value, min, max, step = 1, onChange, tid, suffix = '' }: any) {
   return (

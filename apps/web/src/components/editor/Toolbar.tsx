@@ -8,7 +8,7 @@ import {
   AlignHorizontalDistributeCenter, AlignVerticalDistributeCenter,
   Magnet, ChevronUp, ChevronDown, Lock, Unlock,
   Move, ArrowUpToLine, ArrowDownToLine, ArrowLeftToLine, ArrowRightToLine, Maximize2, Expand,
-  Droplet, PenTool, Download, Spline, Pipette,
+  Droplet, PenTool, Download, Spline, Pipette, Sparkles,
 } from 'lucide-react'
 import { useEditor, type AlignMode } from '#/store/editor'
 import { parseImagePosition } from '#/lib/imagePosition'
@@ -346,6 +346,12 @@ export default function Toolbar({ onExport }: { onExport?: () => void }) {
         icon: <Droplet className="h-4 w-4" />,
         active: Boolean(selected.blur && selected.blur > 0),
       },
+      {
+        key: 'effects',
+        label: 'Effects',
+        icon: <Sparkles className="h-4 w-4" />,
+        active: Boolean(selected.dropShadow || selected.innerShadow),
+      },
       { key: 'animate', label: 'Animate', icon: <Wand2 /> },
       { key: 'dup', label: 'Duplicate', icon: <Copy />, onClick: () => duplicate(selected.id, isMulti ? selectedIds : undefined) },
       { key: 'del', label: 'Delete', icon: <Trash2 />, onClick: () => (isMulti ? deleteLayers(selectedIds) : deleteLayer(selected.id)), danger: true },
@@ -487,9 +493,9 @@ export default function Toolbar({ onExport }: { onExport?: () => void }) {
       ]
     : alignOptions
 
-  const floatingActionKeys = new Set(['color', 'blur', 'lock-proportions', 'dup', 'del'])
+  const floatingActionKeys = new Set(['color', 'blur', 'effects', 'lock-proportions', 'dup', 'del'])
   const floatingItems = selected ? items.filter((it) => floatingActionKeys.has(it.key)) : []
-  const toolbarExcludeKeys = new Set(['color', 'lock-proportions', 'dup', 'del'])
+  const toolbarExcludeKeys = new Set(['color', 'effects', 'lock-proportions', 'dup', 'del'])
   const baseToolbarItems = selected ? items.filter((it) => !toolbarExcludeKeys.has(it.key)) : items
   const toolbarItems = onExport
     ? [...baseToolbarItems, { key: 'export', label: 'Export', icon: <Download />, onClick: onExport }]

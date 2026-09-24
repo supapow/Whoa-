@@ -1,5 +1,6 @@
 import type { Layer, Keyframe } from '#/types'
 import { cloneVectorPoints, interpolateVectorPoints, buildSvgPath } from './vector'
+import { lerpShadowEffect } from './shadows'
 
 function uid(): string {
   return Math.random().toString(36).slice(2, 8)
@@ -129,6 +130,8 @@ export function sampleLayerKeyframeState(layer: Layer, time: number, id?: string
     fill: layer.fill,
     radius: layer.radius,
     blur: layer.blur ?? 0,
+    dropShadow: layer.dropShadow ? { ...layer.dropShadow } : undefined,
+    innerShadow: layer.innerShadow ? { ...layer.innerShadow } : undefined,
     points: layer.points ? cloneVectorPoints(layer.points) : undefined,
   }
 }
@@ -193,6 +196,8 @@ export function convertAnimationToKeyframes(
     radius: layer.radius,
     fontSize: layer.fontSize,
     fontWeight: layer.fontWeight,
+    dropShadow: layer.dropShadow ? { ...layer.dropShadow } : undefined,
+    innerShadow: layer.innerShadow ? { ...layer.innerShadow } : undefined,
     points: layer.points ? cloneVectorPoints(layer.points) : undefined,
   }
 
@@ -401,6 +406,8 @@ export function interpolateKeyframes(layer: Layer, time: number): Layer {
       fill: k.fill ?? layer.fill,
       radius: k.radius ?? layer.radius,
       blur: k.blur ?? layer.blur,
+      dropShadow: k.dropShadow ?? layer.dropShadow,
+      innerShadow: k.innerShadow ?? layer.innerShadow,
       points: pts,
       pathData: (layer.type === 'path' && pts) ? buildSvgPath(pts, layer.closed !== false, k.w, k.h) : layer.pathData,
     }
@@ -413,6 +420,8 @@ export function interpolateKeyframes(layer: Layer, time: number): Layer {
   const hasFontSizeKeyframe = kfs.some((kf) => kf.fontSize !== undefined)
   const hasFontWeightKeyframe = kfs.some((kf) => kf.fontWeight !== undefined)
   const hasScaleKeyframe = kfs.some((kf) => kf.scale !== undefined)
+  const hasDropShadowKeyframe = kfs.some((kf) => kf.dropShadow !== undefined)
+  const hasInnerShadowKeyframe = kfs.some((kf) => kf.innerShadow !== undefined)
 
   const getKfColor = (kf: Keyframe): string | undefined => (kf.color !== undefined ? kf.color : layer.color)
   const getKfFill = (kf: Keyframe): string | undefined => (kf.fill !== undefined ? kf.fill : layer.fill)
@@ -420,6 +429,8 @@ export function interpolateKeyframes(layer: Layer, time: number): Layer {
   const getKfRadius = (kf: Keyframe): number | undefined => (kf.radius !== undefined ? kf.radius : layer.radius)
   const getKfFontSize = (kf: Keyframe): number | undefined => (kf.fontSize !== undefined ? kf.fontSize : layer.fontSize)
   const getKfFontWeight = (kf: Keyframe): number | undefined => (kf.fontWeight !== undefined ? kf.fontWeight : layer.fontWeight)
+  const getKfDropShadow = (kf: Keyframe) => (kf.dropShadow !== undefined ? kf.dropShadow : layer.dropShadow)
+  const getKfInnerShadow = (kf: Keyframe) => (kf.innerShadow !== undefined ? kf.innerShadow : layer.innerShadow)
 
   // Boundary conditions: before first keyframe or after last keyframe
   const first = kfs[0]
@@ -440,6 +451,8 @@ export function interpolateKeyframes(layer: Layer, time: number): Layer {
       fill: hasFillKeyframe ? getKfFill(first) : layer.fill,
       radius: hasRadiusKeyframe ? getKfRadius(first) : layer.radius,
       blur: hasBlurKeyframe ? getKfBlur(first) : layer.blur,
+      dropShadow: hasDropShadowKeyframe ? getKfDropShadow(first) : layer.dropShadow,
+      innerShadow: hasInnerShadowKeyframe ? getKfInnerShadow(first) : layer.innerShadow,
       points: pts,
       pathData: (layer.type === 'path' && pts) ? buildSvgPath(pts, layer.closed !== false, first.w, first.h) : layer.pathData,
     }
@@ -463,6 +476,8 @@ export function interpolateKeyframes(layer: Layer, time: number): Layer {
       fill: hasFillKeyframe ? getKfFill(last) : layer.fill,
       radius: hasRadiusKeyframe ? getKfRadius(last) : layer.radius,
       blur: hasBlurKeyframe ? getKfBlur(last) : layer.blur,
+      dropShadow: hasDropShadowKeyframe ? getKfDropShadow(last) : layer.dropShadow,
+      innerShadow: hasInnerShadowKeyframe ? getKfInnerShadow(last) : layer.innerShadow,
       points: pts,
       pathData: (layer.type === 'path' && pts) ? buildSvgPath(pts, layer.closed !== false, last.w, last.h) : layer.pathData,
     }
@@ -519,6 +534,14 @@ export function interpolateKeyframes(layer: Layer, time: number): Layer {
     ? (lerpColor(getKfFill(k0) || layer.fill, getKfFill(k1) || layer.fill, p) || layer.fill)
     : layer.fill
 
+  const dropShadow = hasDropShadowKeyframe
+    ? (lerpShadowEffect(getKfDropShadow(k0), getKfDropShadow(k1), p) ?? layer.dropShadow)
+    : layer.dropShadow
+
+  const innerShadow = hasInnerShadowKeyframe
+    ? (lerpShadowEffect(getKfInnerShadow(k0), getKfInnerShadow(k1), p) ?? layer.innerShadow)
+    : layer.innerShadow
+
   // Interpolate vector anchor points
   let points = layer.points
   if (hasPointsKeyframe) {
@@ -546,6 +569,8 @@ export function interpolateKeyframes(layer: Layer, time: number): Layer {
     fill,
     radius,
     blur,
+    dropShadow,
+    innerShadow,
     points,
     pathData: (layer.type === 'path' && points) ? buildSvgPath(points, layer.closed !== false, w, h) : layer.pathData,
   }
@@ -592,7 +617,8 @@ export function upsertKeyframe(layer: Layer, time: number, customProps?: Partial
   // keyframe 2 has blur 0 + black color).
   if (customProps && existing.length > 0) {
     const animatableKeys: (keyof Keyframe)[] = [
-      'color', 'fill', 'blur', 'opacity', 'radius', 'fontSize', 'fontWeight', 'rotation', 'x', 'y', 'w', 'h', 'scale', 'points'
+      'color', 'fill', 'blur', 'opacity', 'radius', 'fontSize', 'fontWeight', 'rotation', 'x', 'y', 'w', 'h', 'scale',
+      'dropShadow', 'innerShadow', 'points'
     ]
 
     for (const key of animatableKeys) {
@@ -613,6 +639,8 @@ export function upsertKeyframe(layer: Layer, time: number, customProps?: Partial
             else if (key === 'w') existing[i].w = layer.w
             else if (key === 'h') existing[i].h = layer.h
             else if (key === 'points') existing[i].points = layer.points ? cloneVectorPoints(layer.points) : undefined
+            else if (key === 'dropShadow') existing[i].dropShadow = layer.dropShadow ? { ...layer.dropShadow } : undefined
+            else if (key === 'innerShadow') existing[i].innerShadow = layer.innerShadow ? { ...layer.innerShadow } : undefined
           }
         }
       }
@@ -647,6 +675,12 @@ export function upsertKeyframe(layer: Layer, time: number, customProps?: Partial
       fill: customProps?.fill !== undefined ? customProps.fill : currentSample.fill,
       radius: currentSample.radius,
       blur: customProps?.blur !== undefined ? customProps.blur : (currentSample.blur ?? 0),
+      dropShadow: customProps && 'dropShadow' in customProps
+        ? (customProps.dropShadow ? { ...customProps.dropShadow } : undefined)
+        : currentSample.dropShadow,
+      innerShadow: customProps && 'innerShadow' in customProps
+        ? (customProps.innerShadow ? { ...customProps.innerShadow } : undefined)
+        : currentSample.innerShadow,
       points: customProps?.points !== undefined
         ? cloneVectorPoints(customProps.points)
         : currentSample.points

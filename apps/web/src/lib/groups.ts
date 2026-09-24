@@ -1,4 +1,4 @@
-import type { Layer, Preset } from '#/types'
+import type { Layer, Preset, ShadowEffect } from '#/types'
 import { uid } from '#/lib/data'
 
 export interface ComponentItem {
@@ -206,11 +206,18 @@ export function createGroupFromSelection(
 }
 
 /**
- * Ungroup a group layer
+ * Ungroup a group layer.
+ *
+ * Effects stored on the removed group wrapper are handed down to direct
+ * children that don't already define that effect themselves, so ungrouping
+ * a shadowed group doesn't silently drop the shadow. Child-owned effects
+ * are never overwritten. Pass the group's interpolated effects when it is
+ * keyframed — the static fields alone don't carry the animated values.
  */
 export function ungroupLayer(
   layers: Layer[],
   groupId: string,
+  groupEffects?: { dropShadow?: ShadowEffect; innerShadow?: ShadowEffect },
 ): { newLayers: Layer[]; unpackedIds: string[] } {
   const group = layers.find((l) => l.id === groupId && l.type === 'group')
   if (!group) return { newLayers: layers, unpackedIds: [] }
@@ -218,12 +225,18 @@ export function ungroupLayer(
   const directChildren = layers.filter((l) => l.groupId === groupId)
   const unpackedIds = directChildren.map((c) => c.id)
 
+  const drop = groupEffects?.dropShadow ?? group.dropShadow
+  const inner = groupEffects?.innerShadow ?? group.innerShadow
+
   const newLayers = layers
     .filter((l) => l.id !== groupId)
     .map((l) => {
       if (l.groupId === groupId) {
         // Move children to the parent group of this group (or root if undefined)
-        return { ...l, groupId: group.groupId }
+        const next: Layer = { ...l, groupId: group.groupId }
+        if (!next.dropShadow && drop) next.dropShadow = { ...drop }
+        if (!next.innerShadow && inner) next.innerShadow = { ...inner }
+        return next
       }
       return l
     })
@@ -732,6 +745,9 @@ export function instantiateComponent(
     start: comp.root.start ?? 0,
     end: comp.root.end ?? 5000,
     anim: comp.root.anim || 'none',
+    // only group/component root path that copies field-by-field (children spread `...l`)
+    dropShadow: comp.root.dropShadow,
+    innerShadow: comp.root.innerShadow,
     isComponent: true,
     componentId: comp.id,
     collapsed: false,

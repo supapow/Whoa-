@@ -16,6 +16,15 @@ export interface Background {
   value: string // hex, css-gradient, or image url
 }
 
+export interface ShadowEffect {
+  x: number // offset px
+  y: number
+  blur: number // px
+  spread: number // px
+  color: string // hex
+  opacity: number // 0..1
+}
+
 export interface Keyframe {
   id: string
   time: number // ms on timeline within [layer.start, layer.end]
@@ -34,6 +43,9 @@ export interface Keyframe {
   fill?: string
   radius?: number
   blur?: number
+  // effects
+  dropShadow?: ShadowEffect
+  innerShadow?: ShadowEffect
   points?: VectorPoint[]
 }
 
@@ -50,6 +62,9 @@ export interface Layer {
   scale?: number
   blur?: number // px blur radius
   blurType?: 'element' | 'backdrop' // element blur or backdrop frosted blur
+  // effects (stackable, each independently toggleable via presence)
+  dropShadow?: ShadowEffect
+  innerShadow?: ShadowEffect
   visible: boolean
   alwaysVisible?: boolean
   locked: boolean
