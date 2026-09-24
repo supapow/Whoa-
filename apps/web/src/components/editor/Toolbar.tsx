@@ -485,6 +485,13 @@ export default function Toolbar({ onExport }: { onExport?: () => void }) {
           onClick: () => createGroup(),
         },
         {
+          key: 'mask',
+          label: 'Mask',
+          icon: <Scissors />,
+          accent: true,
+          onClick: handleMask,
+        },
+        {
           key: 'component',
           label: 'Component',
           icon: <ComponentIcon />,
