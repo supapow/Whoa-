@@ -478,18 +478,18 @@ export default function Toolbar({ onExport }: { onExport?: () => void }) {
   const groupItems: Item[] = isMulti
     ? [
         {
-          key: 'group',
-          label: 'Group',
-          icon: <FolderPlus />,
-          accent: true,
-          onClick: () => createGroup(),
-        },
-        {
           key: 'mask',
           label: 'Mask',
           icon: <Scissors />,
           accent: true,
           onClick: handleMask,
+        },
+        {
+          key: 'group',
+          label: 'Group',
+          icon: <FolderPlus />,
+          accent: true,
+          onClick: () => createGroup(),
         },
         {
           key: 'component',
@@ -886,7 +886,7 @@ export default function Toolbar({ onExport }: { onExport?: () => void }) {
       <div className="flex h-16 shrink-0 items-center gap-1 overflow-x-auto border-t border-line bg-toolbar px-2 no-scrollbar" data-testid="toolbar">
         {renderItem(snapItem)}
         {renderItem(timelineItem)}
-        <div className={`flex shrink-0 items-center gap-1 overflow-hidden transition-[max-width,opacity,transform] duration-300 ease-out ${isGroup ? 'max-w-[800px] translate-x-0 opacity-100' : 'pointer-events-none max-w-0 -translate-x-3 opacity-0'}`} data-testid="group-alignment-controls" aria-hidden={!isGroup}>
+        <div className={`flex min-w-0 shrink-0 items-center gap-1 overflow-x-auto no-scrollbar transition-[max-width,opacity,transform] duration-300 ease-out ${isGroup ? 'max-w-[calc(100vw-7rem)] translate-x-0 opacity-100' : 'pointer-events-none max-w-0 -translate-x-3 opacity-0'}`} data-testid="group-alignment-controls" aria-hidden={!isGroup}>
           {groupItems.map(renderItem)}
         </div>
         <div className="flex shrink-0 items-center gap-1">
