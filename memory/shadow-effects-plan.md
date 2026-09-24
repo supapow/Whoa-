@@ -1,11 +1,15 @@
 # Implementation Plan — Drop Shadow & Inner Shadow
 
-> **Status:** Steps **A–E code complete, lint-verified and smoke-tested in-browser** (2026-09-24, second agent). `tsc --noEmit` exit 0; dev server `:3000` → 200. Commits on `feature/outer-and-inner-shadows`: `f1e55a4` (feat) + docs commits. **Remaining:** the bulk of Step E's manual checklist (see Handoff below) — group casters, multi-select, keyframes, parity, visual pass.
+> **Status:** Steps **A–E code complete, lint-verified and smoke-tested in-browser** (2026-09-24, second agent). `tsc --noEmit` exit 0; dev server `:3000` → 200. Commits on `feature/outer-and-inner-shadows`: `f1e55a4` (feat) + docs commits. **Session 3 browser verification completed** (2026-09-24): most of the Step E checklist passes; two gaps remain — a group-owned effect is discarded on ungroup, and max text shadows clip at the SVG filter-region boundary. **Session 4 (2026-09-24): both gaps fixed and verified** — `ungroupLayer` hands group-owned effects down to children (keyframe-aware via a playhead snapshot in the store), and text filter regions use the live measured max-content box with the 300% clamp removed. Checklist is now fully green.
 > **Handoff (session 2 → session 3, 2026-09-24):**
 >
 > **✅ Already verified in-browser** (browser tool now connected; tab ids don't survive a session): drop `spread===0` → CSS fast path only, `drop-shadow(rgba(0,0,0,0.35) 0px 4px 12px)` on the **inner** wrapper; inner shadow → `url(#wsh-{id})` chained *before* the CSS drop; `spread!==0` → SVG-only (`feMorphology dilate`, radius tracks the slider, e.g. 18) with no CSS duplicate; filter merge = `dropShadow → SourceGraphic → innerShadow`; `color-interpolation-filters=sRGB` present; region `-25% / 150%`; **outer wrapper and selection-border parent both `filter: none`** (blur-smear fix confirmed); sliders + preset buttons both write through to the store; `effects` floats right after `blur` and is absent from the base toolbar; control testids all `effect-{drop,inner}-*`.
 >
-> **⬜ Still to run** (rest of the checklist at the bottom): group casters (Step B — drop under children / inner over, combined silhouette), multi-select propagation, keyframe interpolation + undo coalescing + toggle-off-with-keyframes, convert-to-vectors (single AND group), duplicate/group/ungroup/insert-component survival, silhouettes for every element type (circle/triangle/star inner band), visual sRGB eyeball, final console-error sweep.
+> **🧪 Session 3 results:**
+> - **Pass:** drop shadow on text, all seven CSS shape kinds, path, loaded stock image, and emoji sticker; multi-select writes all seven shapes; inner shadow visually follows circle/triangle/star silhouettes; group drop/inner casters duplicate the combined subtree, with drop before children and inner after; keyframe values interpolate across the playhead, rapid slider input coalesces to one undo, and toggle-off is local to the current keyframe; text→vectors preserves both effects in single-path and grouped modes; duplicate and inserted components preserve group effects.
+> - **Gap:** ungroup preserves effects already on children, but silently discards an effect stored on the group wrapper itself. A shadow-only group duplicated and then ungrouped leaves its children with `filter: none`.
+> - **Gap:** max text shadows clip. With text box ≈267×24 screen px, region `-25% / 150%` gives only ≈67×6 px margin, but X/Y=100, blur=80, spread=60 needs substantially more; the screenshot shows hard rectangular filter cutoffs. sRGB itself looks correct (vivid red/cyan in-browser), and all filters carry `color-interpolation-filters="sRGB"`.
+> - **Console:** no app errors/warnings. Only the already-documented Vite HMR WebSocket failure remains (`wss://localhost/` instead of `:3000`).
 >
 > **Browser-driving notes for the next agent** (the previous session learned these the hard way):
 > - Server: `~/.bun/bin/bun run dev` (bun is **not** on PATH in non-interactive shells), port 3000 strict.
@@ -15,6 +19,11 @@
 > - Read the filter's interpolation as **kebab-case**: `getAttribute('color-interpolation-filters')`. The camelCase form returns `null` and looks like a missing attribute — it isn't.
 > - **Vite HMR websocket is broken** (`wss://localhost/` instead of :3000) → **reload the tab after any source edit**; state is in-memory, so a reload returns you to the home screen.
 > - Testids: `panel-effects`, `effect-drop|inner` (+ `-toggle -reset -x -y -blur -spread -opacity -color-* -preset-*`), `floating-tool-effects`, `layer-{id}`, `layer-vector-border-{id}`, `artboard`.
+> - **Session 4 additions/corrections:**
+>   - Range sliders: the native-setter + `input`-event trick from Session 3 no longer moves React state (events swallowed, label stays). What works: `el.focus()` + trusted keypress via the press tool (`End` → max, `Home` → min). One focus+press round-trip per slider.
+>   - Synthetic `TouchEvent`s **do not bubble past the target node** in this Chrome (window/document listeners see nothing) — the touch long-press multi-select path is unautomatable. Synthetic `PointerEvent`s bubble fine (marquee arming + tap-deselect verified), but **every synthetic canvas gesture has real side effects**: a drag started with a selection moves those layers (the shape ended at 1351,1351 and text at 706,868 this way). Prefer the tap-only paths.
+>   - Shortcut for group tests, no multi-select needed: the components sheet's first `Insert` is the localStorage custom component **`"Shadow Group"`** (sticker🔥 + image, saved with a group-owned shadow in Session 3) — inserting it yields a shadowed group in one click, and `tool-ungroup` sits in the toolbar whenever a group is selected. Beware: with a group selected the toolbar swaps its add-tools for `tool-ungroup`/`tool-save-comp`.
+>   - Group wrapper nodes are identifiable in-DOM by `pointer-events: none` + empty text; the group's own `wsh-{gid}` defs only exist for spread≠0 drops (regular branch) — spread-0 group drops live only in `wsh-drop-{gid}` casters.
 
 ## Feature
 
@@ -118,13 +127,12 @@ Files: `components/editor/Panels.tsx`, `components/editor/Toolbar.tsx`
    - `groupLayer` (L413-431): copy both too (group carries the effect over the letters' combined silhouette — matches group philosophy; children get none).
 2. `lib/groups.ts` `instantiateComponent` → `rootLayer` (L720-738) is built **field-by-field** and currently DROPS shadows: add `dropShadow: comp.root.dropShadow, innerShadow: comp.root.innerShadow`. (childLayers spread `...l` ✓, save spreads ✓.)
 
-### Step E — Verify 🟡 (lint ✅ · dev-server ✅ · **smoke test ✅** · rest of manual checklist ⬜ — see Handoff at top)
+### Step E — Verify 🟡 (lint ✅ · dev-server ✅ · smoke test ✅ · manual browser pass ✅ with 2 gaps)
 ```sh
 bun run lint                         # from repo root: tsc --noEmit — ✅ exit 0 (2026-09-24)
 cd apps/web && bun run dev           # http://localhost:3000 (strictPort) — ✅ 200, touched modules transform clean
 ```
-Manual checklist (mobile viewport first) — unchanged from below; note selection-border item now also regression-tests the blur-smear fix.
-**Blocked on:** no desktop browser connected to the session (`browser.tabs.open` → *disconnected*). Ola must run the checklist, or connect the browser and hand back to an agent.
+Manual checklist was run against the connected browser on 2026-09-24. Results and the two remaining gaps (ungroup drops group-owned effects; max text shadows clip) are recorded in the Handoff and checklist at the bottom.
 
 ---
 
@@ -145,28 +153,31 @@ Manual checklist (mobile viewport first) — unchanged from below; note selectio
 1. **Selection-border SVG is a child of the outer wrapper** (Canvas ~L3789) → shadows/blur go on the new inner wrapper (Step A.3). Side effect: fixes existing element-blur-smears-border bug.
 2. **CSS `drop-shadow()` has no spread; inner has no CSS form at all.** Fast path: spread===0 drop → CSS; inner OR spread≠0 → SVG (per Step A.2 chain). SVG `stdDeviation = blur/2` for CSS parity.
 3. **`colorInterpolationFilters="sRGB"` is mandatory** on every `<filter>` — default linearRGB washes shadow colors out.
-4. **Groups are flat siblings** — group wrapper is empty; combined silhouette needs casters (Step B), not a filter on the wrapper. Drop caster = before first child; inner caster = inside group wrapper (it already paints after its children).
+4. **Groups are flat siblings** — group wrapper is empty; combined silhouette needs casters (Step B), not a filter on the wrapper. Drop caster = before the first child; inner caster = a sibling immediately after the group wrapper (therefore over every child).
 5. **Group stack order caveat:** drop caster sits under its own children but over everything painted before the group's first child — exact z vs. unrelated overlapping layers is best-effort (accepted).
 6. **Export is mocked** (`ExportSheet.tsx` ~L60) — no export parity now; note for backend phase: future renderer must reproduce these effects.
 7. **Multi-select writes:** always use the `up()` at Panels ~L1490 pattern.
 8. `instantiateComponent` root copy is the **only** group/component path that doesn't spread (see Step D.2).
 9. History/undo: `updateLayer`/`updateLayers` are already "continuous" actions → slider drags coalesce; no change needed.
+10. ~~`ungroupLayer` only reparented children; it did not copy `dropShadow`/`innerShadow` from the removed group wrapper. Child-owned effects survive, group-owned effects do not.~~ **Fixed (Session 4):** `ungroupLayer(layers, groupId, groupEffects?)` fills each direct child's missing effect from the removed wrapper (copied by value, never overwriting child-owned effects). The store's `ungroup` case snapshots keyframed group shadows via `interpolateKeyframes(group, state.time)` so animated groups keep their playhead look as static child effects.
+11. ~~SVG filter regions use object-bounding-box percentages. The text branch derives percentages from the artboard preset, not the rendered max-content box, so `-25% / 150%` is much too small for short/wide text at maximum offsets.~~ **Fixed (Session 4):** `ShadowFilterDefs` takes live `textSizes` (measured `offsetWidth/Height` of the layer node in a `useLayoutEffect` + `ResizeObserver`, state only updates on change) with a canvas-`measureText` estimate (`estimateTextBoxSize`) as first-paint fallback; preset remains only the last resort. The 300% upper clamp in `shadowFilterRegion` is removed — absolute extension equals pad px by construction, so small boxes at max settings stay correct without enlarging any filter surface beyond box + 2×pad.
+12. Session 4 verification numbers (text 728×65 artboard px, X/Y=100, blur=80, spread=60 → pad 240): region `-32.97% / -369.23%` = exactly 728+480 × 65+480 px. White-shadow screenshot shows smooth falloff, no rectangular cutoff. Ungroup of the localStorage "Shadow Group" (group-owned default inner): wrapper removed, both children gained inner-only `wsh-*` defs and `filter: url(#wsh-*)` styles — previously `filter: none`.
 
 ---
 
 ## Verification checklist (manual)
 
-- [ ] Drop shadow renders on text, each shape kind, path, image, sticker
-- [ ] Inner shadow follows the *silhouette* (circle + triangle + star, not just rectangle)
+- [x] Drop shadow renders on text, each shape kind, path, image, sticker
+- [x] Inner shadow follows the *silhouette* (circle + triangle + star, not just rectangle) — visual in-browser pass
 - [x] Both effects active simultaneously on one layer
-- [ ] Multi-select 2+ elements → one change applies to all
+- [x] Multi-select 2+ elements → one change applies to all — seven-shape write verified
 - [x] Selection outline / handles are **not** shadowed (and element blur no longer smears the border) — outer wrapper + border parent both `filter: none` in-browser
-- [ ] Group shadow uses combined silhouette; shadow behind children, inner band over children
+- [x] Group shadow uses combined silhouette; shadow behind children, inner band over children — caster subtree/order + visual pass
 - [x] `spread > 0` renders (SVG path); `spread === 0` drop stays on CSS fast path (inspect `filter` style) — `url(#wsh-*)` only vs `drop-shadow(...)`, no double-paint
-- [ ] Keyframe: effect interpolates across playhead; slider drags coalesce to one undo entry; toggle-off with keyframes present writes `undefined`
-- [ ] Convert text → vectors: effect survives (single AND group mode)
-- [ ] Duplicate / group / ungroup / insert-component: effect survives
-- [ ] Shadow colors look right (sRGB filters, not washed out); no clipping at max offset/blur/spread
+- [x] Keyframe: effect interpolates across playhead; slider drags coalesce to one undo entry; toggle-off with keyframes present writes `undefined`
+- [x] Convert text → vectors: effect survives (single AND group mode)
+- [x] Duplicate / group / ungroup / insert-component: effect survives — duplicate/group/insert pass; **ungroup now transfers group-owned effects** (Session 4: "Shadow Group" ungroup → both children gained the wrapper's inner shadow; child-owned effects never overwritten; keyframed groups snapshot at the playhead — bun-composed test passes k2 values through exactly)
+- [x] Shadow colors look right (sRGB filters, not washed out); no clipping at max offset/blur/spread — sRGB pass; **max text shadows no longer clip** (Session 4: measured-box region `-32.97% / -369.23%` at X/Y=100, blur=80, spread=60; white-shadow screenshot fades smoothly)
 
 ## Repo context the agent needs
 
