@@ -11,6 +11,7 @@ import {
   saveComponentToLibrary,
   getDescendantLayers,
   computeGroupBounds,
+  orderGroupChildren,
   type ComponentItem,
 } from '#/lib/groups'
 import {
@@ -83,6 +84,7 @@ type Action =
   | { t: 'reorder'; id: string; dir: number }
   | { t: 'duplicate'; id?: string; ids?: string[] }
   | { t: 'createGroup'; ids?: string[]; name?: string; isComponent?: boolean }
+  | { t: 'maskSelection'; ids?: string[] }
   | { t: 'ungroup'; groupId: string }
   | { t: 'toggleGroupCollapse'; groupId: string }
   | { t: 'insertComponent'; component: ComponentItem }
@@ -603,8 +605,47 @@ function innerReducer(state: State, a: Action): State {
         return state
       }
     }
-    case 'ungroup': {
-      // Snapshot a keyframed group's shadows at the current time so the
+  case 'maskSelection': {
+  const targetIds = a.ids || state.selectedIds
+  if (targetIds.length < 2) return state
+  const selected = p.layers.filter((layer) => targetIds.includes(layer.id))
+  if (selected.length < 2) return state
+
+  // The top-most selected layer is the mask. Array order is the editor's z-order.
+  const mask = selected[selected.length - 1]
+  const existingGroup = selected.find((layer) => layer.type === 'group')
+  if (existingGroup) {
+    const maskLayer = mask.id === existingGroup.id ? selected[selected.length - 2] : mask
+    const layers = p.layers.map((layer) => layer.id === maskLayer.id
+      ? { ...layer, groupId: existingGroup.id, isMask: true }
+      : layer)
+    return {
+      ...state,
+      project: touch({ ...p, layers: orderGroupChildren(existingGroup.id, layers) }),
+      selectedId: existingGroup.id,
+      selectedIds: [existingGroup.id],
+      tool: null,
+    }
+  }
+
+  try {
+    const { newLayers, groupLayer } = createGroupFromSelection(p.layers, targetIds, 'Masked group')
+    const maskedLayers = newLayers.map((layer) => layer.id === mask.id ? { ...layer, isMask: true } : layer)
+    return {
+      ...state,
+      project: touch({ ...p, layers: orderGroupChildren(groupLayer.id, maskedLayers) }),
+      selectedId: groupLayer.id,
+      selectedIds: [groupLayer.id],
+      tool: null,
+    }
+  } catch (err) {
+    console.warn('Failed to create mask group:', err)
+    return state
+  }
+  }
+  case 'ungroup': {
+  // Snapshot a keyframed group's shadows at the current time so the
+
       // unpacked children keep the look the group had when it was removed.
       const group = p.layers.find((l) => l.id === a.groupId && l.type === 'group')
       const effG = group && group.keyframes && group.keyframes.length > 0
@@ -1079,6 +1120,7 @@ interface Ctx extends State {
   duplicate: (id: string, ids?: string[]) => void
   reorder: (id: string, dir: number) => void
   createGroup: (ids?: string[], name?: string, isComponent?: boolean) => void
+  maskSelection: (ids?: string[]) => void
   ungroup: (groupId: string) => void
   toggleGroupCollapse: (groupId: string) => void
   insertComponent: (component: ComponentItem) => void
@@ -1165,6 +1207,7 @@ export function EditorProvider({ project, children }: { project: Project; childr
   const duplicate = useCallback((id: string, ids?: string[]) => dispatch({ t: 'duplicate', id, ids }), [])
   const reorder = useCallback((id: string, dir: number) => dispatch({ t: 'reorder', id, dir }), [])
   const createGroup = useCallback((ids?: string[], name?: string, isComponent = false) => dispatch({ t: 'createGroup', ids, name, isComponent }), [])
+  const maskSelection = useCallback((ids?: string[]) => dispatch({ t: 'maskSelection', ids }), [])
   const ungroup = useCallback((groupId: string) => dispatch({ t: 'ungroup', groupId }), [])
   const toggleGroupCollapse = useCallback((groupId: string) => dispatch({ t: 'toggleGroupCollapse', groupId }), [])
   const insertComponent = useCallback((component: ComponentItem) => dispatch({ t: 'insertComponent', component }), [])
@@ -1300,8 +1343,9 @@ export function EditorProvider({ project, children }: { project: Project; childr
       deleteLayers,
       duplicate,
       reorder,
-      createGroup,
-      ungroup,
+  createGroup,
+  maskSelection,
+  ungroup,
       toggleGroupCollapse,
       insertComponent,
       saveAsComponent,
@@ -1356,8 +1400,9 @@ export function EditorProvider({ project, children }: { project: Project; childr
       deleteLayers,
       duplicate,
       reorder,
-      createGroup,
-      ungroup,
+  createGroup,
+  maskSelection,
+  ungroup,
       toggleGroupCollapse,
       insertComponent,
       saveAsComponent,

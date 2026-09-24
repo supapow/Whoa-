@@ -122,6 +122,8 @@ export interface Layer {
   aspectRatio?: number
   // group / component hierarchy
   groupId?: string
+  // A mask is rendered above the sibling layers it clips. Multiple masks are supported.
+  isMask?: boolean
   isComponent?: boolean
   componentId?: string
   collapsed?: boolean

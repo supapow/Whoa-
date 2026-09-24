@@ -18,10 +18,15 @@ type Item = { key: string; label: string; icon: React.ReactNode; onClick?: () =>
 export default function Toolbar({ onExport }: { onExport?: () => void }) {
   const {
     project, selected, selectedIds, alignSelected, openTool, addLayer, deleteLayer, deleteLayers, duplicate, reorder,
-    createGroup, ungroup, saveAsComponent, artboardSnap, setArtboardSnap,
+    createGroup, maskSelection, ungroup, saveAsComponent, artboardSnap, setArtboardSnap,
     timelineOpen, toggleTimeline, updateLayer, imagePositioningId, setImagePositioningId,
     vectorEditingId, setVectorEditingId, startEyedropper,
   } = useEditor()
+
+  const handleMask = () => {
+    if (selectedIds.length < 2) return
+    maskSelection(selectedIds)
+  }
 
   const handleStartEyedropper = () => {
     if (!selected) return
@@ -397,7 +402,7 @@ export default function Toolbar({ onExport }: { onExport?: () => void }) {
         { key: 'shape', label: 'Shape', icon: <Square /> },
         { key: 'color', label: 'Fill', icon: <PaintBucket /> },
         { key: 'radius', label: 'Corners', icon: <Square /> },
-        { key: 'mask', label: 'Mask', icon: <Scissors /> },
+        { key: 'mask', label: 'Mask', icon: <Scissors />, onClick: handleMask },
         ...common,
       ]
     } else if (selected.type === 'path') {
@@ -411,7 +416,7 @@ export default function Toolbar({ onExport }: { onExport?: () => void }) {
         },
         { key: 'shape', label: 'Shape', icon: <Square /> },
         { key: 'radius', label: 'Corners', icon: <Square /> },
-        { key: 'mask', label: 'Mask', icon: <Scissors /> },
+        { key: 'mask', label: 'Mask', icon: <Scissors />, onClick: handleMask },
         { key: 'color', label: 'Color', icon: <PaintBucket /> },
         ...common,
       ]
@@ -426,7 +431,7 @@ export default function Toolbar({ onExport }: { onExport?: () => void }) {
         },
         { key: 'image', label: 'Replace', icon: <ImageIcon /> },
         { key: 'crop', label: 'Crop', icon: <Crop /> },
-        { key: 'mask', label: 'Mask', icon: <Scissors /> },
+        { key: 'mask', label: 'Mask', icon: <Scissors />, onClick: handleMask },
         ...common,
       ]
     } else {

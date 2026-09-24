@@ -39,6 +39,20 @@ export function getDirectChildren(groupId: string, allLayers: Layer[]): Layer[] 
 }
 
 /**
+ * Keep masks at the front of a group's direct-child stack. The first child is
+ * the top-most child in the layer panel, so masks are evaluated before content.
+ */
+export function orderGroupChildren(groupId: string, allLayers: Layer[]): Layer[] {
+  const children = allLayers.filter((layer) => layer.groupId === groupId)
+  if (children.length < 2) return allLayers
+
+  const childIds = new Set(children.map((child) => child.id))
+  const orderedChildren = [...children].sort((a, b) => Number(Boolean(b.isMask)) - Number(Boolean(a.isMask)))
+  let childIndex = 0
+  return allLayers.map((layer) => childIds.has(layer.id) ? orderedChildren[childIndex++] : layer)
+}
+
+/**
  * Find the topmost group containing a given layer
  */
 export function getTopmostGroup(layerId: string, allLayers: Layer[]): Layer | null {
