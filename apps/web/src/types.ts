@@ -25,6 +25,24 @@ export interface ShadowEffect {
   opacity: number // 0..1
 }
 
+export interface GradientStop {
+  color: string // hex
+  opacity: number // 0..1
+  at: number // 0..100 position along the gradient
+}
+
+export interface LayerGradient {
+  kind: 'linear' | 'radial'
+  angle: number // linear direction in degrees (0 = to top, 90 = to right)
+  stops: GradientStop[]
+}
+
+/** Blur that dissolves toward one edge (gradient-masked backdrop blur). */
+export interface BlurFade {
+  side: 'top' | 'bottom' | 'left' | 'right' // edge the blur fades OUT toward
+  length: number // % of the layer the fade ramp covers (1..100)
+}
+
 export interface Keyframe {
   id: string
   time: number // ms on timeline within [layer.start, layer.end]
@@ -62,6 +80,7 @@ export interface Layer {
   scale?: number
   blur?: number // px blur radius
   blurType?: 'element' | 'backdrop' // element blur or backdrop frosted blur
+  blurFade?: BlurFade // dissolve the (backdrop) blur toward one edge
   // effects (stackable, each independently toggleable via presence)
   dropShadow?: ShadowEffect
   innerShadow?: ShadowEffect
@@ -92,6 +111,7 @@ export interface Layer {
   // shape
   shape?: ShapeKind
   fill?: string
+  fillGradient?: LayerGradient // gradient fill for shape/path/text (overrides fill/color)
   radius?: number
   // vector path
   pathData?: string

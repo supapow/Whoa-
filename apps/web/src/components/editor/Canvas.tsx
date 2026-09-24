@@ -1,6 +1,6 @@
 import { Fragment, useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react'
 import { ArrowLeft, ArrowRight, ArrowUp, ArrowDown, Move, RotateCw } from 'lucide-react'
-import type { Layer, LayerType, ShadowEffect, VectorPoint } from '#/types'
+import type { Layer, LayerType, ShadowEffect, VectorPoint, LayerGradient } from '#/types'
 import { useEditor } from '#/store/editor'
 import { getDescendantLayers, getTopmostGroup, computeGroupBounds, getMaskedGroupIds } from '#/lib/groups'
 import { findCornerSizeMatch, findSizeMatch, getCandidateTargets, type SizeMatch } from '#/lib/sizeMatch'
@@ -8,6 +8,7 @@ import { findGapMatch, type GapMatchResult } from '#/lib/gapMatch'
 import { findElementAlignMatch, type ElementAlignResult } from '#/lib/elementAlign'
 import { parseImagePosition, formatImagePosition, calcImagePositionDelta } from '#/lib/imagePosition'
 import { interpolateKeyframes } from '#/lib/keyframes'
+import { fillGradientDefId, gradientAngleCoords, layerGradientToCss, blurFadeMaskCss } from '#/lib/gradients'
 import { layerNeedsSvgFilter, shadowFilterId, dropShadowCss, shadowFilterRegion, dropCasterFilterId, innerCasterFilterId, estimateTextBoxSize, colorToRgba } from '#/lib/shadows'
 import {
   buildSvgPath, scaleVectorPoints, tightenVectorLayer,
@@ -818,6 +819,52 @@ function MaskDefs({
       <defs>{defs}</defs>
     </svg>
   )
+}
+
+/**
+ * SVG paint server for a layer's gradient fill. Rendered as <defs> inside the
+ * layer's own <svg> so each shape is self-contained. (Group shadow-caster
+ * duplicates reuse the same id with identical stops, so first-match wins
+ * harmlessly.)
+ */
+function GradientDef({ id, gradient }: { id: string; gradient: LayerGradient }) {
+  const stops = [...gradient.stops].sort((a, b) => a.at - b.at)
+  const nodes = stops.map((s, i) => (
+    <stop
+      key={i}
+      offset={`${Math.max(0, Math.min(100, Math.round(s.at)))}%`}
+      stopColor={s.color}
+      stopOpacity={Math.max(0, Math.min(1, s.opacity))}
+    />
+  ))
+  if (gradient.kind === 'radial') {
+    return (
+      <defs>
+        <radialGradient id={id} cx="50%" cy="50%" r="50%">
+          {nodes}
+        </radialGradient>
+      </defs>
+    )
+  }
+  const c = gradientAngleCoords(gradient.angle)
+  return (
+    <defs>
+      <linearGradient id={id} x1={c.x1} y1={c.y1} x2={c.x2} y2={c.y2}>
+        {nodes}
+      </linearGradient>
+    </defs>
+  )
+}
+
+/**
+ * Merge the group-clip masks with the blur-fade mask. Multiple mask-image
+ * layers intersect (comma-separated), so clipped content fades as one.
+ */
+function combineMaskStyles(clip: React.CSSProperties, fade: string | undefined): React.CSSProperties {
+  const parts = [clip.maskImage as string | undefined, fade].filter(Boolean) as string[]
+  if (parts.length === 0) return clip
+  const combined = parts.join(', ')
+  return { ...clip, maskImage: combined, WebkitMaskImage: combined }
 }
 
 const clampN = (v: number, lo: number, hi: number) => Math.max(lo, Math.min(v, hi))
@@ -4338,7 +4385,12 @@ export default function Canvas() {
                 data-mask={l.isMask && l.groupId && maskedGroupIds.has(l.groupId) ? 'true' : undefined}
                 style={{
                   ...layerBoxStyle(effectiveLayer, a, preset, layerRefs.current.get(l.id), Boolean(l.keyframes?.length)),
-                  ...maskClipStyle(l),
+                  ...combineMaskStyles(
+                    maskClipStyle(l),
+                    effectiveLayer.blurFade && (effectiveLayer.blur || 0) > 0
+                      ? blurFadeMaskCss(effectiveLayer.blurFade)
+                      : undefined,
+                  ),
                   backdropFilter: (effectiveLayer.blurType === 'backdrop' && effectiveLayer.blur && effectiveLayer.blur > 0)
                     ? `blur(${effectiveLayer.blur}px)`
                     : undefined,
@@ -6142,6 +6194,12 @@ function LayerContent({
       wordBreak: 'normal',
       outline: 'none',
     }
+    if (layer.fillGradient && layer.fillGradient.stops.length > 0) {
+      style.backgroundImage = layerGradientToCss(layer.fillGradient)
+      style.WebkitBackgroundClip = 'text'
+      style.backgroundClip = 'text'
+      style.color = 'transparent'
+    }
     if (editing) {
       return <EditableText style={style} initial={layer.text || ''} onCommit={(t) => onEdit(t)} onDone={onEndEdit} />
     }
@@ -6160,12 +6218,19 @@ function LayerContent({
     const fillOpacity = isVectorEditing ? 0.65 : (isBackdrop ? frostFillOpacity : undefined)
     const stroke = layer.stroke || undefined
     const strokeWidth = layer.strokeWidth || 0
+    const hasGrad = Boolean(layer.fillGradient && layer.fillGradient.stops.length > 0)
+    const gradId = fillGradientDefId(layer.id)
+    const paint = hasGrad ? `url(#${gradId})` : fill
+    const gradDef = hasGrad && layer.fillGradient
+      ? <GradientDef id={gradId} gradient={layer.fillGradient} />
+      : null
 
     switch (layer.shape) {
       case 'circle':
         return (
           <svg viewBox={`0 0 ${layer.w} ${layer.h}`} width="100%" height="100%" style={{ display: 'block', overflow: 'visible' }} shapeRendering="geometricPrecision">
-            <ellipse cx={layer.w / 2} cy={layer.h / 2} rx={layer.w / 2} ry={layer.h / 2} fill={fill} fillOpacity={fillOpacity} stroke={stroke} strokeWidth={strokeWidth} strokeOpacity={strokeOpacity} shapeRendering="geometricPrecision" style={{ transition: 'fill-opacity 0.2s ease' }} />
+            {gradDef}
+            <ellipse cx={layer.w / 2} cy={layer.h / 2} rx={layer.w / 2} ry={layer.h / 2} fill={paint} fillOpacity={fillOpacity} stroke={stroke} strokeWidth={strokeWidth} strokeOpacity={strokeOpacity} shapeRendering="geometricPrecision" style={{ transition: 'fill-opacity 0.2s ease' }} />
             {isVectorEditing && (
               <ellipse cx={layer.w / 2} cy={layer.h / 2} rx={layer.w / 2} ry={layer.h / 2} fill="none" stroke="#d1d5db" strokeWidth={1 / eff} shapeRendering="geometricPrecision" />
             )}
@@ -6174,7 +6239,8 @@ function LayerContent({
       case 'triangle':
         return (
           <svg viewBox={`0 0 ${layer.w} ${layer.h}`} width="100%" height="100%" style={{ display: 'block', overflow: 'visible' }} shapeRendering="geometricPrecision">
-            <polygon points={`${layer.w / 2},0 ${layer.w},${layer.h} 0,${layer.h}`} fill={fill} fillOpacity={fillOpacity} stroke={stroke} strokeWidth={strokeWidth} strokeOpacity={strokeOpacity} strokeLinejoin="round" shapeRendering="geometricPrecision" style={{ transition: 'fill-opacity 0.2s ease' }} />
+            {gradDef}
+            <polygon points={`${layer.w / 2},0 ${layer.w},${layer.h} 0,${layer.h}`} fill={paint} fillOpacity={fillOpacity} stroke={stroke} strokeWidth={strokeWidth} strokeOpacity={strokeOpacity} strokeLinejoin="round" shapeRendering="geometricPrecision" style={{ transition: 'fill-opacity 0.2s ease' }} />
             {isVectorEditing && (
               <polygon points={`${layer.w / 2},0 ${layer.w},${layer.h} 0,${layer.h}`} fill="none" stroke="#d1d5db" strokeWidth={1 / eff} strokeLinejoin="round" shapeRendering="geometricPrecision" />
             )}
@@ -6183,7 +6249,8 @@ function LayerContent({
       case 'star':
         return (
           <svg viewBox="0 0 100 100" width="100%" height="100%" style={{ display: 'block', overflow: 'visible' }} shapeRendering="geometricPrecision">
-            <polygon points="50,0 61,35 98,35 68,57 79,91 50,70 21,91 32,57 2,35 39,35" fill={fill} fillOpacity={fillOpacity} stroke={stroke} strokeWidth={strokeWidth} strokeOpacity={strokeOpacity} strokeLinejoin="round" shapeRendering="geometricPrecision" style={{ transition: 'fill-opacity 0.2s ease' }} />
+            {gradDef}
+            <polygon points="50,0 61,35 98,35 68,57 79,91 50,70 21,91 32,57 2,35 39,35" fill={paint} fillOpacity={fillOpacity} stroke={stroke} strokeWidth={strokeWidth} strokeOpacity={strokeOpacity} strokeLinejoin="round" shapeRendering="geometricPrecision" style={{ transition: 'fill-opacity 0.2s ease' }} />
             {isVectorEditing && (
               <polygon points="50,0 61,35 98,35 68,57 79,91 50,70 21,91 32,57 2,35 39,35" fill="none" stroke="#d1d5db" strokeWidth={1 / eff} strokeLinejoin="round" shapeRendering="geometricPrecision" />
             )}
@@ -6192,7 +6259,8 @@ function LayerContent({
       case 'line':
         return (
           <svg viewBox={`0 0 ${layer.w} ${layer.h}`} width="100%" height="100%" style={{ display: 'block', overflow: 'visible' }} shapeRendering="geometricPrecision">
-            <line x1={0} y1={layer.h / 2} x2={layer.w} y2={layer.h / 2} stroke={fill} strokeOpacity={fillOpacity} strokeWidth={Math.max(2, layer.h * 0.12)} strokeLinecap="round" shapeRendering="geometricPrecision" />
+            {gradDef}
+            <line x1={0} y1={layer.h / 2} x2={layer.w} y2={layer.h / 2} stroke={paint} strokeOpacity={fillOpacity} strokeWidth={Math.max(2, layer.h * 0.12)} strokeLinecap="round" shapeRendering="geometricPrecision" />
           </svg>
         )
       case 'pill': {
@@ -6200,6 +6268,7 @@ function LayerContent({
         const pillR = layer.radius !== undefined ? Math.min(Math.max(0, layer.radius), maxR) : maxR
         return (
           <svg viewBox={`0 0 ${layer.w} ${layer.h}`} width="100%" height="100%" style={{ display: 'block', overflow: 'visible' }} shapeRendering="geometricPrecision">
+            {gradDef}
             <rect
               x={0}
               y={0}
@@ -6207,7 +6276,7 @@ function LayerContent({
               height={layer.h}
               rx={pillR}
               ry={pillR}
-              fill={fill}
+              fill={paint}
               fillOpacity={fillOpacity}
               stroke={stroke}
               strokeWidth={strokeWidth}
@@ -6239,6 +6308,7 @@ function LayerContent({
         const r = Math.min(Math.max(0, layer.radius !== undefined ? layer.radius : 0), maxR)
         return (
           <svg viewBox={`0 0 ${layer.w} ${layer.h}`} width="100%" height="100%" style={{ display: 'block', overflow: 'visible' }} shapeRendering="geometricPrecision">
+            {gradDef}
             <rect
               x={0}
               y={0}
@@ -6246,7 +6316,7 @@ function LayerContent({
               height={layer.h}
               rx={r}
               ry={r}
-              fill={fill}
+              fill={paint}
               fillOpacity={fillOpacity}
               stroke={stroke}
               strokeWidth={strokeWidth}
@@ -6286,11 +6356,18 @@ function LayerContent({
       : undefined
     const d = layer.points ? buildSvgPath(layer.points, layer.closed !== false, layer.w, layer.h) : (layer.pathData || '')
     const fill = layer.fill || 'none'
-    const fillOpacity = isVectorEditing && fill !== 'none' ? 0.65 : (isBackdrop && fill !== 'none' ? frostFillOpacity : undefined)
+    const hasGrad = Boolean(layer.fillGradient && layer.fillGradient.stops.length > 0)
+    const hasPaint = fill !== 'none' || hasGrad
+    const fillOpacity = isVectorEditing && hasPaint ? 0.65 : (isBackdrop && hasPaint ? frostFillOpacity : undefined)
     const stroke = layer.stroke || (layer.strokeWidth ? '#007AFF' : undefined)
     const strokeWidth = layer.strokeWidth ?? (stroke ? 2 : 0)
     const strokeLinecap = layer.strokeLinecap || 'round'
     const strokeLinejoin = layer.strokeLinejoin || 'round'
+    const gradId = fillGradientDefId(layer.id)
+    const paint = hasGrad ? `url(#${gradId})` : fill
+    const gradDef = hasGrad && layer.fillGradient
+      ? <GradientDef id={gradId} gradient={layer.fillGradient} />
+      : null
 
     return (
       <svg
@@ -6300,9 +6377,10 @@ function LayerContent({
         style={{ display: 'block', overflow: 'visible' }}
         shapeRendering="geometricPrecision"
       >
+        {gradDef}
         <path
           d={d}
-          fill={fill}
+          fill={paint}
           fillOpacity={fillOpacity}
           stroke={stroke}
           strokeWidth={strokeWidth}

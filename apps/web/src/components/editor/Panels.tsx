@@ -8,11 +8,15 @@ import {
 import ColorPicker from '#/components/editor/ColorPicker'
 import { DEFAULT_DROP_SHADOW, DEFAULT_INNER_SHADOW } from '#/lib/shadows'
 import { useEditor } from '#/store/editor'
-import type { ShapeKind, Layer, ShadowEffect, VectorPoint } from '#/types'
+import type { ShapeKind, Layer, LayerGradient, BlurFade, ShadowEffect, VectorPoint } from '#/types'
 import { hasKeyframeAt, getAdjacentKeyframes, interpolateKeyframes } from '#/lib/keyframes'
 import {
   PALETTE, GRADIENTS, BG_IMAGES, STOCK_IMAGES, STICKERS, SHAPES,
 } from '#/lib/data'
+import {
+  LAYER_GRADIENT_PRESETS, BG_FADE_PRESETS, layerGradientToCss, defaultGradientForLayerType,
+} from '#/lib/gradients'
+import { colorToRgba } from '#/lib/shadows'
 import {
   getAllFonts, getAvailableWeightsForFont, getClosestAvailableWeight,
   registerUploadedFontFile, addGoogleFontFamily, subscribeFonts,
@@ -222,7 +226,6 @@ function Elements() {
                       w: 220,
                       h: 64,
                       radius: 9999,
-                      anim: 'pop',
                       name: 'Pill Button',
                     })
                   } else if (s === 'rectangle') {
@@ -231,7 +234,6 @@ function Elements() {
                       w: 220,
                       h: 140,
                       radius: 0,
-                      anim: 'pop',
                       name: 'Rectangle',
                     })
                   } else if (s === 'rect') {
@@ -240,7 +242,6 @@ function Elements() {
                       w: 160,
                       h: 160,
                       radius: 0,
-                      anim: 'pop',
                       name: 'Square',
                     })
                   } else {
@@ -483,6 +484,7 @@ function Images() {
 function BackgroundPanel() {
   const { setBackground, project, startEyedropper } = useEditor()
   const [isBgPickerExpanded, setIsBgPickerExpanded] = useState(false)
+  const [customGrad, setCustomGrad] = useState<LayerGradient | null>(null)
   const cur = project.background.value
   const isSolid = project.background.type === 'color'
 
@@ -568,6 +570,39 @@ function BackgroundPanel() {
             <Swatch key={i} tid={`bg-gradient-${i}`} active={cur === g} onClick={() => setBackground({ type: 'gradient', value: g })} style={{ backgroundImage: g }} />
           ))}
         </Grid>
+        <div className="mb-2 flex items-center justify-between">
+          <p className="text-xs font-semibold uppercase tracking-wider text-txt3">Fades</p>
+          <span className="text-[10px] text-txt3">to transparent</span>
+        </div>
+        <Grid cols={4}>
+          {BG_FADE_PRESETS.map((g, i) => (
+            <Swatch key={i} tid={`bg-fade-${i}`} active={cur === g} onClick={() => setBackground({ type: 'gradient', value: g })} style={{ backgroundImage: g }} />
+          ))}
+        </Grid>
+        <button
+          type="button"
+          data-testid="bg-gradient-custom-toggle"
+          onClick={() => setCustomGrad((v) => v ?? defaultGradientForLayerType('shape'))}
+          className="mb-2 w-full py-2 text-xs font-semibold rounded-xl border border-line bg-surface2 text-txt2 hover:text-white transition-colors"
+        >
+          {customGrad ? 'Hide custom gradient' : 'Custom gradient…'}
+        </button>
+        {customGrad && (
+          <div className="rounded-2xl border border-line bg-surface2/40 p-3">
+            <GradientEditor value={customGrad} onChange={setCustomGrad} />
+            <button
+              type="button"
+              data-testid="bg-gradient-custom-apply"
+              onClick={() => {
+                setBackground({ type: 'gradient', value: layerGradientToCss(customGrad) })
+                setCustomGrad(null)
+              }}
+              className="mt-3 w-full py-2 text-xs font-bold rounded-xl bg-accent text-white transition-transform active:scale-95"
+            >
+              Apply as background
+            </button>
+          </div>
+        )}
       </div>
       <div>
         <p className="mb-2 text-xs font-semibold uppercase tracking-wider text-txt3">Image</p>
@@ -1323,6 +1358,169 @@ function FontPanel({
   )
 }
 
+/* ---------- Gradient editor (layer fills + backgrounds) ---------- */
+function GradientEditor({ value, onChange }: { value: LayerGradient; onChange: (g: LayerGradient) => void }) {
+  const [selIdx, setSelIdx] = useState(0)
+  const stops = value.stops
+  const sel = stops[Math.min(selIdx, stops.length - 1)]
+
+  const setStops = (next: LayerGradient['stops']) => onChange({ ...value, stops: next })
+  const patchSel = (patch: Partial<{ color: string; opacity: number; at: number }>) =>
+    setStops(stops.map((s, i) => (i === Math.min(selIdx, stops.length - 1) ? { ...s, ...patch } : s)))
+
+  const addStop = () => {
+    if (stops.length >= 4) return
+    const sorted = [...stops].sort((a, b) => a.at - b.at)
+    const last = sorted[sorted.length - 1]
+    const prev = sorted[sorted.length - 2] ?? { color: '#FFFFFF', opacity: 1, at: 0 }
+    const next = [...stops, { color: last.color, opacity: last.opacity, at: Math.min(100, Math.round((prev.at + 100) / 2)) }]
+    setStops(next)
+    setSelIdx(next.length - 1)
+  }
+
+  const removeStop = () => {
+    if (stops.length <= 2) return
+    const idx = Math.min(selIdx, stops.length - 1)
+    setStops(stops.filter((_, i) => i !== idx))
+    setSelIdx(Math.max(0, idx - 1))
+  }
+
+  return (
+    <div className="space-y-4">
+      <div>
+        <div className="mb-2 flex items-center justify-between">
+          <p className="text-xs font-semibold uppercase tracking-wider text-txt3">Presets</p>
+          <span className="text-[10px] text-txt3">incl. fades</span>
+        </div>
+        <Grid cols={4}>
+          {LAYER_GRADIENT_PRESETS.map((p, i) => (
+            <button
+              key={p.label}
+              type="button"
+              data-testid={`gradient-preset-${i}`}
+              title={p.label}
+              onClick={() => {
+                onChange({ ...p.gradient, stops: p.gradient.stops.map((s) => ({ ...s })) })
+                setSelIdx(0)
+              }}
+              style={{ backgroundImage: layerGradientToCss(p.gradient) }}
+              className="aspect-square rounded-xl border-2 border-line transition-transform active:scale-95 hover:border-line-strong"
+            />
+          ))}
+        </Grid>
+      </div>
+
+      <div>
+        <div className="mb-2 text-xs font-medium text-txt2">Style</div>
+        <div className="grid grid-cols-2 gap-2">
+          {(['linear', 'radial'] as const).map((k) => (
+            <button
+              key={k}
+              type="button"
+              data-testid={`gradient-kind-${k}`}
+              onClick={() => onChange({ ...value, kind: k })}
+              className={`py-1.5 text-xs font-semibold rounded-lg border transition-colors capitalize ${value.kind === k ? 'border-accent bg-accent/20 text-white' : 'border-line bg-surface2 text-txt2'}`}
+            >
+              {k}
+            </button>
+          ))}
+        </div>
+      </div>
+
+      {value.kind === 'linear' && (
+        <Slider
+          label="Angle"
+          tid="gradient-angle"
+          value={Math.round(value.angle)}
+          min={0}
+          max={360}
+          suffix="°"
+          onChange={(v: number) => onChange({ ...value, angle: v })}
+        />
+      )}
+
+      <div>
+        <div className="mb-2 flex items-center justify-between">
+          <p className="text-xs font-medium text-txt2">Stops</p>
+          <div className="flex items-center gap-1.5">
+            <button
+              type="button"
+              data-testid="gradient-add-stop"
+              onClick={addStop}
+              disabled={stops.length >= 4}
+              className="grid h-7 w-7 place-items-center rounded-lg border border-line bg-surface2 text-txt2 hover:text-white disabled:opacity-30 disabled:pointer-events-none transition-colors"
+              title="Add stop"
+            >
+              <Plus className="h-3.5 w-3.5" />
+            </button>
+            <button
+              type="button"
+              data-testid="gradient-remove-stop"
+              onClick={removeStop}
+              disabled={stops.length <= 2}
+              className="grid h-7 w-7 place-items-center rounded-lg border border-line bg-surface2 text-txt2 hover:text-white disabled:opacity-30 disabled:pointer-events-none transition-colors"
+              title="Remove selected stop"
+            >
+              <Trash2 className="h-3.5 w-3.5" />
+            </button>
+          </div>
+        </div>
+        <div className="flex gap-2">
+          {stops.map((s, i) => (
+            <button
+              key={i}
+              type="button"
+              data-testid={`gradient-stop-${i}`}
+              onClick={() => setSelIdx(i)}
+              style={{ background: colorToRgba(s.color, s.opacity) }}
+              className={`h-9 flex-1 rounded-lg border-2 transition-all active:scale-95 ${i === Math.min(selIdx, stops.length - 1) ? 'border-accent ring-2 ring-accent/40' : 'border-line'}`}
+              title={`Stop ${i + 1}: ${s.color} @ ${Math.round(s.at)}%`}
+            />
+          ))}
+        </div>
+      </div>
+
+      {sel && (
+        <div className="space-y-3 rounded-2xl border border-line bg-surface2/40 p-3">
+          <div>
+            <div className="mb-2 text-xs font-medium text-txt2">Stop color</div>
+            <Grid cols={6}>
+              {PALETTE.map((c) => (
+                <button
+                  key={c}
+                  type="button"
+                  data-testid={`gradient-stop-color-${c}`}
+                  onClick={() => patchSel({ color: c })}
+                  style={{ background: c }}
+                  className={`aspect-square rounded-full border-2 transition-transform active:scale-90 ${sel.color === c ? 'border-accent ring-2 ring-accent/40' : 'border-line'}`}
+                />
+              ))}
+            </Grid>
+          </div>
+          <Slider
+            label="Stop opacity"
+            tid="gradient-stop-opacity"
+            value={Math.round(sel.opacity * 100)}
+            min={0}
+            max={100}
+            suffix="%"
+            onChange={(v: number) => patchSel({ opacity: v / 100 })}
+          />
+          <Slider
+            label="Stop position"
+            tid="gradient-stop-at"
+            value={Math.round(sel.at)}
+            min={0}
+            max={100}
+            suffix="%"
+            onChange={(v: number) => patchSel({ at: v })}
+          />
+        </div>
+      )}
+    </div>
+  )
+}
+
 function ColorPanel() {
   const { selected, selectedIds, updateLayers, updateLayer, time, startEyedropper } = useEditor()
   const [colorMode, setColorMode] = useState<'fill' | 'stroke'>('fill')
@@ -1359,6 +1557,10 @@ function ColorPanel() {
   }
 
   const activeDisplayColor = cur === 'transparent' ? 'transparent' : (cur || '#007AFF')
+  const isStrokeMode = isPath && colorMode === 'stroke'
+  const canGradient = !isStrokeMode
+  const curGradient = (l as Layer).fillGradient
+  const isGradient = canGradient && Boolean(curGradient && curGradient.stops.length > 0)
 
   return (
     <>
@@ -1429,8 +1631,8 @@ function ColorPanel() {
               data-testid="color-current-preview"
               onClick={handleStartEyedropper}
               className="h-6 w-6 rounded-full border border-white/20 shadow-xs ring-1 ring-black/20 cursor-pointer hover:scale-105 active:scale-95 transition-transform"
-              style={{ background: activeDisplayColor }}
-              title={`Current: ${cur || '#007AFF'} (Tap to sample)`}
+              style={isGradient && curGradient ? { backgroundImage: layerGradientToCss(curGradient) } : { background: activeDisplayColor }}
+              title={isGradient ? 'Current: gradient' : `Current: ${cur || '#007AFF'} (Tap to sample)`}
             />
             <button
               type="button"
@@ -1458,6 +1660,37 @@ function ColorPanel() {
         )}
       </div>
 
+      {canGradient && (
+        <div className="mb-3 flex gap-2">
+          <button
+            type="button"
+            data-testid="fill-mode-solid"
+            onClick={() => up({ fillGradient: undefined })}
+            className={`flex-1 py-1.5 text-xs font-semibold rounded-lg border transition-colors ${!isGradient ? 'border-accent bg-accent/20 text-white' : 'border-line bg-surface2 text-txt2'}`}
+          >
+            Solid
+          </button>
+          <button
+            type="button"
+            data-testid="fill-mode-gradient"
+            onClick={() => {
+              if (!isGradient) up({ fillGradient: defaultGradientForLayerType(l.type) })
+            }}
+            className={`flex-1 py-1.5 text-xs font-semibold rounded-lg border transition-colors ${isGradient ? 'border-accent bg-accent/20 text-white' : 'border-line bg-surface2 text-txt2'}`}
+          >
+            Gradient
+          </button>
+        </div>
+      )}
+
+      {isGradient && curGradient ? (
+        <div className="pb-1">
+          <GradientEditor
+            value={curGradient}
+            onChange={(g) => up({ fillGradient: g })}
+          />
+        </div>
+      ) : (
       <div className="pb-1">
         <div className="mb-2 flex items-center justify-between">
           <p className="text-xs font-semibold uppercase tracking-wider text-txt3">Swatches</p>
@@ -1503,6 +1736,7 @@ function ColorPanel() {
           )}
         </Grid>
       </div>
+      )}
       <Slider
         label="Opacity"
         tid="slider-opacity"
@@ -1567,7 +1801,7 @@ function BlurPanel() {
           <button
             type="button"
             data-testid="blur-reset-btn"
-            onClick={() => up({ blur: 0 })}
+            onClick={() => up({ blur: 0, blurFade: undefined })}
             className="text-xs font-medium text-txt3 hover:text-danger active:scale-95 transition-colors cursor-pointer"
           >
             Reset
@@ -1680,6 +1914,51 @@ function BlurPanel() {
         suffix="%"
         onChange={(v: number) => up({ opacity: v / 100 })}
       />
+
+      {/* Fade edge: dissolve the blur toward one side (blur to transparent) */}
+      {currentBlur > 0 && (
+        <div>
+          <div className="mb-2.5 text-xs font-medium text-txt2">Fade Edge</div>
+          <div className="grid grid-cols-5 gap-1.5">
+            {([
+              { id: 'off', label: 'Off' },
+              { id: 'top', label: 'Top' },
+              { id: 'bottom', label: 'Bottom' },
+              { id: 'left', label: 'Left' },
+              { id: 'right', label: 'Right' },
+            ] as const).map((o) => {
+              const isActive = o.id === 'off' ? !l?.blurFade : l?.blurFade?.side === o.id
+              return (
+                <button
+                  key={o.id}
+                  type="button"
+                  data-testid={`blur-fade-${o.id}`}
+                  onClick={() => {
+                    if (o.id === 'off') up({ blurFade: undefined })
+                    else up({ blurFade: { side: o.id, length: l?.blurFade?.length ?? 50 } as BlurFade })
+                  }}
+                  className={`py-1.5 text-[11px] font-semibold rounded-lg border transition-colors ${isActive ? 'border-accent bg-accent/20 text-white' : 'border-line bg-surface2 text-txt2'}`}
+                >
+                  {o.label}
+                </button>
+              )
+            })}
+          </div>
+          {l?.blurFade && (
+            <div className="mt-3">
+              <Slider
+                label="Fade length"
+                tid="slider-blur-fade"
+                value={Math.round(l.blurFade.length)}
+                min={10}
+                max={100}
+                suffix="%"
+                onChange={(v: number) => up({ blurFade: { side: l.blurFade!.side, length: v } })}
+              />
+            </div>
+          )}
+        </div>
+      )}
     </div>
   )
 }
