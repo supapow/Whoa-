@@ -406,18 +406,26 @@ function layerBoxStyle(
     ? (a.opacity === 0 ? 0 : (a.opacity < baseOp ? a.opacity / baseOp : 1))
     : a.opacity
 
-  const centered =
+  const isCentered =
     !keyframed &&
     effectiveLayer.type === 'text' &&
     effectiveLayer.align === 'center' &&
     effectiveLayer.x === 0 &&
     effectiveLayer.w === preset.w &&
     !effectiveLayer.paddingLeft &&
-    !effectiveLayer.paddingRight &&
-    Boolean(measured)
+    !effectiveLayer.paddingRight
+
+  const textW = (measured && measured.offsetWidth > 0)
+    ? measured.offsetWidth
+    : (estimateTextBoxSize(effectiveLayer)?.w || 0)
+
+  const left = (isCentered && textW > 0)
+    ? (preset.w - textW) / 2
+    : effectiveLayer.x
+
   return {
     position: 'absolute',
-    left: centered ? (preset.w - measured!.offsetWidth) / 2 : effectiveLayer.x,
+    left,
     top: effectiveLayer.y,
     width: effectiveLayer.type === 'text' ? 'max-content' : effectiveLayer.w,
     height: effectiveLayer.type === 'text' && effectiveLayer.h !== preset.h ? 'auto' : effectiveLayer.h,
@@ -460,6 +468,37 @@ const casterBoxStyle: React.CSSProperties = {
   width: '100%',
   height: '100%',
   pointerEvents: 'none',
+}
+
+function getLayerRenderBounds(
+  layer: Layer,
+  node: HTMLElement | undefined | null,
+  presetW: number,
+  selH?: number,
+  selectedId?: string | null,
+): { x: number; y: number; w: number; h: number } {
+  const isCentered =
+    !layer.keyframes?.length &&
+    layer.type === 'text' &&
+    layer.align === 'center' &&
+    layer.x === 0 &&
+    layer.w === presetW &&
+    !layer.paddingLeft &&
+    !layer.paddingRight
+
+  const isText = layer.type === 'text'
+  const est = isText ? estimateTextBoxSize(layer) : null
+  const nodeW = isText && node ? node.offsetWidth : node?.offsetWidth
+  const nodeH = isText && node ? node.offsetHeight : node?.offsetHeight
+
+  const w = (nodeW && nodeW > 0) ? nodeW : (est?.w || layer.w)
+  const h = (nodeH && nodeH > 0)
+    ? nodeH
+    : (isText && selectedId && layer.id === selectedId && selH ? selH : (est?.h || layer.h))
+
+  const x = isCentered ? (presetW - w) / 2 : layer.x
+  const y = layer.y
+  return { x, y, w, h }
 }
 
 /**
@@ -876,7 +915,7 @@ export default function Canvas() {
     return exclude
   }, [])
   const { preset } = project
-  const active = mode === 'animated' && (playing || time > 0 || timelineOpen || Boolean(selectedId))
+  const active = mode === 'animated' && (playing || time > 0 || timelineOpen)
 
   const center = useCallback(() => {
     const el = ref.current
@@ -1071,6 +1110,7 @@ export default function Canvas() {
           g.moved = true
         }
         if (g.moved) {
+          if (!g.id || g.fromCanvas) return
           const rawX = g.ox + dx
           const rawY = g.oy + dy
           const bounds = g.group
@@ -2153,7 +2193,7 @@ export default function Canvas() {
           setMultiSelectMode(false)
           multiSelectModeRef.current = false
         }
-      } else if (g?.mode === 'move' && (g.fromCanvas || g.deselectOnTap) && !g.moved) {
+      } else if (g?.mode === 'move' && (g.fromCanvas || g.deselectOnTap) && (!g.moved || !g.id)) {
         if (!pinchTouchSequence.current && !pinching.current) {
           setMultiSelectMode(false)
           multiSelectModeRef.current = false
@@ -2167,7 +2207,7 @@ export default function Canvas() {
           setEditingComponentId(currentSel.id)
         }
       }
-    if (g && (g.mode === 'resize' || (g.mode === 'move' && g.moved))) {
+    if (g && (g.mode === 'resize' || (g.mode === 'move' && g.moved && Boolean(g.id)))) {
       checkpoint()
     }
     gesture.current = null
@@ -2198,12 +2238,9 @@ export default function Canvas() {
       for (const [id, node] of layerRefs.current.entries()) {
         if (node) {
           const l = layersRef.current.find((layer) => layer.id === id)
-          const isCentered = l?.type === 'text' && l.align === 'center' && l.x === 0 && l.w === preset.w
-          const w = node.offsetWidth
-          const h = node.offsetHeight
-          const x = isCentered ? (preset.w - w) / 2 : (l ? l.x : node.offsetLeft)
-          const y = l ? l.y : node.offsetTop
-          measured[id] = { x, y, w, h }
+          if (!l) continue
+          const b = getLayerRenderBounds(l, node, preset.w)
+          measured[id] = { x: b.x, y: b.y, w: b.w, h: b.h }
         }
       }
       nudge(actualDx, actualDy, measured)
@@ -2394,17 +2431,13 @@ export default function Canvas() {
 
     const measured = pinchLayers.map((item) => {
       const itemNode = layerRefs.current.get(item.id)
-      const itemW = (item.type === 'text' && itemNode ? itemNode.offsetWidth : itemNode?.offsetWidth) || item.w
-      const itemH = (item.type === 'text' && itemNode ? itemNode.offsetHeight : itemNode?.offsetHeight) || item.h
-      const itemX = (item.type === 'text' && item.align === 'center' && item.x === 0 && item.w === preset.w && itemNode)
-        ? (preset.w - itemW) / 2
-        : (itemNode?.offsetLeft ?? item.x)
+      const b = getLayerRenderBounds(item, itemNode, preset.w)
       return {
         id: item.id,
-        x: itemX,
-        y: item.y,
-        w: itemW,
-        h: itemH,
+        x: b.x,
+        y: b.y,
+        w: b.w,
+        h: b.h,
         fontSize: item.type === 'text' ? item.fontSize : undefined,
         crop0: item.type === 'image' && item.crop ? { ...item.crop } : undefined,
         isCroppedImage: item.type === 'image' && Boolean(item.crop),
@@ -2894,57 +2927,6 @@ export default function Canvas() {
     }
 
     const topGroup = getTopmostGroup(l.id, project.layers)
-    const isChildOfSelectedGroup = topGroup && selectedIds.includes(topGroup.id)
-    const isExternalToSelection = selectedIds.length > 0 && !selectedIds.includes(l.id) && !isChildOfSelectedGroup
-
-    if (isExternalToSelection) {
-      const allSelectedAndDescIds = new Set<string>()
-      for (const id of selectedIds) {
-        allSelectedAndDescIds.add(id)
-        const desc = getDescendantLayers(id, project.layers)
-        for (const d of desc) allSelectedAndDescIds.add(d.id)
-      }
-      const selectedLayers = project.layers.filter((item) => allSelectedAndDescIds.has(item.id) && item.visible && !item.locked)
-      if (selectedLayers.length > 0) {
-        const primary = selectedLayers[0]
-        const pNode = layerRefs.current.get(primary.id)
-        const pW = (primary.type === 'text' && pNode ? pNode.offsetWidth : pNode?.offsetWidth) || primary.w
-        const pH = (primary.type === 'text' && pNode ? pNode.offsetHeight : pNode?.offsetHeight) || primary.h
-        const pX = (primary.type === 'text' && primary.align === 'center' && primary.x === 0 && primary.w === preset.w && pNode)
-          ? (preset.w - pW) / 2
-          : primary.x
-        const group = selectedLayers.length > 1
-          ? selectedLayers.map((item) => {
-              const itemNode = layerRefs.current.get(item.id)
-              const itemW = (item.type === 'text' && itemNode ? itemNode.offsetWidth : itemNode?.offsetWidth) || item.w
-              const itemH = (item.type === 'text' && itemNode ? itemNode.offsetHeight : itemNode?.offsetHeight) || item.h
-              const itemX = (item.type === 'text' && item.align === 'center' && item.x === 0 && item.w === preset.w && itemNode)
-                ? (preset.w - itemW) / 2
-                : item.x
-              return { id: item.id, x: itemX, y: item.y, w: itemW, h: itemH }
-            })
-          : undefined
-        gesture.current = {
-          id: primary.id,
-          mode: 'move',
-          sx: e.clientX,
-          sy: e.clientY,
-          ox: pX,
-          oy: primary.y,
-          ow: pW,
-          oh: pH,
-          fromCanvas: false,
-          moved: false,
-          deselectOnTap: !multiSelectModeRef.current,
-          tapAddId: multiSelectModeRef.current ? l.id : undefined,
-          group,
-        }
-        if (e.pointerType === 'touch') {
-          e.currentTarget.setPointerCapture?.(e.pointerId)
-        }
-        return
-      }
-    }
 
     if (l.locked) {
       return
@@ -3002,20 +2984,18 @@ export default function Canvas() {
       itemsToMove = [target]
     }
 
-    const node = layerRefs.current.get(target.id)
-    let currentX = (target.type === 'text' && target.align === 'center' && target.x === 0 && target.w === preset.w && node)
-      ? (preset.w - node.offsetWidth) / 2
-      : target.x
+    const b = getLayerRenderBounds(target, layerRefs.current.get(target.id), preset.w, selH, selectedId)
+    let currentX = b.x
     let currentY = target.y
-    let currentW = (target.type === 'text' && node ? node.offsetWidth : node?.offsetWidth) || target.w
-    let currentH = (target.type === 'text' && node ? node.offsetHeight : node?.offsetHeight) || target.h
+    let currentW = b.w
+    let currentH = b.h
 
     if (target.type === 'group' && (!currentW || !currentH)) {
-      const b = computeGroupBounds(target.id, project.layers)
-      currentX = target.x || b.x
-      currentY = target.y || b.y
-      currentW = target.w || b.w
-      currentH = target.h || b.h
+      const gb = computeGroupBounds(target.id, project.layers)
+      currentX = target.x || gb.x
+      currentY = target.y || gb.y
+      currentW = target.w || gb.w
+      currentH = target.h || gb.h
     }
 
     if (target.keyframes && target.keyframes.length > 0) {
@@ -3026,13 +3006,8 @@ export default function Canvas() {
 
     const group = itemsToMove.length > 1
       ? itemsToMove.map((item) => {
-          const itemNode = layerRefs.current.get(item.id)
-          const itemW = (item.type === 'text' && itemNode ? itemNode.offsetWidth : itemNode?.offsetWidth) || item.w
-          const itemH = (item.type === 'text' && itemNode ? itemNode.offsetHeight : itemNode?.offsetHeight) || item.h
-          const itemX = (item.type === 'text' && item.align === 'center' && item.x === 0 && item.w === preset.w && itemNode)
-            ? (preset.w - itemW) / 2
-            : item.x
-          return { id: item.id, x: itemX, y: item.y, w: itemW, h: itemH }
+          const itemB = getLayerRenderBounds(item, layerRefs.current.get(item.id), preset.w, selH, selectedId)
+          return { id: item.id, x: itemB.x, y: item.y, w: itemB.w, h: itemB.h }
         })
       : undefined
 
@@ -3162,11 +3137,10 @@ export default function Canvas() {
     e.preventDefault()
     e.currentTarget.setPointerCapture?.(e.pointerId)
     const node = layerRefs.current.get(l.id)
-    const currentW = l.type === 'text' && node ? node.offsetWidth : l.w
-    const currentH = l.type === 'text' && node ? node.offsetHeight : boxH
-    const currentX = (l.type === 'text' && l.align === 'center' && l.x === 0 && l.w === preset.w && node)
-      ? (preset.w - currentW) / 2
-      : l.x
+    const b = getLayerRenderBounds(l, node, preset.w, boxH, selectedId)
+    const currentW = b.w
+    const currentH = b.h
+    const currentX = b.x
     const originX = group ? (boundsLeft ?? currentX) : currentX
     const originY = group ? (boundsTop ?? l.y) : l.y
     const originW = group ? boxW : currentW
@@ -3620,40 +3594,21 @@ export default function Canvas() {
             e.currentTarget.setPointerCapture?.(e.pointerId)
           }
         } else if (selectedLayers.length > 0) {
-          const primary = selectedLayers[0]
-          const pNode = layerRefs.current.get(primary.id)
-          const pW = (primary.type === 'text' && pNode ? pNode.offsetWidth : pNode?.offsetWidth) || primary.w
-          const pH = (primary.type === 'text' && pNode ? pNode.offsetHeight : pNode?.offsetHeight) || primary.h
-          const pX = (primary.type === 'text' && primary.align === 'center' && primary.x === 0 && primary.w === preset.w && pNode)
-            ? (preset.w - pW) / 2
-            : primary.x
-          const group = selectedLayers.length > 1
-            ? selectedLayers.map((item) => {
-                const itemNode = layerRefs.current.get(item.id)
-                const itemW = (item.type === 'text' && itemNode ? itemNode.offsetWidth : itemNode?.offsetWidth) || item.w
-                const itemH = (item.type === 'text' && itemNode ? itemNode.offsetHeight : itemNode?.offsetHeight) || item.h
-                const itemX = (item.type === 'text' && item.align === 'center' && item.x === 0 && item.w === preset.w && itemNode)
-                  ? (preset.w - itemW) / 2
-                  : item.x
-                return { id: item.id, x: itemX, y: item.y, w: itemW, h: itemH }
-              })
-            : undefined
           gesture.current = {
-            id: primary.id,
+            id: '',
             mode: 'move',
             sx: e.clientX,
             sy: e.clientY,
-            ox: pX,
-            oy: primary.y,
-            ow: pW,
-            oh: pH,
+            ox: 0,
+            oy: 0,
+            ow: 0,
+            oh: 0,
             fromCanvas: true,
             moved: false,
             deselectOnTap: true,
-            group,
           }
           if (e.pointerType === 'touch') {
-            e.currentTarget.setPointerCapture?.(e.pointerId)
+            panGesture.current = { sx: e.clientX, sy: e.clientY, ox: v.x, oy: v.y, moved: false }
           }
         } else if (e.pointerType === 'touch') {
           // On touch, allow panning if no element is selected
@@ -4111,31 +4066,53 @@ export default function Canvas() {
                 }}
               >
                 {/* Crisp Vector Border on Selected Layer */}
-                {isSel && !playing && l.type !== 'group' && !(vectorEditingId === l.id && l.type === 'path') && (
-                  <svg
-                    data-testid={`layer-vector-border-${l.id}`}
-                    className="pointer-events-none absolute inset-0 overflow-visible"
-                    style={{ zIndex: 60, width: '100%', height: '100%' }}
-                  >
-                    <rect
-                      x={Math.max(0.5, 0.75 / eff)}
-                      y={Math.max(0.5, 0.75 / eff)}
-                      width={`calc(100% - ${Math.max(1, 1.5 / eff)}px)`}
-                      height={`calc(100% - ${Math.max(1, 1.5 / eff)}px)`}
-                      rx={effectiveLayer.type === 'shape'
-                        ? (effectiveLayer.shape === 'circle' || effectiveLayer.shape === 'pill'
-                            ? (effectiveLayer.radius !== undefined ? effectiveLayer.radius : 9999)
-                            : (effectiveLayer.radius || 0))
-                        : (effectiveLayer.type === 'text' && effectiveLayer.radius ? effectiveLayer.radius : 0)}
-                      fill="none"
-                      stroke={imagePositioningId === l.id && l.type === 'image'
-                        ? '#38bdf8'
-                        : ((multiSelectMode || selectedIds.length > 1) && !pinchActive ? '#4B1D6B' : '#007AFF')}
-                      strokeWidth={1.5 / eff}
-                      shapeRendering="geometricPrecision"
-                    />
-                  </svg>
-                )}
+                {isSel && !playing && l.type !== 'group' && !(vectorEditingId === l.id && l.type === 'path') && (() => {
+                  const borderRadii = (() => {
+                    if (effectiveLayer.type === 'shape') {
+                      if (effectiveLayer.shape === 'circle') {
+                        return { rx: effectiveLayer.w / 2, ry: effectiveLayer.h / 2 }
+                      }
+                      const maxR = Math.min(effectiveLayer.w, effectiveLayer.h) / 2
+                      if (effectiveLayer.shape === 'pill') {
+                        const r = effectiveLayer.radius !== undefined
+                          ? Math.min(Math.max(0, effectiveLayer.radius), maxR)
+                          : maxR
+                        return { rx: r, ry: r }
+                      }
+                      const r = Math.min(Math.max(0, effectiveLayer.radius ?? 0), maxR)
+                      return { rx: r, ry: r }
+                    }
+                    if (effectiveLayer.type === 'text' && effectiveLayer.radius) {
+                      const maxR = Math.min(effectiveLayer.w, effectiveLayer.h) / 2
+                      const r = Math.min(Math.max(0, effectiveLayer.radius), maxR)
+                      return { rx: r, ry: r }
+                    }
+                    return { rx: 0, ry: 0 }
+                  })()
+
+                  return (
+                    <svg
+                      data-testid={`layer-vector-border-${l.id}`}
+                      className="pointer-events-none absolute inset-0 overflow-visible"
+                      style={{ zIndex: 60, width: '100%', height: '100%' }}
+                    >
+                      <rect
+                        x={Math.max(0.5, 0.75 / eff)}
+                        y={Math.max(0.5, 0.75 / eff)}
+                        width={`calc(100% - ${Math.max(1, 1.5 / eff)}px)`}
+                        height={`calc(100% - ${Math.max(1, 1.5 / eff)}px)`}
+                        rx={borderRadii.rx}
+                        ry={borderRadii.ry}
+                        fill="none"
+                        stroke={imagePositioningId === l.id && l.type === 'image'
+                          ? '#38bdf8'
+                          : ((multiSelectMode || selectedIds.length > 1) && !pinchActive ? '#4B1D6B' : '#007AFF')}
+                        strokeWidth={1.5 / eff}
+                        shapeRendering="geometricPrecision"
+                      />
+                    </svg>
+                  )
+                })()}
                 <div style={{ width: '100%', height: '100%', filter: combinedFilter }}>
                   <LayerContent
                     layer={effectiveLayer}
@@ -4187,18 +4164,7 @@ export default function Canvas() {
             const measured = (layer: Layer) => {
               const effLayer = layer.keyframes && layer.keyframes.length > 0 ? interpolateKeyframes(layer, time) : layer
               const node = layerRefs.current.get(effLayer.id)
-              const isText = effLayer.type === 'text'
-              const textW = (isText && node ? node.offsetWidth : 0) || effLayer.w
-              const posX = !effLayer.keyframes?.length && isText && effLayer.align === 'center' && effLayer.x === 0 && effLayer.w === preset.w
-                ? (preset.w - textW) / 2
-                : effLayer.x
-              const textH = (isText && node ? node.offsetHeight : 0) || (isText && effLayer.id === selectedId ? selH : 0) || effLayer.h
-              return {
-                x: posX,
-                y: effLayer.y,
-                w: isText ? textW : effLayer.w,
-                h: isText ? textH : effLayer.h,
-              }
+              return getLayerRenderBounds(effLayer, node, preset.w, selH, selectedId)
             }
             let bounds = selected.reduce(
               (box, layer) => {
@@ -5926,7 +5892,9 @@ function LayerContent({
             <line x1={0} y1={layer.h / 2} x2={layer.w} y2={layer.h / 2} stroke={fill} strokeOpacity={fillOpacity} strokeWidth={Math.max(2, layer.h * 0.12)} strokeLinecap="round" shapeRendering="geometricPrecision" />
           </svg>
         )
-      case 'pill':
+      case 'pill': {
+        const maxR = Math.min(layer.w, layer.h) / 2
+        const pillR = layer.radius !== undefined ? Math.min(Math.max(0, layer.radius), maxR) : maxR
         return (
           <svg viewBox={`0 0 ${layer.w} ${layer.h}`} width="100%" height="100%" style={{ display: 'block', overflow: 'visible' }} shapeRendering="geometricPrecision">
             <rect
@@ -5934,8 +5902,8 @@ function LayerContent({
               y={0}
               width={layer.w}
               height={layer.h}
-              rx={Math.min(layer.w, layer.h) / 2}
-              ry={Math.min(layer.w, layer.h) / 2}
+              rx={pillR}
+              ry={pillR}
               fill={fill}
               fillOpacity={fillOpacity}
               stroke={stroke}
@@ -5950,8 +5918,8 @@ function LayerContent({
                 y={0}
                 width={layer.w}
                 height={layer.h}
-                rx={Math.min(layer.w, layer.h) / 2}
-                ry={Math.min(layer.w, layer.h) / 2}
+                rx={pillR}
+                ry={pillR}
                 fill="none"
                 stroke="#d1d5db"
                 strokeWidth={1 / eff}
@@ -5960,7 +5928,12 @@ function LayerContent({
             )}
           </svg>
         )
+      }
       case 'rectangle':
+      case 'rect':
+      default: {
+        const maxR = Math.min(layer.w, layer.h) / 2
+        const r = Math.min(Math.max(0, layer.radius !== undefined ? layer.radius : 0), maxR)
         return (
           <svg viewBox={`0 0 ${layer.w} ${layer.h}`} width="100%" height="100%" style={{ display: 'block', overflow: 'visible' }} shapeRendering="geometricPrecision">
             <rect
@@ -5968,8 +5941,8 @@ function LayerContent({
               y={0}
               width={layer.w}
               height={layer.h}
-              rx={layer.radius !== undefined ? layer.radius : 0}
-              ry={layer.radius !== undefined ? layer.radius : 0}
+              rx={r}
+              ry={r}
               fill={fill}
               fillOpacity={fillOpacity}
               stroke={stroke}
@@ -5984,8 +5957,8 @@ function LayerContent({
                 y={0}
                 width={layer.w}
                 height={layer.h}
-                rx={layer.radius !== undefined ? layer.radius : 0}
-                ry={layer.radius !== undefined ? layer.radius : 0}
+                rx={r}
+                ry={r}
                 fill="none"
                 stroke="#d1d5db"
                 strokeWidth={1 / eff}
@@ -5994,15 +5967,7 @@ function LayerContent({
             )}
           </svg>
         )
-      default:
-        return (
-          <svg viewBox={`0 0 ${layer.w} ${layer.h}`} width="100%" height="100%" style={{ display: 'block', overflow: 'visible' }} shapeRendering="geometricPrecision">
-            <rect x={0} y={0} width={layer.w} height={layer.h} rx={layer.radius || 0} fill={fill} fillOpacity={fillOpacity} stroke={stroke} strokeWidth={strokeWidth} strokeOpacity={strokeOpacity} shapeRendering="geometricPrecision" style={{ transition: 'fill-opacity 0.2s ease' }} />
-            {isVectorEditing && (
-              <rect x={0} y={0} width={layer.w} height={layer.h} rx={layer.radius || 0} fill="none" stroke="#d1d5db" strokeWidth={1 / eff} shapeRendering="geometricPrecision" />
-            )}
-          </svg>
-        )
+      }
     }
   }
 

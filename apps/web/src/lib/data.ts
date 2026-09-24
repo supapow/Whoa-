@@ -221,8 +221,8 @@ export const TEMPLATES: Template[] = [
     (p) => [
       createLayer('text', p, { text: 'SUMMER', fontSize: Math.round(p.w * 0.18), fontWeight: 800, color: '#1a1a1a', y: p.h * 0.18, x: 0, w: p.w, align: 'center', anim: 'rise' }),
       createLayer('text', p, { text: 'SALE', fontSize: Math.round(p.w * 0.3), fontWeight: 800, color: '#FFFFFF', y: p.h * 0.34, x: 0, w: p.w, align: 'center', anim: 'pop', start: 300 }),
-      createLayer('shape', p, { shape: 'rect', fill: '#1a1a1a', radius: 999, w: p.w * 0.5, h: p.h * 0.11, x: p.w * 0.25, y: p.h * 0.7, anim: 'slide', start: 600 }),
-      createLayer('text', p, { text: 'UP TO 50% OFF', fontSize: Math.round(p.w * 0.05), fontWeight: 700, color: '#FFFFFF', y: p.h * 0.725, x: 0, w: p.w, align: 'center', start: 800 }),
+      createLayer('shape', p, { shape: 'pill', name: 'Pill Button', fill: '#1a1a1a', radius: 9999, w: p.w * 0.5, h: p.h * 0.11, x: p.w * 0.25, y: p.h * 0.7, anim: 'slide', start: 600 }),
+      createLayer('text', p, { text: 'UP TO 50% OFF', fontSize: Math.round(p.w * 0.05), fontWeight: 700, color: '#FFFFFF', y: p.h * 0.735, x: 0, w: p.w, align: 'center', start: 800 }),
     ], 'animated'),
 
   tmpl('t-yt', 'Gaming Thumbnail', 'yt-thumb', GRADIENTS[4],

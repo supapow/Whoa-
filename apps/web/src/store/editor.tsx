@@ -22,6 +22,7 @@ import {
 } from '#/lib/keyframes'
 import { scaleVectorPoints, buildSvgPath } from '#/lib/vector'
 import { convertTextLayerToVectors } from '#/lib/textToVector'
+import { estimateTextBoxSize } from '#/lib/shadows'
 
 export interface HistoryEntry {
   project: Project
@@ -223,8 +224,9 @@ function innerReducer(state: State, a: Action): State {
           }
           const isCenteredTemplateText =
             layer.type === 'text' && layer.align === 'center' && layer.x === 0 && layer.w === p.preset.w
-          const x = isCenteredTemplateText ? (p.preset.w - layer.w) / 2 : layer.x
-          return { x, y: layer.y, w: layer.w, h: layer.h }
+          const w = isCenteredTemplateText ? (estimateTextBoxSize(layer)?.w || layer.w) : layer.w
+          const x = isCenteredTemplateText ? (p.preset.w - w) / 2 : layer.x
+          return { x, y: layer.y, w, h: layer.h }
         }
 
         const boxes = new Map(children.map((layer) => [layer.id, getBox(layer)]))
@@ -366,8 +368,9 @@ function innerReducer(state: State, a: Action): State {
         }
         const isCenteredTemplateText =
           layer.type === 'text' && layer.align === 'center' && layer.x === 0 && layer.w === p.preset.w
-        const x = isCenteredTemplateText ? (p.preset.w - layer.w) / 2 : layer.x
-        return { x, y: layer.y, w: layer.w, h: layer.h }
+        const w = isCenteredTemplateText ? (estimateTextBoxSize(layer)?.w || layer.w) : layer.w
+        const x = isCenteredTemplateText ? (p.preset.w - w) / 2 : layer.x
+        return { x, y: layer.y, w, h: layer.h }
       }
 
       const boxes = new Map(selected.map((layer) => [layer.id, getBox(layer)]))
@@ -500,12 +503,15 @@ function innerReducer(state: State, a: Action): State {
           l.type === 'text' && l.align === 'center' && l.x === 0 && l.w === p.preset.w
         const measuredBox = a.measured?.[l.id]
 
-        if (isCenteredTemplateText && measuredBox) {
+        if (isCenteredTemplateText) {
+          const estW = estimateTextBoxSize(l)?.w || l.w
+          const currentX = measuredBox ? measuredBox.x : (p.preset.w - estW) / 2
+          const currentW = measuredBox ? measuredBox.w : estW
           return {
             ...l,
-            x: Math.round(measuredBox.x + a.dx),
-            y: Math.round(measuredBox.y + a.dy),
-            w: Math.round(measuredBox.w),
+            x: Math.round(currentX + a.dx),
+            y: Math.round((measuredBox?.y ?? l.y) + a.dy),
+            w: Math.round(currentW),
           }
         }
 
