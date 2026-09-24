@@ -611,12 +611,14 @@ function innerReducer(state: State, a: Action): State {
   const selected = p.layers.filter((layer) => targetIds.includes(layer.id))
   if (selected.length < 2) return state
 
-  // The top-most selected layer is the mask. Array order is the editor's z-order.
-  const mask = selected[selected.length - 1]
+  // Layers are stored in top-to-bottom z-order, so the first selected layer is
+  // the top-most candidate and becomes the mask. A selected group is only the
+  // destination; never mark the group wrapper itself as a mask.
   const existingGroup = selected.find((layer) => layer.type === 'group')
+  const mask = selected.find((layer) => layer.type !== 'group')
+  if (!mask) return state
   if (existingGroup) {
-    const maskLayer = mask.id === existingGroup.id ? selected[selected.length - 2] : mask
-    const layers = p.layers.map((layer) => layer.id === maskLayer.id
+    const layers = p.layers.map((layer) => layer.id === mask.id
       ? { ...layer, groupId: existingGroup.id, isMask: true }
       : layer)
     return {
