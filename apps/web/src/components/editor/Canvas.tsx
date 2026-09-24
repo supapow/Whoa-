@@ -8,7 +8,7 @@ import { findGapMatch, type GapMatchResult } from '#/lib/gapMatch'
 import { findElementAlignMatch, type ElementAlignResult } from '#/lib/elementAlign'
 import { parseImagePosition, formatImagePosition, calcImagePositionDelta } from '#/lib/imagePosition'
 import { interpolateKeyframes } from '#/lib/keyframes'
-import { layerNeedsSvgFilter, shadowFilterId, dropShadowCss, shadowFilterRegion, dropCasterFilterId, innerCasterFilterId } from '#/lib/shadows'
+import { layerNeedsSvgFilter, shadowFilterId, dropShadowCss, shadowFilterRegion, dropCasterFilterId, innerCasterFilterId, estimateTextBoxSize } from '#/lib/shadows'
 import {
   buildSvgPath, scaleVectorPoints, tightenVectorLayer,
   updateHandleWithMode, snapVectorAnchor, snapVectorHandle, switchPointBezierMode,
@@ -483,11 +483,13 @@ function ShadowFilterDefs({
   preset,
   time,
   active,
+  textSizes,
 }: {
   layers: Layer[]
   preset: { w: number; h: number }
   time: number
   active: boolean
+  textSizes: Record<string, { w: number; h: number }>
 }) {
   const filters: { id: string; region: ReturnType<typeof shadowFilterRegion>; nodes: React.ReactNode[] }[] = []
 
@@ -503,9 +505,15 @@ function ShadowFilterDefs({
     const inner = eff.innerShadow
     if (!drop && !inner) continue
 
-    // text boxes are measured (max-content / auto height) — artboard size is the safe ref
-    const refW = eff.type === 'text' || !eff.w ? preset.w : eff.w
-    const refH = eff.type === 'text' || !eff.h ? preset.h : eff.h
+    // Text renders max-content / auto height, so the reference box is the live
+    // DOM measurement when available, else a canvas-measured estimate. The
+    // artboard preset is only the last-resort fallback: percentages resolve
+    // against the element's own box, and preset-derived values under-pad
+    // short text until shadows clip at max offset/blur/spread.
+    const measured = textSizes[l.id]
+    const est = eff.type === 'text' ? (measured ?? estimateTextBoxSize(eff)) : undefined
+    const refW = eff.type === 'text' ? (est?.w || preset.w) : (eff.w || preset.w)
+    const refH = eff.type === 'text' ? (est?.h || preset.h) : (eff.h || preset.h)
 
     filters.push({
       id: shadowFilterId(l.id),
@@ -903,6 +911,48 @@ export default function Canvas() {
     ro.observe(el)
     return () => ro.disconnect()
   }, [selectedId, editingId])
+
+  // Live max-content boxes for text layers carrying SVG shadows. Filter-region
+  // percentages resolve against the element's own box, so ShadowFilterDefs
+  // needs the rendered size — not the artboard preset.
+  const [shadowTextSizes, setShadowTextSizes] = useState<Record<string, { w: number; h: number }>>({})
+  const measureShadowText = useCallback(() => {
+    setShadowTextSizes((prev) => {
+      const next: Record<string, { w: number; h: number }> = {}
+      for (const l of project.layers) {
+        if (l.type !== 'text' || l.visible === false) continue
+        const eff = l.keyframes && l.keyframes.length > 0 ? interpolateKeyframes(l, time) : l
+        if (!layerNeedsSvgFilter(eff)) continue
+        const drop = eff.dropShadow && eff.dropShadow.spread !== 0 ? eff.dropShadow : undefined
+        if (!drop && !eff.innerShadow) continue
+        const node = layerRefs.current.get(l.id)
+        if (!node) continue
+        const w = node.offsetWidth
+        const h = node.offsetHeight
+        if (!(w > 0 && h > 0)) continue
+        next[l.id] = { w, h }
+      }
+      const prevKeys = Object.keys(prev)
+      const nextKeys = Object.keys(next)
+      if (prevKeys.length === nextKeys.length && nextKeys.every((k) => {
+        const p = prev[k]
+        const n = next[k]
+        return p !== undefined && p.w === n.w && p.h === n.h
+      })) return prev
+      return next
+    })
+  }, [project.layers, time])
+  useLayoutEffect(() => { measureShadowText() }, [measureShadowText])
+  // Font loads and text edits resize nodes without a layers/time change.
+  useEffect(() => {
+    const ro = new ResizeObserver(() => measureShadowText())
+    for (const l of project.layers) {
+      if (l.type !== 'text') continue
+      const node = layerRefs.current.get(l.id)
+      if (node) ro.observe(node)
+    }
+    return () => ro.disconnect()
+  }, [project.layers, measureShadowText])
 
   useEffect(() => {
     const move = (e: PointerEvent) => {
@@ -3746,7 +3796,7 @@ export default function Canvas() {
           style={{ width: preset.w, height: preset.h, transformOrigin: 'center', ...bgStyle }}
           data-testid="artboard"
         >
-          <ShadowFilterDefs layers={project.layers} preset={preset} time={time} active={active} />
+          <ShadowFilterDefs layers={project.layers} preset={preset} time={time} active={active} textSizes={shadowTextSizes} />
           {snapGuides && snapGuides.active && (
             <>
               {snapGuides.xGuides.includes(preset.w / 2) && (

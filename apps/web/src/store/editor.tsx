@@ -16,6 +16,7 @@ import {
 import {
   convertAnimationToKeyframes,
   hasKeyframeAt,
+  interpolateKeyframes,
   removeKeyframeAt,
   upsertKeyframe,
 } from '#/lib/keyframes'
@@ -597,7 +598,17 @@ function innerReducer(state: State, a: Action): State {
       }
     }
     case 'ungroup': {
-      const { newLayers, unpackedIds } = ungroupLayer(p.layers, a.groupId)
+      // Snapshot a keyframed group's shadows at the current time so the
+      // unpacked children keep the look the group had when it was removed.
+      const group = p.layers.find((l) => l.id === a.groupId && l.type === 'group')
+      const effG = group && group.keyframes && group.keyframes.length > 0
+        ? interpolateKeyframes(group, state.time)
+        : group
+      const { newLayers, unpackedIds } = ungroupLayer(
+        p.layers,
+        a.groupId,
+        effG ? { dropShadow: effG.dropShadow, innerShadow: effG.innerShadow } : undefined,
+      )
       return {
         ...state,
         project: touch({ ...p, layers: newLayers }),

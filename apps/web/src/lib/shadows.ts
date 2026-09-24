@@ -58,14 +58,69 @@ export function layerNeedsSvgFilter(layer: { dropShadow?: ShadowEffect; innerSha
 
 /**
  * Percent-based filter region so offset+blur+spread never clip.
- * Generous but bounded; keyed on the dominant dimension.
+ *
+ * Percentages resolve against the filtered element's OWN box, so the
+ * reference w/h must be that box — not the artboard. There is intentionally
+ * no upper clamp: the absolute extension is pad px regardless of the box
+ * size, so small boxes at large settings stay correct without blowing up
+ * the filter surface. The 25% floor covers antialiasing on tiny pads.
  */
 export function shadowFilterRegion(w: number, h: number, e: ShadowEffect): { x: string; y: string; width: string; height: string } {
   const padX = Math.abs(e.x) + Math.abs(e.spread) + e.blur
   const padY = Math.abs(e.y) + Math.abs(e.spread) + e.blur
-  const px = Math.min(300, Math.max(25, (padX / Math.max(1, w)) * 100))
-  const py = Math.min(300, Math.max(25, (padY / Math.max(1, h)) * 100))
+  const px = Math.max(25, (padX / Math.max(1, w)) * 100)
+  const py = Math.max(25, (padY / Math.max(1, h)) * 100)
   return { x: `${-px}%`, y: `${-py}%`, width: `${100 + px * 2}%`, height: `${100 + py * 2}%` }
+}
+
+let measureCtx: CanvasRenderingContext2D | null | undefined
+
+function textMeasureCtx(): CanvasRenderingContext2D | null {
+  if (measureCtx !== undefined) return measureCtx
+  if (typeof document === 'undefined') {
+    measureCtx = null
+    return measureCtx
+  }
+  try {
+    measureCtx = document.createElement('canvas').getContext('2d')
+  } catch {
+    measureCtx = null
+  }
+  return measureCtx
+}
+
+/**
+ * Synchronous estimate of a text layer's rendered max-content box
+ * (whiteSpace: pre, lineHeight 0.8 — matches the canvas text render).
+ * Used as the filter-region reference until the live DOM measurement
+ * arrives; deliberately approximate, since over-padding is harmless
+ * and under-padding clips.
+ */
+export function estimateTextBoxSize(l: {
+  text?: string
+  fontFamily?: string
+  fontSize?: number
+  fontWeight?: number
+  paddingLeft?: number
+  paddingRight?: number
+  paddingTop?: number
+  paddingBottom?: number
+}): { w: number; h: number } | null {
+  const ctx = textMeasureCtx()
+  if (!ctx) return null
+  const size = l.fontSize ?? 40
+  try {
+    const fam = (l.fontFamily ?? 'sans-serif').replace(/["']/g, '')
+    ctx.font = `${l.fontWeight ?? 400} ${size}px "${fam}", sans-serif`
+    const lines = (l.text ?? '').split('\n')
+    let w = 0
+    for (const line of lines) w = Math.max(w, ctx.measureText(line).width)
+    w += (l.paddingLeft ?? 0) + (l.paddingRight ?? 0)
+    const h = lines.length * size * 0.8 + (l.paddingTop ?? 0) + (l.paddingBottom ?? 0)
+    return { w: Math.max(1, w), h: Math.max(1, h) }
+  } catch {
+    return null
+  }
 }
 
 export function lerpShadowEffect(
