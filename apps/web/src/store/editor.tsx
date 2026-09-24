@@ -554,8 +554,20 @@ function innerReducer(state: State, a: Action): State {
     }
     case 'tool':
       return { ...state, tool: a.tool }
-    case 'addLayer':
-      return { ...state, project: touch({ ...p, layers: [...p.layers, a.layer] }), selectedId: a.layer.id, selectedIds: [a.layer.id], tool: null }
+    case 'addLayer': {
+      // Fresh layers ship with an automatic in-animation (see createLayer).
+      // A project containing animations is de facto animated: without this
+      // flip the preset in/out anims never evaluate (Canvas gates them on
+      // project.mode === 'animated'), so pressing play would do nothing.
+      // Mirrors previewAnim in the Animate panel, which also flips to
+      // 'animated' when an animation enters the picture.
+      const hasAnim =
+        (a.layer.inAnim && a.layer.inAnim !== 'none') ||
+        (a.layer.anim && a.layer.anim !== 'none') ||
+        (a.layer.outAnim && a.layer.outAnim !== 'none')
+      const base = hasAnim && p.mode !== 'animated' ? { ...p, mode: 'animated' as const } : p
+      return { ...state, project: touch({ ...base, layers: [...p.layers, a.layer] }), selectedId: a.layer.id, selectedIds: [a.layer.id], tool: null }
+    }
     case 'updateLayer': {
       let layers = p.layers.map((l) => (l.id === a.id ? applyLayerUpdate(l, a.patch, state.time) : l))
       const targetLayer = layers.find((l) => l.id === a.id)
