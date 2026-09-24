@@ -1457,6 +1457,21 @@ export function convertShapeToVector(shapeLayer: Layer): Partial<Layer> {
     stroke: shapeLayer.shape === 'line' ? (shapeLayer.fill || '#007AFF') : undefined,
     strokeWidth: shapeLayer.shape === 'line' ? Math.max(3, shapeLayer.h * 0.12) : 0,
     fillRule: 'nonzero',
+    // Retain outer and inner shadow effects
+    shadowEnabled: shapeLayer.shadowEnabled,
+    shadowColor: shapeLayer.shadowColor,
+    shadowBlur: shapeLayer.shadowBlur,
+    shadowX: shapeLayer.shadowX,
+    shadowY: shapeLayer.shadowY,
+    shadowSpread: shapeLayer.shadowSpread,
+    shadowOpacity: shapeLayer.shadowOpacity,
+    innerShadowEnabled: shapeLayer.innerShadowEnabled,
+    innerShadowColor: shapeLayer.innerShadowColor,
+    innerShadowBlur: shapeLayer.innerShadowBlur,
+    innerShadowX: shapeLayer.innerShadowX,
+    innerShadowY: shapeLayer.innerShadowY,
+    innerShadowSpread: shapeLayer.innerShadowSpread,
+    innerShadowOpacity: shapeLayer.innerShadowOpacity,
   }
 }
 

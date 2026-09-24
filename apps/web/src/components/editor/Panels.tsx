@@ -1545,7 +1545,13 @@ function BlurPanel() {
         max={80}
         step={1}
         suffix="px"
-        onChange={(v: number) => up({ blur: v })}
+        onChange={(v: number) => {
+          const patch: Partial<Layer> = { blur: v }
+          if (v > 0 && currentType === 'backdrop' && l && (l.opacity === undefined || l.opacity >= 0.99)) {
+            patch.opacity = 0.65
+          }
+          up(patch)
+        }}
       />
 
       {/* Quick Presets */}
@@ -1559,7 +1565,13 @@ function BlurPanel() {
                 key={p.label}
                 type="button"
                 data-testid={`blur-preset-${p.val}`}
-                onClick={() => up({ blur: p.val })}
+                onClick={() => {
+                  const patch: Partial<Layer> = { blur: p.val }
+                  if (p.val > 0 && currentType === 'backdrop' && l && (l.opacity === undefined || l.opacity >= 0.99)) {
+                    patch.opacity = 0.65
+                  }
+                  up(patch)
+                }}
                 className={`flex flex-col items-center justify-center rounded-xl border py-2 px-1 text-center transition-all active:scale-95 cursor-pointer ${
                   isSelected
                     ? 'border-accent bg-accent/10 text-accent font-semibold shadow-xs'
@@ -1581,7 +1593,11 @@ function BlurPanel() {
           <button
             type="button"
             data-testid="blur-type-element"
-            onClick={() => up({ blurType: 'element' })}
+            onClick={() => {
+              const patch: Partial<Layer> = { blurType: 'element' }
+              if (currentBlur === 0) patch.blur = 10
+              up(patch)
+            }}
             className={`flex flex-col items-start rounded-xl border p-3 text-left transition-all active:scale-95 cursor-pointer ${
               currentType !== 'backdrop'
                 ? 'border-accent bg-accent/10 text-accent ring-1 ring-accent/30'
@@ -1595,7 +1611,14 @@ function BlurPanel() {
           <button
             type="button"
             data-testid="blur-type-backdrop"
-            onClick={() => up({ blurType: 'backdrop' })}
+            onClick={() => {
+              const patch: Partial<Layer> = { blurType: 'backdrop' }
+              if (currentBlur === 0) patch.blur = 20
+              if (l && (l.opacity === undefined || l.opacity >= 0.99)) {
+                patch.opacity = 0.65
+              }
+              up(patch)
+            }}
             className={`flex flex-col items-start rounded-xl border p-3 text-left transition-all active:scale-95 cursor-pointer ${
               currentType === 'backdrop'
                 ? 'border-accent bg-accent/10 text-accent ring-1 ring-accent/30'
@@ -1626,7 +1649,7 @@ type EffectPreset = { label: string; desc: string; values: ShadowEffect | null }
 
 /**
  * One shadow effect's controls: status header with enable toggle + reset, then (when on)
- * offset/blur/spread/opacity sliders, a swatch row with an expandable ColorPicker, and quick
+ * offset/blur/opacity sliders, a swatch row with an expandable ColorPicker, and quick
  * presets. Both effects in the panel are rendered through this so they can't drift apart.
  */
 function EffectControls({
@@ -1667,7 +1690,6 @@ function EffectControls({
         v.x === p.values.x &&
         v.y === p.values.y &&
         v.blur === p.values.blur &&
-        v.spread === p.values.spread &&
         v.color === p.values.color &&
         Number(v.opacity.toFixed(3)) === p.values.opacity
       : !enabled
@@ -1717,7 +1739,6 @@ function EffectControls({
           <Slider label="Offset X" tid={`${eid}-x`} value={v.x} min={-100} max={100} suffix="px" onChange={(n: number) => set({ x: n })} />
           <Slider label="Offset Y" tid={`${eid}-y`} value={v.y} min={-100} max={100} suffix="px" onChange={(n: number) => set({ y: n })} />
           <Slider label="Blur" tid={`${eid}-blur`} value={v.blur} min={0} max={80} suffix="px" onChange={(n: number) => set({ blur: n })} />
-          <Slider label="Spread" tid={`${eid}-spread`} value={v.spread} min={-20} max={60} suffix="px" onChange={(n: number) => set({ spread: n })} />
           <Slider label="Opacity" tid={`${eid}-opacity`} value={Math.round(v.opacity * 100)} min={0} max={100} suffix="%" onChange={(n: number) => set({ opacity: n / 100 })} />
 
           {/* Color: swatch row + expandable picker */}
@@ -1810,14 +1831,14 @@ function EffectsPanel() {
     { label: 'Off', desc: 'none', values: null },
     { label: 'Subtle', desc: '6px', values: { x: 0, y: 2, blur: 6, spread: 0, color: '#000000', opacity: 0.25 } },
     { label: 'Soft', desc: '16px', values: { x: 0, y: 6, blur: 16, spread: 0, color: '#000000', opacity: 0.35 } },
-    { label: 'Deep', desc: '32px', values: { x: 0, y: 12, blur: 32, spread: 2, color: '#000000', opacity: 0.45 } },
+    { label: 'Deep', desc: '32px', values: { x: 0, y: 12, blur: 32, spread: 0, color: '#000000', opacity: 0.45 } },
   ]
 
   const innerPresets: EffectPreset[] = [
     { label: 'Off', desc: 'none', values: null },
     { label: 'Top', desc: '4px', values: { x: 0, y: -2, blur: 4, spread: 0, color: '#000000', opacity: 0.35 } },
     { label: 'Inset', desc: '8px', values: { x: 0, y: 4, blur: 8, spread: 0, color: '#000000', opacity: 0.4 } },
-    { label: 'Carve', desc: 'tight', values: { x: 0, y: 2, blur: 2, spread: 3, color: '#000000', opacity: 0.5 } },
+    { label: 'Carve', desc: 'tight', values: { x: 0, y: 2, blur: 2, spread: 0, color: '#000000', opacity: 0.5 } },
   ]
 
   return (

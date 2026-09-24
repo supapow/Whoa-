@@ -42,6 +42,11 @@ export function shadowCssColor(effect: ShadowEffect): string {
   return c
 }
 
+/** Convert a hex or rgb color with an opacity into an rgba() string. */
+export function colorToRgba(color: string, opacity: number): string {
+  return shadowCssColor({ x: 0, y: 0, blur: 0, spread: 0, color, opacity })
+}
+
 /**
  * CSS fast path: drop-shadow() has no spread, so only use it when spread === 0.
  * Inner shadow has no CSS equivalent at all — always SVG.

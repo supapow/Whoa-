@@ -8,7 +8,7 @@ import { findGapMatch, type GapMatchResult } from '#/lib/gapMatch'
 import { findElementAlignMatch, type ElementAlignResult } from '#/lib/elementAlign'
 import { parseImagePosition, formatImagePosition, calcImagePositionDelta } from '#/lib/imagePosition'
 import { interpolateKeyframes } from '#/lib/keyframes'
-import { layerNeedsSvgFilter, shadowFilterId, dropShadowCss, shadowFilterRegion, dropCasterFilterId, innerCasterFilterId, estimateTextBoxSize } from '#/lib/shadows'
+import { layerNeedsSvgFilter, shadowFilterId, dropShadowCss, shadowFilterRegion, dropCasterFilterId, innerCasterFilterId, estimateTextBoxSize, colorToRgba } from '#/lib/shadows'
 import {
   buildSvgPath, scaleVectorPoints, tightenVectorLayer,
   updateHandleWithMode, snapVectorAnchor, snapVectorHandle, switchPointBezierMode,
@@ -335,14 +335,12 @@ function getCompositeAnim(
 /**
  * Primitive chain shared by every shadow <filter>.
  *
- * - `'full'`      → regular layer filter. Drop branch only when `drop` is passed (Step A passes
- *                   it only for spread !== 0 — spread === 0 drops use the CSS `drop-shadow()`
- *                   fast path, so passing both would double-paint) + inner branch, merged as
- *                   drop → SourceGraphic → inner.
- * - `'dropOnly'`  → group drop caster (Step B): output is the drop silhouette ONLY. SourceGraphic
+ * - `'full'`      → regular layer filter. Inner branch merged with SourceGraphic.
+ *                   (Regular layer drop shadows run on the CSS `drop-shadow()` fast path).
+ * - `'dropOnly'`  → group drop caster: output is the drop silhouette ONLY. SourceGraphic
  *                   is omitted so the duplicate subtree's own pixels are discarded — only its
  *                   alpha drives the shadow (no double-draw).
- * - `'innerOnly'` → group inner caster (Step B): output is the inner band ONLY.
+ * - `'innerOnly'` → group inner caster: output is the inner band ONLY.
  *
  * `stdDeviation = blur / 2` to match CSS `drop-shadow()` radius semantics.
  * `colorInterpolationFilters="sRGB"` must be set on every <filter> (set by the caller).
@@ -355,39 +353,14 @@ function shadowFilterNodes(
   const nodes: React.ReactNode[] = []
 
   if (drop) {
-    // spread: Figma-style. dilate grows the silhouette outward; erode pulls it inward.
-    const morph = drop.spread !== 0
-    if (morph) {
-      nodes.push(
-        <feMorphology
-          key="d-spread"
-          in="SourceAlpha"
-          operator={drop.spread > 0 ? 'dilate' : 'erode'}
-          radius={Math.abs(drop.spread)}
-          result="dspread"
-        />,
-      )
-    }
-    nodes.push(<feOffset key="d-off" in={morph ? 'dspread' : 'SourceAlpha'} dx={drop.x} dy={drop.y} result="doffset" />)
+    nodes.push(<feOffset key="d-off" in="SourceAlpha" dx={drop.x} dy={drop.y} result="doffset" />)
     nodes.push(<feGaussianBlur key="d-blur" in="doffset" stdDeviation={Math.max(0, drop.blur) / 2} result="dblur" />)
     nodes.push(<feFlood key="d-flood" floodColor={drop.color} floodOpacity={drop.opacity} result="dflood" />)
     nodes.push(<feComposite key="d-comp" in="dflood" in2="dblur" operator="in" result="dropShadow" />)
   }
 
   if (inner) {
-    const morph = inner.spread !== 0
-    if (morph) {
-      nodes.push(
-        <feMorphology
-          key="i-spread"
-          in="SourceAlpha"
-          operator={inner.spread > 0 ? 'erode' : 'dilate'}
-          radius={Math.abs(inner.spread)}
-          result="ispread"
-        />,
-      )
-    }
-    nodes.push(<feOffset key="i-off" in={morph ? 'ispread' : 'SourceAlpha'} dx={inner.x} dy={inner.y} result="ioffset" />)
+    nodes.push(<feOffset key="i-off" in="SourceAlpha" dx={inner.x} dy={inner.y} result="ioffset" />)
     nodes.push(<feGaussianBlur key="i-blur" in="ioffset" stdDeviation={Math.max(0, inner.blur) / 2} result="iblur" />)
     // band = inside the source silhouette but NOT covered by the offset/blurred silhouette
     nodes.push(<feComposite key="i-band" in="SourceAlpha" in2="iblur" operator="out" result="iband" />)
@@ -407,13 +380,6 @@ function shadowFilterNodes(
   return nodes
 }
 
-/** Bigger pad wins — the region must fit whichever effect reaches furthest. */
-function shadowRegionEffect(drop: ShadowEffect | undefined, inner: ShadowEffect | undefined): ShadowEffect {
-  const pad = (e: ShadowEffect) => Math.abs(e.x) + Math.abs(e.y) + Math.abs(e.spread) + e.blur
-  if (drop && inner) return pad(inner) >= pad(drop) ? inner : drop
-  return (inner || drop)!
-}
-
 /**
  * Geometry + animation styling for a layer's outer box. Shared by the live render loop and the
  * group shadow-caster duplicates (Step B) — the caster silhouette must match the real render
@@ -430,6 +396,16 @@ function layerBoxStyle(
   measured: HTMLDivElement | undefined,
   keyframed: boolean,
 ): React.CSSProperties {
+  const isBackdrop = effectiveLayer.blurType === 'backdrop' && Boolean(effectiveLayer.blur && effectiveLayer.blur > 0)
+  const baseOp = Math.max(0.001, effectiveLayer.opacity ?? 1)
+  // For backdrop blur, we do not fade the container box itself onto the unblurred artboard at resting state;
+  // instead, the fill/tint inside the shape carries the translucent opacity, allowing the 100% blurred
+  // backdrop to shine through the translucent tint. If an entrance/exit animation is actively fading,
+  // we scale the container's opacity proportionally.
+  const containerOpacity = isBackdrop
+    ? (a.opacity === 0 ? 0 : (a.opacity < baseOp ? a.opacity / baseOp : 1))
+    : a.opacity
+
   const centered =
     !keyframed &&
     effectiveLayer.type === 'text' &&
@@ -451,15 +427,27 @@ function layerBoxStyle(
     paddingRight: effectiveLayer.paddingRight ? `${effectiveLayer.paddingRight}px` : undefined,
     paddingBottom: effectiveLayer.paddingBottom ? `${effectiveLayer.paddingBottom}px` : undefined,
     paddingLeft: effectiveLayer.paddingLeft ? `${effectiveLayer.paddingLeft}px` : undefined,
-    background: effectiveLayer.type === 'text' && effectiveLayer.fill ? effectiveLayer.fill : undefined,
+    background: effectiveLayer.type === 'text' && effectiveLayer.fill
+      ? (isBackdrop
+          ? colorToRgba(effectiveLayer.fill, Math.min(0.88, effectiveLayer.opacity !== undefined ? effectiveLayer.opacity : 0.65))
+          : effectiveLayer.fill)
+      : undefined,
     borderRadius: effectiveLayer.type === 'shape'
-      ? (effectiveLayer.shape === 'circle' || effectiveLayer.shape === 'pill'
-          ? (effectiveLayer.radius !== undefined ? `${effectiveLayer.radius}px` : '9999px')
-          : (effectiveLayer.radius !== undefined ? `${effectiveLayer.radius}px` : undefined))
+      ? (effectiveLayer.shape === 'circle'
+          ? '50%'
+          : (effectiveLayer.shape === 'pill'
+              ? '9999px'
+              : (effectiveLayer.radius !== undefined ? `${effectiveLayer.radius}px` : undefined)))
       : (effectiveLayer.type === 'text' && effectiveLayer.radius ? `${effectiveLayer.radius}px` : undefined),
+    overflow: isBackdrop && !effectiveLayer.dropShadow ? 'hidden' : undefined,
+    clipPath: isBackdrop && effectiveLayer.type === 'shape' && effectiveLayer.shape === 'triangle'
+      ? 'polygon(50% 0%, 100% 100%, 0% 100%)'
+      : isBackdrop && effectiveLayer.type === 'shape' && effectiveLayer.shape === 'star'
+        ? 'polygon(50% 0%, 61% 35%, 98% 35%, 68% 57%, 79% 91%, 50% 70%, 21% 91%, 32% 57%, 2% 35%, 39% 35%)'
+        : undefined,
     margin: 0,
     boxSizing: 'border-box',
-    opacity: a.opacity,
+    opacity: containerOpacity,
     transform: a.transform,
   }
 }
@@ -499,17 +487,16 @@ function ShadowFilterDefs({
     if (!layerNeedsSvgFilter(eff)) continue
     if (getCompositeAnim(eff, time, active, layers).hidden) continue
 
-    // spread === 0 drop lives on the CSS fast path (chained after this url() on the element),
-    // so it must not be duplicated inside the filter.
-    const drop = eff.dropShadow && eff.dropShadow.spread !== 0 ? eff.dropShadow : undefined
+    // Regular layer drop shadows live on the CSS fast path (drop-shadow() on the element),
+    // so only inner shadow needs an SVG filter.
     const inner = eff.innerShadow
-    if (!drop && !inner) continue
+    if (!inner) continue
 
     // Text renders max-content / auto height, so the reference box is the live
     // DOM measurement when available, else a canvas-measured estimate. The
     // artboard preset is only the last-resort fallback: percentages resolve
     // against the element's own box, and preset-derived values under-pad
-    // short text until shadows clip at max offset/blur/spread.
+    // short text until shadows clip at max offset/blur.
     const measured = textSizes[l.id]
     const est = eff.type === 'text' ? (measured ?? estimateTextBoxSize(eff)) : undefined
     const refW = eff.type === 'text' ? (est?.w || preset.w) : (eff.w || preset.w)
@@ -517,8 +504,8 @@ function ShadowFilterDefs({
 
     filters.push({
       id: shadowFilterId(l.id),
-      region: shadowFilterRegion(refW, refH, shadowRegionEffect(drop, inner)),
-      nodes: shadowFilterNodes(drop, inner, 'full'),
+      region: shadowFilterRegion(refW, refH, inner),
+      nodes: shadowFilterNodes(undefined, inner, 'full'),
     })
   }
 
@@ -923,8 +910,7 @@ export default function Canvas() {
         if (l.type !== 'text' || l.visible === false) continue
         const eff = l.keyframes && l.keyframes.length > 0 ? interpolateKeyframes(l, time) : l
         if (!layerNeedsSvgFilter(eff)) continue
-        const drop = eff.dropShadow && eff.dropShadow.spread !== 0 ? eff.dropShadow : undefined
-        if (!drop && !eff.innerShadow) continue
+        if (!eff.innerShadow) continue
         const node = layerRefs.current.get(l.id)
         if (!node) continue
         const w = node.offsetWidth
@@ -4027,8 +4013,8 @@ export default function Canvas() {
             const filterParts: string[] = []
             if (a.filter && a.filter !== 'none') filterParts.push(a.filter)
             if (layerNeedsSvgFilter(effectiveLayer)) filterParts.push(`url(#${shadowFilterId(l.id)})`)
-            // spread === 0 drop has no SVG branch (see ShadowFilterDefs) — CSS fast path
-            if (effectiveLayer.dropShadow && effectiveLayer.dropShadow.spread === 0) {
+            // Drop shadow runs on the CSS fast path
+            if (effectiveLayer.dropShadow) {
               filterParts.push(dropShadowCss(effectiveLayer.dropShadow))
             }
             const combinedFilter = filterParts.length > 0 ? filterParts.join(' ') : undefined
@@ -4111,7 +4097,7 @@ export default function Canvas() {
                   WebkitBackdropFilter: (effectiveLayer.blurType === 'backdrop' && effectiveLayer.blur && effectiveLayer.blur > 0)
                     ? `blur(${effectiveLayer.blur}px)`
                     : undefined,
-                  willChange: (a.filter !== 'none' || Boolean(effectiveLayer.blur)) ? 'filter, opacity' : undefined,
+                  willChange: (a.filter !== 'none' || (Boolean(effectiveLayer.blur) && effectiveLayer.blurType !== 'backdrop')) ? 'filter, opacity' : undefined,
                   outline: 'none',
                   outlineOffset: 0,
                   cursor: l.locked
@@ -4132,10 +4118,10 @@ export default function Canvas() {
                     style={{ zIndex: 60, width: '100%', height: '100%' }}
                   >
                     <rect
-                      x={0}
-                      y={0}
-                      width="100%"
-                      height="100%"
+                      x={Math.max(0.5, 0.75 / eff)}
+                      y={Math.max(0.5, 0.75 / eff)}
+                      width={`calc(100% - ${Math.max(1, 1.5 / eff)}px)`}
+                      height={`calc(100% - ${Math.max(1, 1.5 / eff)}px)`}
                       rx={effectiveLayer.type === 'shape'
                         ? (effectiveLayer.shape === 'circle' || effectiveLayer.shape === 'pill'
                             ? (effectiveLayer.radius !== undefined ? effectiveLayer.radius : 9999)
@@ -5894,8 +5880,15 @@ function LayerContent({
   }
 
   if (layer.type === 'shape') {
+    const isBackdrop = layer.blurType === 'backdrop' && Boolean(layer.blur && layer.blur > 0)
+    const frostFillOpacity = isBackdrop
+      ? Math.min(0.88, Math.max(0, layer.opacity !== undefined ? layer.opacity : 0.65))
+      : undefined
+    const strokeOpacity = isBackdrop && (layer.stroke || layer.strokeWidth)
+      ? Math.max(0.3, Math.min(1, (layer.opacity ?? 1) + 0.2))
+      : undefined
     const fill = layer.fill || '#000000'
-    const fillOpacity = isVectorEditing ? 0.65 : undefined
+    const fillOpacity = isVectorEditing ? 0.65 : (isBackdrop ? frostFillOpacity : undefined)
     const stroke = layer.stroke || undefined
     const strokeWidth = layer.strokeWidth || 0
 
@@ -5903,7 +5896,7 @@ function LayerContent({
       case 'circle':
         return (
           <svg viewBox={`0 0 ${layer.w} ${layer.h}`} width="100%" height="100%" style={{ display: 'block', overflow: 'visible' }} shapeRendering="geometricPrecision">
-            <ellipse cx={layer.w / 2} cy={layer.h / 2} rx={layer.w / 2} ry={layer.h / 2} fill={fill} fillOpacity={fillOpacity} stroke={stroke} strokeWidth={strokeWidth} shapeRendering="geometricPrecision" style={{ transition: 'fill-opacity 0.2s ease' }} />
+            <ellipse cx={layer.w / 2} cy={layer.h / 2} rx={layer.w / 2} ry={layer.h / 2} fill={fill} fillOpacity={fillOpacity} stroke={stroke} strokeWidth={strokeWidth} strokeOpacity={strokeOpacity} shapeRendering="geometricPrecision" style={{ transition: 'fill-opacity 0.2s ease' }} />
             {isVectorEditing && (
               <ellipse cx={layer.w / 2} cy={layer.h / 2} rx={layer.w / 2} ry={layer.h / 2} fill="none" stroke="#d1d5db" strokeWidth={1 / eff} shapeRendering="geometricPrecision" />
             )}
@@ -5912,7 +5905,7 @@ function LayerContent({
       case 'triangle':
         return (
           <svg viewBox={`0 0 ${layer.w} ${layer.h}`} width="100%" height="100%" style={{ display: 'block', overflow: 'visible' }} shapeRendering="geometricPrecision">
-            <polygon points={`${layer.w / 2},0 ${layer.w},${layer.h} 0,${layer.h}`} fill={fill} fillOpacity={fillOpacity} stroke={stroke} strokeWidth={strokeWidth} strokeLinejoin="round" shapeRendering="geometricPrecision" style={{ transition: 'fill-opacity 0.2s ease' }} />
+            <polygon points={`${layer.w / 2},0 ${layer.w},${layer.h} 0,${layer.h}`} fill={fill} fillOpacity={fillOpacity} stroke={stroke} strokeWidth={strokeWidth} strokeOpacity={strokeOpacity} strokeLinejoin="round" shapeRendering="geometricPrecision" style={{ transition: 'fill-opacity 0.2s ease' }} />
             {isVectorEditing && (
               <polygon points={`${layer.w / 2},0 ${layer.w},${layer.h} 0,${layer.h}`} fill="none" stroke="#d1d5db" strokeWidth={1 / eff} strokeLinejoin="round" shapeRendering="geometricPrecision" />
             )}
@@ -5921,7 +5914,7 @@ function LayerContent({
       case 'star':
         return (
           <svg viewBox="0 0 100 100" width="100%" height="100%" style={{ display: 'block', overflow: 'visible' }} shapeRendering="geometricPrecision">
-            <polygon points="50,0 61,35 98,35 68,57 79,91 50,70 21,91 32,57 2,35 39,35" fill={fill} fillOpacity={fillOpacity} stroke={stroke} strokeWidth={strokeWidth} strokeLinejoin="round" shapeRendering="geometricPrecision" style={{ transition: 'fill-opacity 0.2s ease' }} />
+            <polygon points="50,0 61,35 98,35 68,57 79,91 50,70 21,91 32,57 2,35 39,35" fill={fill} fillOpacity={fillOpacity} stroke={stroke} strokeWidth={strokeWidth} strokeOpacity={strokeOpacity} strokeLinejoin="round" shapeRendering="geometricPrecision" style={{ transition: 'fill-opacity 0.2s ease' }} />
             {isVectorEditing && (
               <polygon points="50,0 61,35 98,35 68,57 79,91 50,70 21,91 32,57 2,35 39,35" fill="none" stroke="#d1d5db" strokeWidth={1 / eff} strokeLinejoin="round" shapeRendering="geometricPrecision" />
             )}
@@ -5930,7 +5923,7 @@ function LayerContent({
       case 'line':
         return (
           <svg viewBox={`0 0 ${layer.w} ${layer.h}`} width="100%" height="100%" style={{ display: 'block', overflow: 'visible' }} shapeRendering="geometricPrecision">
-            <line x1={0} y1={layer.h / 2} x2={layer.w} y2={layer.h / 2} stroke={fill} strokeWidth={Math.max(2, layer.h * 0.12)} strokeLinecap="round" shapeRendering="geometricPrecision" />
+            <line x1={0} y1={layer.h / 2} x2={layer.w} y2={layer.h / 2} stroke={fill} strokeOpacity={fillOpacity} strokeWidth={Math.max(2, layer.h * 0.12)} strokeLinecap="round" shapeRendering="geometricPrecision" />
           </svg>
         )
       case 'pill':
@@ -5947,6 +5940,7 @@ function LayerContent({
               fillOpacity={fillOpacity}
               stroke={stroke}
               strokeWidth={strokeWidth}
+              strokeOpacity={strokeOpacity}
               shapeRendering="geometricPrecision"
               style={{ transition: 'fill-opacity 0.2s ease' }}
             />
@@ -5980,6 +5974,7 @@ function LayerContent({
               fillOpacity={fillOpacity}
               stroke={stroke}
               strokeWidth={strokeWidth}
+              strokeOpacity={strokeOpacity}
               shapeRendering="geometricPrecision"
               style={{ transition: 'fill-opacity 0.2s ease' }}
             />
@@ -6002,7 +5997,7 @@ function LayerContent({
       default:
         return (
           <svg viewBox={`0 0 ${layer.w} ${layer.h}`} width="100%" height="100%" style={{ display: 'block', overflow: 'visible' }} shapeRendering="geometricPrecision">
-            <rect x={0} y={0} width={layer.w} height={layer.h} rx={layer.radius || 0} fill={fill} fillOpacity={fillOpacity} stroke={stroke} strokeWidth={strokeWidth} shapeRendering="geometricPrecision" style={{ transition: 'fill-opacity 0.2s ease' }} />
+            <rect x={0} y={0} width={layer.w} height={layer.h} rx={layer.radius || 0} fill={fill} fillOpacity={fillOpacity} stroke={stroke} strokeWidth={strokeWidth} strokeOpacity={strokeOpacity} shapeRendering="geometricPrecision" style={{ transition: 'fill-opacity 0.2s ease' }} />
             {isVectorEditing && (
               <rect x={0} y={0} width={layer.w} height={layer.h} rx={layer.radius || 0} fill="none" stroke="#d1d5db" strokeWidth={1 / eff} shapeRendering="geometricPrecision" />
             )}
@@ -6014,9 +6009,16 @@ function LayerContent({
   if (layer.type === 'path') {
     // Editable points are the source of truth. Keeping stale pathData first makes
     // the rendered shape drift away from its anchor handles after vector edits.
+    const isBackdrop = layer.blurType === 'backdrop' && Boolean(layer.blur && layer.blur > 0)
+    const frostFillOpacity = isBackdrop
+      ? Math.min(0.88, Math.max(0, layer.opacity !== undefined ? layer.opacity : 0.65))
+      : undefined
+    const strokeOpacity = isBackdrop && (layer.stroke || layer.strokeWidth)
+      ? Math.max(0.3, Math.min(1, (layer.opacity ?? 1) + 0.2))
+      : undefined
     const d = layer.points ? buildSvgPath(layer.points, layer.closed !== false, layer.w, layer.h) : (layer.pathData || '')
     const fill = layer.fill || 'none'
-    const fillOpacity = isVectorEditing && fill !== 'none' ? 0.65 : undefined
+    const fillOpacity = isVectorEditing && fill !== 'none' ? 0.65 : (isBackdrop && fill !== 'none' ? frostFillOpacity : undefined)
     const stroke = layer.stroke || (layer.strokeWidth ? '#007AFF' : undefined)
     const strokeWidth = layer.strokeWidth ?? (stroke ? 2 : 0)
     const strokeLinecap = layer.strokeLinecap || 'round'
@@ -6036,6 +6038,7 @@ function LayerContent({
           fillOpacity={fillOpacity}
           stroke={stroke}
           strokeWidth={strokeWidth}
+          strokeOpacity={strokeOpacity}
           strokeLinecap={strokeLinecap}
           strokeLinejoin={strokeLinejoin}
           fillRule={layer.fillRule || 'nonzero'}
@@ -6060,6 +6063,11 @@ function LayerContent({
   }
 
   if (layer.type === 'image') {
+    const isBackdrop = layer.blurType === 'backdrop' && Boolean(layer.blur && layer.blur > 0)
+    const frostFillOpacity = isBackdrop
+      ? Math.min(0.88, Math.max(0, layer.opacity !== undefined ? layer.opacity : 0.65))
+      : undefined
+
     if (layer.crop) {
       return (
         <div
@@ -6094,6 +6102,7 @@ function LayerContent({
               maxWidth: 'none',
               maxHeight: 'none',
               objectFit: 'cover',
+              opacity: frostFillOpacity,
               pointerEvents: 'none',
               WebkitTouchCallout: 'none',
               WebkitUserSelect: 'none',
@@ -6125,6 +6134,7 @@ function LayerContent({
           objectFit: layer.imageFit || 'cover',
           objectPosition: layer.imagePosition || 'center center',
           borderRadius: layer.radius || 0,
+          opacity: frostFillOpacity,
           pointerEvents: 'none',
           WebkitTouchCallout: 'none',
           WebkitUserSelect: 'none',
