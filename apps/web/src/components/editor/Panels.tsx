@@ -3,7 +3,7 @@ import {
   X, Upload, Type as TypeIcon, Folder, FolderPlus,
   Component as ComponentIcon, ChevronRight, ChevronLeft, ChevronDown, Plus, Trash2,
   Lock, Unlock, CircleDot, Diamond, Droplet, PenTool, Spline, Magnet, Check, CheckSquare,
-  Wand2, Globe, FileUp, Pipette, Search, Sparkles, Contrast,
+  Wand2, Globe, FileUp, Pipette, Search, Sparkles, Contrast, Scissors,
 } from 'lucide-react'
 import ColorPicker from '#/components/editor/ColorPicker'
 import { DEFAULT_DROP_SHADOW, DEFAULT_INNER_SHADOW } from '#/lib/shadows'
@@ -775,7 +775,7 @@ function ComponentsPanel() {
 function LayersPanel() {
   const {
     project, selectedId, selectedIds, select, updateLayer, deleteLayer,
-    reorder, createGroup, ungroup, saveAsComponent, toggleGroupCollapse,
+    reorder, createGroup, maskSelection, unmaskGroup, ungroup, saveAsComponent, toggleGroupCollapse,
   } = useEditor()
 
   const label = (l: any) =>
@@ -788,7 +788,9 @@ function LayersPanel() {
   const renderNode = (layer: any, depth: number) => {
     const isGroup = layer.type === 'group'
     const isComponent = Boolean(layer.isComponent)
+    const isMask = Boolean(layer.isMask)
     const children = project.layers.filter((l: any) => l.groupId === layer.id).reverse()
+    const hasMasks = isGroup && children.some((c: any) => c.isMask)
     const isSelected = selectedId === layer.id || selectedIds.includes(layer.id)
     const collapsed = Boolean(layer.collapsed)
 
@@ -835,6 +837,18 @@ function LayersPanel() {
             {label(layer)}
           </span>
 
+          {isMask && (
+            <span className="rounded bg-teal-500/30 px-1.5 py-0.5 text-[9px] font-bold text-teal-200">
+              MASK
+            </span>
+          )}
+
+          {hasMasks && (
+            <span className="rounded bg-teal-500/30 px-1.5 py-0.5 text-[9px] font-bold text-teal-200">
+              MASKED
+            </span>
+          )}
+
           {isGroup && (
             <span
               className={`rounded px-1.5 py-0.5 text-[9px] font-bold ${
@@ -843,6 +857,21 @@ function LayersPanel() {
             >
               {isComponent ? 'COMPONENT' : 'GROUP'}
             </span>
+          )}
+
+          {isGroup && hasMasks && (
+            <button
+              data-testid={`unmask-${layer.id}`}
+              onClick={(e) => {
+                e.stopPropagation()
+                unmaskGroup(layer.id)
+                window.dispatchEvent(new Event('whoa:selection-commit'))
+              }}
+              className="rounded bg-surface px-1.5 py-0.5 text-[10px] text-txt2 hover:text-white"
+              title="Release mask (keep group)"
+            >
+              Unmask
+            </button>
           )}
 
           {isGroup && (
@@ -918,6 +947,16 @@ function LayersPanel() {
       {/* Top actions if multi-selected */}
       {selectedIds.length > 1 && (
         <div className="flex gap-2 mb-3">
+          <button
+            onClick={() => {
+              maskSelection()
+              window.dispatchEvent(new Event('whoa:selection-commit'))
+            }}
+            className="flex-1 flex items-center justify-center gap-1.5 py-2 rounded-xl bg-teal-600 hover:bg-teal-500 text-white text-xs font-semibold shadow-sm active:scale-95 transition-all"
+          >
+            <Scissors className="h-3.5 w-3.5" />
+            Mask ({selectedIds.length})
+          </button>
           <button
             onClick={() => createGroup()}
             className="flex-1 flex items-center justify-center gap-1.5 py-2 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-semibold shadow-sm active:scale-95 transition-all"

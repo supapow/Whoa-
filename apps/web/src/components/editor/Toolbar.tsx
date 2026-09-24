@@ -18,15 +18,22 @@ type Item = { key: string; label: string; icon: React.ReactNode; onClick?: () =>
 export default function Toolbar({ onExport }: { onExport?: () => void }) {
   const {
     project, selected, selectedIds, alignSelected, openTool, addLayer, deleteLayer, deleteLayers, duplicate, reorder,
-    createGroup, maskSelection, ungroup, saveAsComponent, artboardSnap, setArtboardSnap,
+    createGroup, maskSelection, unmaskGroup, ungroup, saveAsComponent, artboardSnap, setArtboardSnap,
     timelineOpen, toggleTimeline, updateLayer, imagePositioningId, setImagePositioningId,
     vectorEditingId, setVectorEditingId, startEyedropper,
   } = useEditor()
 
   const handleMask = () => {
-    if (selectedIds.length < 2) return
+    if (selectedIds.length === 0) return
     maskSelection(selectedIds)
+    // Masking lands on a single group — drop multi-select mode so the next
+    // tap selects (and drills into) the masked group instead of adding to it.
+    window.dispatchEvent(new Event('whoa:selection-commit'))
   }
+
+  const selectedGroupHasMasks = Boolean(
+    selected?.type === 'group' && project.layers.some((l) => l.groupId === selected.id && l.isMask),
+  )
 
   const handleStartEyedropper = () => {
     if (!selected) return
@@ -364,6 +371,24 @@ export default function Toolbar({ onExport }: { onExport?: () => void }) {
 
     if (selected.type === 'group') {
       items = [
+        selectedGroupHasMasks
+          ? {
+              key: 'unmask',
+              label: 'Unmask',
+              icon: <Scissors />,
+              accent: true,
+              onClick: () => {
+                unmaskGroup(selected.id)
+                window.dispatchEvent(new Event('whoa:selection-commit'))
+              },
+            }
+          : {
+              key: 'mask',
+              label: 'Mask',
+              icon: <Scissors />,
+              accent: true,
+              onClick: handleMask,
+            },
         {
           key: 'ungroup',
           label: 'Ungroup',

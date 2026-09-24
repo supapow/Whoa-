@@ -2,7 +2,7 @@ import { Fragment, useCallback, useEffect, useLayoutEffect, useRef, useState } f
 import { ArrowLeft, ArrowRight, ArrowUp, ArrowDown, Move, RotateCw } from 'lucide-react'
 import type { Layer, LayerType, ShadowEffect, VectorPoint } from '#/types'
 import { useEditor } from '#/store/editor'
-import { getDescendantLayers, getTopmostGroup, computeGroupBounds } from '#/lib/groups'
+import { getDescendantLayers, getTopmostGroup, computeGroupBounds, getMaskedGroupIds } from '#/lib/groups'
 import { findCornerSizeMatch, findSizeMatch, getCandidateTargets, type SizeMatch } from '#/lib/sizeMatch'
 import { findGapMatch, type GapMatchResult } from '#/lib/gapMatch'
 import { findElementAlignMatch, type ElementAlignResult } from '#/lib/elementAlign'
@@ -603,6 +603,223 @@ function ShadowFilterDefs({
   )
 }
 
+const maskIdFor = (groupId: string, contentId?: string) =>
+  contentId ? `whoa-mask-${groupId}-${contentId}` : `whoa-mask-${groupId}`
+
+/**
+ * Visual top-left box of a content layer in artboard coordinates. Mirrors the
+ * centering logic in layerBoxStyle: centre-aligned full-width text renders
+ * from the middle, not from x = 0.
+ */
+function maskContentBox(layer: Layer, preset: { w: number; h: number }, keyframed = false): { x: number; y: number; w: number; h: number } {
+  const isCentered =
+    !keyframed &&
+    layer.type === 'text' &&
+    layer.align === 'center' &&
+    layer.x === 0 &&
+    layer.w === preset.w &&
+    !layer.paddingLeft &&
+    !layer.paddingRight
+  if (!isCentered) return { x: layer.x, y: layer.y, w: layer.w, h: layer.h }
+  const est = estimateTextBoxSize(layer)
+  const w = est?.w || layer.w
+  return { x: (preset.w - w) / 2, y: layer.y, w, h: est?.h || layer.h }
+}
+
+/**
+ * White silhouette of one mask layer. Coordinates are artboard px minus the
+ * given origin: CSS resolves an SVG mask's userSpaceOnUse against the masked
+ * element's own border box, so each content layer gets its own mask with
+ * shapes offset by that layer's visual box (verified empirically).
+ *
+ * Base x/y moves need no extra work — the offset is recomputed every render,
+ * so dragging content slides it under a stationary mask (Figma behavior).
+ */
+function MaskShape({ layer, ox, oy }: { layer: Layer; ox: number; oy: number }) {
+  const x = layer.x - ox
+  const y = layer.y - oy
+  const { w, h } = layer
+  if (!(w > 0 && h > 0)) return null
+  const cx = x + w / 2
+  const cy = y + h / 2
+  const rot = layer.rotation ? ` rotate(${layer.rotation} ${cx} ${cy})` : ''
+  const wrap = (node: React.ReactNode) => <g opacity={layer.opacity ?? 1}>{node}</g>
+
+  if (layer.type === 'text') {
+    const fs = layer.fontSize || 40
+    const anchor = layer.align === 'center' ? 'middle' : layer.align === 'right' ? 'end' : 'start'
+    const tx = layer.align === 'center' ? x + w / 2 : layer.align === 'right' ? x + w : x
+    return wrap(
+      <text x={tx} y={y + fs * 0.8} fontFamily={layer.fontFamily} fontSize={fs} fontWeight={layer.fontWeight} textAnchor={anchor} fill="#fff" transform={rot ? `rotate(${layer.rotation} ${cx} ${cy})` : undefined}>
+        {layer.text}
+      </text>,
+    )
+  }
+
+  if (layer.type === 'shape') {
+    switch (layer.shape) {
+      case 'circle':
+        return wrap(<ellipse cx={cx} cy={cy} rx={w / 2} ry={h / 2} fill="#fff" transform={rot || undefined} />)
+      case 'triangle':
+        return wrap(<polygon points={`${cx},${y} ${x + w},${y + h} ${x},${y + h}`} fill="#fff" transform={rot || undefined} />)
+      case 'star':
+        return wrap(
+          <g transform={`translate(${x} ${y}) scale(${w / 100} ${h / 100})`}>
+            <polygon
+              points="50,0 61,35 98,35 68,57 79,91 50,70 21,91 32,57 2,35 39,35"
+              fill="#fff"
+              transform={layer.rotation ? `rotate(${layer.rotation} 50 50)` : undefined}
+            />
+          </g>,
+        )
+      case 'line':
+        return wrap(<line x1={x} y1={cy} x2={x + w} y2={cy} stroke="#fff" strokeWidth={Math.max(2, h * 0.12)} strokeLinecap="round" transform={rot || undefined} />)
+      case 'pill':
+      case 'rectangle':
+      case 'rect':
+      default: {
+        const maxR = Math.min(w, h) / 2
+        const r = layer.shape === 'pill' && layer.radius === undefined
+          ? maxR
+          : Math.min(Math.max(0, layer.radius ?? 0), maxR)
+        return wrap(<rect x={x} y={y} width={w} height={h} rx={r} ry={r} fill="#fff" transform={rot || undefined} />)
+      }
+    }
+  }
+
+  if (layer.type === 'path') {
+    const d = layer.points ? buildSvgPath(layer.points, layer.closed !== false, w, h) : layer.pathData || ''
+    if (!d) return null
+    const fill = layer.fill || 'none'
+    const hasFill = fill !== 'none'
+    const hasStroke = Boolean(layer.stroke || layer.strokeWidth)
+    return wrap(
+      <path
+        d={d}
+        transform={`translate(${x} ${y})${rot}`}
+        fill={hasFill ? '#fff' : 'none'}
+        stroke={hasStroke ? '#fff' : 'none'}
+        strokeWidth={layer.strokeWidth ?? (hasStroke ? 2 : 0)}
+        strokeLinecap={layer.strokeLinecap || 'round'}
+        strokeLinejoin={layer.strokeLinejoin || 'round'}
+        fillRule={layer.fillRule || 'nonzero'}
+      />,
+    )
+  }
+
+  if (layer.type === 'image' && layer.src) {
+    if (layer.crop) {
+      return wrap(
+        <svg x={x} y={y} width={w} height={h} overflow="hidden">
+          <image href={layer.src} x={layer.crop.x} y={layer.crop.y} width={layer.crop.w} height={layer.crop.h} preserveAspectRatio="none" />
+        </svg>,
+      )
+    }
+    return wrap(
+      <image
+        href={layer.src}
+        x={x}
+        y={y}
+        width={w}
+        height={h}
+        preserveAspectRatio={layer.imageFit === 'contain' ? 'xMidYMid meet' : 'xMidYMid slice'}
+        transform={rot || undefined}
+      />,
+    )
+  }
+
+  if (layer.type === 'sticker') {
+    return wrap(
+      <text x={cx} y={y + h * 0.85} fontSize={h * 0.8} textAnchor="middle" transform={rot ? `rotate(${layer.rotation} ${cx} ${cy})` : undefined}>
+        {layer.emoji}
+      </text>,
+    )
+  }
+
+  return null
+}
+
+/**
+ * One hidden <defs> per artboard holding every masked group's SVG masks:
+ * - a group-level mask in artboard coordinates for the group's shadow casters
+ *   (full-artboard boxes, so element-origin == artboard origin there), and
+ * - one mask per content layer with shapes offset by that layer's visual box.
+ * Multiple masks in one group union naturally (all paint white into one mask).
+ * A content layer's own rotation is counter-applied so the clip stays put
+ * while rotated content turns under it.
+ */
+function MaskDefs({
+  layers,
+  preset,
+  time,
+}: {
+  layers: Layer[]
+  preset: { w: number; h: number }
+  time: number
+}) {
+  const defs: React.ReactNode[] = []
+  for (const g of layers) {
+    if (g.type !== 'group' || g.visible === false) continue
+    const masks = layers.filter((l) => l.groupId === g.id && l.isMask && l.visible !== false)
+    if (masks.length === 0) continue
+    const effMasks = masks.map((m) =>
+      m.keyframes && m.keyframes.length > 0 ? interpolateKeyframes(m, time) : m,
+    )
+    defs.push(
+      <mask
+        key={g.id}
+        id={maskIdFor(g.id)}
+        maskUnits="userSpaceOnUse"
+        x={0}
+        y={0}
+        width={preset.w}
+        height={preset.h}
+      >
+        {effMasks.map((m) => (
+          <MaskShape key={m.id} layer={m} ox={0} oy={0} />
+        ))}
+      </mask>,
+    )
+    const contents = getDescendantLayers(g.id, layers).filter((c) => c.type !== 'group' && !c.isMask)
+    for (const c of contents) {
+      const keyframed = Boolean(c.keyframes?.length)
+      const effC: Layer = keyframed ? interpolateKeyframes(c, time) : c
+      const box = maskContentBox(effC, preset, keyframed)
+      const counter = effC.rotation
+        ? `rotate(${-effC.rotation} ${box.w / 2} ${box.h / 2})`
+        : undefined
+      defs.push(
+        <mask
+          key={`${g.id}-${c.id}`}
+          id={maskIdFor(g.id, c.id)}
+          maskUnits="userSpaceOnUse"
+          x={0}
+          y={0}
+          width={Math.max(1, box.w)}
+          height={Math.max(1, box.h)}
+        >
+          <g transform={counter}>
+            {effMasks.map((m) => (
+              <MaskShape key={m.id} layer={m} ox={box.x} oy={box.y} />
+            ))}
+          </g>
+        </mask>,
+      )
+    }
+  }
+  if (defs.length === 0) return null
+  return (
+    <svg
+      aria-hidden="true"
+      width={0}
+      height={0}
+      style={{ position: 'absolute', left: 0, top: 0, width: 0, height: 0, overflow: 'hidden', pointerEvents: 'none' }}
+    >
+      <defs>{defs}</defs>
+    </svg>
+  )
+}
+
 const clampN = (v: number, lo: number, hi: number) => Math.max(lo, Math.min(v, hi))
 const tdist = (a: Touch, b: Touch) => Math.hypot(a.clientX - b.clientX, a.clientY - b.clientY)
 const tmid = (a: Touch, b: Touch) => ({ x: (a.clientX + b.clientX) / 2, y: (a.clientY + b.clientY) / 2 })
@@ -834,6 +1051,16 @@ export default function Canvas() {
   const pinchStartedInMultiSelect = useRef(false)
   const multiSelectModeRef = useRef(false)
   multiSelectModeRef.current = multiSelectMode
+  // Mask/unmask lands on one group — leave multi-select so the next tap
+  // selects (and drills into) the masked group instead of adding to it.
+  useEffect(() => {
+    const exit = () => {
+      setMultiSelectMode(false)
+      multiSelectModeRef.current = false
+    }
+    window.addEventListener('whoa:selection-commit', exit)
+    return () => window.removeEventListener('whoa:selection-commit', exit)
+  }, [])
   const isSpacePressed = useRef(false)
   const gesture = useRef<Gesture>(null)
   const panGesture = useRef<{ sx: number; sy: number; ox: number; oy: number; moved: boolean }>(null)
@@ -2948,7 +3175,19 @@ export default function Canvas() {
       e.currentTarget.setPointerCapture?.(e.pointerId)
     }
     let target = l
-    if (topGroup && (selectedId === topGroup.id || (!selectedIds.includes(topGroup.id) && !selectedIds.includes(l.id) && !multiSelectModeRef.current))) {
+    // Masked groups drill in: once the group (or one of its children) is
+    // selected, tapping a child selects that child itself — so the mask and
+    // the content behind it are directly selectable, movable and animatable.
+    // First tap still grabs the whole group; siblings hop without leaving.
+    const selTopId = !selectedId
+      ? undefined
+      : selectedId === topGroup?.id
+        ? topGroup.id
+        : getTopmostGroup(selectedId, project.layers)?.id
+    const drillMask = Boolean(
+      topGroup && maskedGroupIds.has(topGroup.id) && selTopId === topGroup.id && !multiSelectModeRef.current,
+    )
+    if (!drillMask && topGroup && (selectedId === topGroup.id || (!selectedIds.includes(topGroup.id) && !selectedIds.includes(l.id) && !multiSelectModeRef.current))) {
       target = topGroup
     }
 
@@ -3290,19 +3529,40 @@ export default function Canvas() {
   const eff = scale * view.scale
   const hs = eff ? 11 / eff : 11 // handle size in artboard px (constant on screen)
 
+  // --- Masked groups ---------------------------------------------------------------
+  // Groups with mask children clip their content through SVG <mask> defs (see
+  // MaskDefs). A mask's userSpaceOnUse resolves against each masked element's
+  // own box, so every content layer references its own per-layer mask id.
+  // Nested masked groups intersect (comma = intersection for mask-image).
+  const maskedGroupIds = getMaskedGroupIds(project.layers)
+  const layerById = new Map(project.layers.map((l) => [l.id, l]))
+  const maskClipStyle = (layer: Layer): React.CSSProperties => {
+    if (layer.type === 'group' || layer.isMask) return {}
+    const urls: string[] = []
+    let currId: string | undefined = layer.groupId
+    while (currId) {
+      if (maskedGroupIds.has(currId)) urls.unshift(`url(#${maskIdFor(currId, layer.id)})`)
+      currId = layerById.get(currId)?.groupId
+    }
+    if (urls.length === 0) return {}
+    const list = urls.join(', ')
+    return { maskImage: list, WebkitMaskImage: list }
+  }
+
   // --- Group shadow casters (Step B) ----------------------------------------------------
   // Group wrappers are empty boxes (children render as flat siblings), so a group's effect can't
   // be a filter on the wrapper — it's cast by shadow-only duplicates of the subtree. The DROP
   // caster is spliced in right before the group's first child (⇒ paints under every child); the
   // INNER caster renders right after the group wrapper, which sits at maxIdx + 1 (⇒ after every
   // child, paints over them). Both are click-through and event-free.
+  // Mask layers are excluded: they define the clip region, they don't cast content shadows.
   const dropCasters = new Map<string, Layer[]>()
   for (const g of project.layers) {
     if (g.type !== 'group' || g.visible === false) continue
     const effG: Layer = g.keyframes && g.keyframes.length > 0 ? interpolateKeyframes(g, time) : g
     if (!effG.dropShadow) continue
     if (getCompositeAnim(effG, time, active, project.layers).hidden) continue
-    const firstChild = project.layers.find((c) => c.groupId === g.id)
+    const firstChild = project.layers.find((c) => c.groupId === g.id && !c.isMask)
     if (!firstChild) continue
     const groups = dropCasters.get(firstChild.id)
     if (groups) groups.push(g)
@@ -3313,7 +3573,7 @@ export default function Canvas() {
    *  no interaction, no selection chrome, no per-child shadow of its own. */
   const casterChildren = (groupId: string): React.ReactNode =>
     getDescendantLayers(groupId, project.layers)
-      .filter((c) => c.type !== 'group') // nested group wrappers are empty boxes too
+      .filter((c) => c.type !== 'group' && !c.isMask) // nested group wrappers are empty boxes too
       .map((c) => {
         const cEff: Layer = c.keyframes && c.keyframes.length > 0 ? interpolateKeyframes(c, time) : c
         const ca = getCompositeAnim(cEff, time, active, project.layers)
@@ -3738,6 +3998,7 @@ export default function Canvas() {
           data-testid="artboard"
         >
           <ShadowFilterDefs layers={project.layers} preset={preset} time={time} active={active} textSizes={shadowTextSizes} />
+          <MaskDefs layers={project.layers} preset={preset} time={time} />
           {snapGuides && snapGuides.active && (
             <>
               {snapGuides.xGuides.includes(preset.w / 2) && (
@@ -3950,10 +4211,14 @@ export default function Canvas() {
             const a = getCompositeAnim(effectiveLayer, time, active, project.layers)
             // Drop casters are keyed on the group's first child, which may itself be hidden —
             // still emit them (the group is the thing being gated, and it was gated in the map).
+            // A masked group's shadow is cast from the clipped content, so the
+            // caster (full-artboard box, same coordinates) takes the same mask.
             const dropCasterNode = dropCasters.get(l.id)?.map((g) => (
               <div
                 key={`drop-caster-${g.id}`}
-                style={{ ...casterBoxStyle, filter: `url(#${dropCasterFilterId(g.id)})` }}
+                style={maskedGroupIds.has(g.id)
+                  ? { ...casterBoxStyle, filter: `url(#${dropCasterFilterId(g.id)})`, maskImage: `url(#${maskIdFor(g.id)})`, WebkitMaskImage: `url(#${maskIdFor(g.id)})` }
+                  : { ...casterBoxStyle, filter: `url(#${dropCasterFilterId(g.id)})` }}
               >
                 {casterChildren(g.id)}
               </div>
@@ -4044,8 +4309,10 @@ export default function Canvas() {
                 }}
                 data-testid={`layer-${l.id}`}
                 data-layer-id={l.id}
+                data-mask={l.isMask && l.groupId && maskedGroupIds.has(l.groupId) ? 'true' : undefined}
                 style={{
                   ...layerBoxStyle(effectiveLayer, a, preset, layerRefs.current.get(l.id), Boolean(l.keyframes?.length)),
+                  ...maskClipStyle(l),
                   backdropFilter: (effectiveLayer.blurType === 'backdrop' && effectiveLayer.blur && effectiveLayer.blur > 0)
                     ? `blur(${effectiveLayer.blur}px)`
                     : undefined,
@@ -4113,7 +4380,15 @@ export default function Canvas() {
                     </svg>
                   )
                 })()}
-                <div style={{ width: '100%', height: '100%', filter: combinedFilter }}>
+                <div style={{
+                  width: '100%',
+                  height: '100%',
+                  filter: combinedFilter,
+                  // A mask defines the clip region — its own fill stays hidden
+                  // so only the clipped content shows through. It reappears
+                  // while the mask or its group is selected for editing.
+                  opacity: (l.isMask && l.groupId && maskedGroupIds.has(l.groupId) && !isSel && !selectedIds.includes(l.groupId)) ? 0 : undefined,
+                }}>
                   <LayerContent
                     layer={effectiveLayer}
                     editing={editingId === l.id}
@@ -4128,7 +4403,9 @@ export default function Canvas() {
               {l.type === 'group' && effectiveLayer.innerShadow && (
                 <div
                   key={`inner-caster-${l.id}`}
-                  style={{ ...casterBoxStyle, filter: `url(#${innerCasterFilterId(l.id)})` }}
+                  style={maskedGroupIds.has(l.id)
+                    ? { ...casterBoxStyle, filter: `url(#${innerCasterFilterId(l.id)})`, maskImage: `url(#${maskIdFor(l.id)})`, WebkitMaskImage: `url(#${maskIdFor(l.id)})` }
+                    : { ...casterBoxStyle, filter: `url(#${innerCasterFilterId(l.id)})` }}
                 >
                   {casterChildren(l.id)}
                 </div>
