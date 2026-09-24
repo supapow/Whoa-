@@ -18,10 +18,22 @@ type Item = { key: string; label: string; icon: React.ReactNode; onClick?: () =>
 export default function Toolbar({ onExport }: { onExport?: () => void }) {
   const {
     project, selected, selectedIds, alignSelected, openTool, addLayer, deleteLayer, deleteLayers, duplicate, reorder,
-    createGroup, ungroup, saveAsComponent, artboardSnap, setArtboardSnap,
+    createGroup, maskSelection, unmaskGroup, ungroup, saveAsComponent, artboardSnap, setArtboardSnap,
     timelineOpen, toggleTimeline, updateLayer, imagePositioningId, setImagePositioningId,
     vectorEditingId, setVectorEditingId, startEyedropper,
   } = useEditor()
+
+  const handleMask = () => {
+    if (selectedIds.length === 0) return
+    maskSelection(selectedIds)
+    // Masking lands on a single group — drop multi-select mode so the next
+    // tap selects (and drills into) the masked group instead of adding to it.
+    window.dispatchEvent(new Event('whoa:selection-commit'))
+  }
+
+  const selectedGroupHasMasks = Boolean(
+    selected?.type === 'group' && project.layers.some((l) => l.groupId === selected.id && l.isMask),
+  )
 
   const handleStartEyedropper = () => {
     if (!selected) return
@@ -359,6 +371,24 @@ export default function Toolbar({ onExport }: { onExport?: () => void }) {
 
     if (selected.type === 'group') {
       items = [
+        selectedGroupHasMasks
+          ? {
+              key: 'unmask',
+              label: 'Unmask',
+              icon: <Scissors />,
+              accent: true,
+              onClick: () => {
+                unmaskGroup(selected.id)
+                window.dispatchEvent(new Event('whoa:selection-commit'))
+              },
+            }
+          : {
+              key: 'mask',
+              label: 'Mask',
+              icon: <Scissors />,
+              accent: true,
+              onClick: handleMask,
+            },
         {
           key: 'ungroup',
           label: 'Ungroup',
@@ -397,7 +427,7 @@ export default function Toolbar({ onExport }: { onExport?: () => void }) {
         { key: 'shape', label: 'Shape', icon: <Square /> },
         { key: 'color', label: 'Fill', icon: <PaintBucket /> },
         { key: 'radius', label: 'Corners', icon: <Square /> },
-        { key: 'mask', label: 'Mask', icon: <Scissors /> },
+        { key: 'mask', label: 'Mask', icon: <Scissors />, onClick: handleMask },
         ...common,
       ]
     } else if (selected.type === 'path') {
@@ -411,7 +441,7 @@ export default function Toolbar({ onExport }: { onExport?: () => void }) {
         },
         { key: 'shape', label: 'Shape', icon: <Square /> },
         { key: 'radius', label: 'Corners', icon: <Square /> },
-        { key: 'mask', label: 'Mask', icon: <Scissors /> },
+        { key: 'mask', label: 'Mask', icon: <Scissors />, onClick: handleMask },
         { key: 'color', label: 'Color', icon: <PaintBucket /> },
         ...common,
       ]
@@ -426,7 +456,7 @@ export default function Toolbar({ onExport }: { onExport?: () => void }) {
         },
         { key: 'image', label: 'Replace', icon: <ImageIcon /> },
         { key: 'crop', label: 'Crop', icon: <Crop /> },
-        { key: 'mask', label: 'Mask', icon: <Scissors /> },
+        { key: 'mask', label: 'Mask', icon: <Scissors />, onClick: handleMask },
         ...common,
       ]
     } else {
@@ -472,6 +502,13 @@ export default function Toolbar({ onExport }: { onExport?: () => void }) {
 
   const groupItems: Item[] = isMulti
     ? [
+        {
+          key: 'mask',
+          label: 'Mask',
+          icon: <Scissors />,
+          accent: true,
+          onClick: handleMask,
+        },
         {
           key: 'group',
           label: 'Group',
@@ -874,7 +911,7 @@ export default function Toolbar({ onExport }: { onExport?: () => void }) {
       <div className="flex h-16 shrink-0 items-center gap-1 overflow-x-auto border-t border-line bg-toolbar px-2 no-scrollbar" data-testid="toolbar">
         {renderItem(snapItem)}
         {renderItem(timelineItem)}
-        <div className={`flex shrink-0 items-center gap-1 overflow-hidden transition-[max-width,opacity,transform] duration-300 ease-out ${isGroup ? 'max-w-[800px] translate-x-0 opacity-100' : 'pointer-events-none max-w-0 -translate-x-3 opacity-0'}`} data-testid="group-alignment-controls" aria-hidden={!isGroup}>
+        <div className={`flex min-w-0 shrink-0 items-center gap-1 overflow-x-auto no-scrollbar transition-[max-width,opacity,transform] duration-300 ease-out ${isGroup ? 'max-w-[calc(100vw-7rem)] translate-x-0 opacity-100' : 'pointer-events-none max-w-0 -translate-x-3 opacity-0'}`} data-testid="group-alignment-controls" aria-hidden={!isGroup}>
           {groupItems.map(renderItem)}
         </div>
         <div className="flex shrink-0 items-center gap-1">

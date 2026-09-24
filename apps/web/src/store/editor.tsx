@@ -11,6 +11,7 @@ import {
   saveComponentToLibrary,
   getDescendantLayers,
   computeGroupBounds,
+  orderGroupChildren,
   type ComponentItem,
 } from '#/lib/groups'
 import {
@@ -83,6 +84,8 @@ type Action =
   | { t: 'reorder'; id: string; dir: number }
   | { t: 'duplicate'; id?: string; ids?: string[] }
   | { t: 'createGroup'; ids?: string[]; name?: string; isComponent?: boolean }
+  | { t: 'maskSelection'; ids?: string[] }
+  | { t: 'unmaskGroup'; groupId: string }
   | { t: 'ungroup'; groupId: string }
   | { t: 'toggleGroupCollapse'; groupId: string }
   | { t: 'insertComponent'; component: ComponentItem }
@@ -603,8 +606,143 @@ function innerReducer(state: State, a: Action): State {
         return state
       }
     }
-    case 'ungroup': {
-      // Snapshot a keyframed group's shadows at the current time so the
+  case 'maskSelection': {
+  const targetIds = a.ids || state.selectedIds
+  if (targetIds.length === 0) return state
+  const selected = p.layers.filter((layer) => targetIds.includes(layer.id))
+  if (selected.length === 0) return state
+
+  // Layers paint in array order (later = on top), so the topmost candidate is
+  // the one with the highest index. A group wrapper can never be a mask.
+  const topmost = (pool: Layer[]): Layer | undefined => {
+    let best: Layer | undefined
+    let bestIdx = -1
+    for (const l of pool) {
+      const idx = p.layers.findIndex((x) => x.id === l.id)
+      if (idx > bestIdx) { bestIdx = idx; best = l }
+    }
+    return best
+  }
+  const flagMask = (layers: Layer[], maskId: string, destGroupId: string): Layer[] => {
+    const moved = layers.map((layer) =>
+      layer.id === maskId ? { ...layer, groupId: destGroupId, isMask: true } : layer,
+    )
+    return orderGroupChildren(destGroupId, moved)
+  }
+
+  // --- single selection -------------------------------------------------
+  if (selected.length === 1) {
+    const only = selected[0]
+    // Single group selected: its topmost direct child becomes the mask
+    // (covers "circle already inside the group, in front" — no new group).
+    if (only.type === 'group') {
+      const kids = p.layers.filter((l) => l.groupId === only.id && l.type !== 'group')
+      const mask = topmost(kids)
+      if (!mask) return state
+      return {
+        ...state,
+        project: touch({ ...p, layers: flagMask(p.layers, mask.id, only.id) }),
+        selectedId: only.id,
+        selectedIds: [only.id],
+        tool: null,
+      }
+    }
+    // Single layer already inside a group: flag it in place when it has
+    // siblings to clip.
+    if (only.groupId) {
+      const siblings = p.layers.filter((l) => l.groupId === only.groupId && l.id !== only.id)
+      if (siblings.length === 0) return state
+      return {
+        ...state,
+        project: touch({ ...p, layers: flagMask(p.layers, only.id, only.groupId) }),
+        selectedId: only.groupId,
+        selectedIds: [only.groupId],
+        tool: null,
+      }
+    }
+    return state
+  }
+
+  // --- multi selection ---------------------------------------------------
+  const groups = selected.filter((layer) => layer.type === 'group')
+  const content = selected.filter((layer) => layer.type !== 'group')
+  if (content.length === 0) return state
+
+  // Case A: everything already shares one parent group — flag the topmost
+  // selected layer as a mask in place, no new group.
+  const parents = new Set(content.map((l) => l.groupId))
+  if (groups.length === 0 && parents.size === 1 && content[0].groupId) {
+    const destId = content[0].groupId!
+    const mask = topmost(content)
+    if (!mask) return state
+    return {
+      ...state,
+      project: touch({ ...p, layers: flagMask(p.layers, mask.id, destId) }),
+      selectedId: destId,
+      selectedIds: [destId],
+      tool: null,
+    }
+  }
+
+  // Case B: a group wrapper is selected together with content — move the
+  // content into the group and make the topmost one the mask.
+  if (groups.length === 1) {
+    const dest = groups[0]
+    const mask = topmost(content)
+    if (!mask) return state
+    const moveIds = new Set(content.map((l) => l.id))
+    const moved = p.layers.map((layer) =>
+      moveIds.has(layer.id)
+        ? { ...layer, groupId: dest.id, isMask: layer.id === mask.id }
+        : layer,
+    )
+    return {
+      ...state,
+      project: touch({ ...p, layers: orderGroupChildren(dest.id, moved) }),
+      selectedId: dest.id,
+      selectedIds: [dest.id],
+      tool: null,
+    }
+  }
+
+  // Case C: fresh selection — create a group, topmost becomes the mask.
+  try {
+    const { newLayers, groupLayer } = createGroupFromSelection(p.layers, targetIds, 'Masked group')
+    const mask = topmost(content)
+    if (!mask) return state
+    const maskedLayers = newLayers.map((layer) => layer.id === mask.id ? { ...layer, isMask: true } : layer)
+    return {
+      ...state,
+      project: touch({ ...p, layers: orderGroupChildren(groupLayer.id, maskedLayers) }),
+      selectedId: groupLayer.id,
+      selectedIds: [groupLayer.id],
+      tool: null,
+    }
+  } catch (err) {
+    console.warn('Failed to create mask group:', err)
+    return state
+  }
+  }
+  case 'unmaskGroup': {
+    const kids = p.layers.filter((l) => l.groupId === a.groupId && l.isMask)
+    if (kids.length === 0) return state
+    const ids = new Set(kids.map((l) => l.id))
+    const layers = p.layers.map((l) => {
+      if (!ids.has(l.id)) return l
+      const { isMask: _released, ...rest } = l
+      return rest
+    })
+    return {
+      ...state,
+      project: touch({ ...p, layers }),
+      selectedId: a.groupId,
+      selectedIds: [a.groupId],
+      tool: null,
+    }
+  }
+  case 'ungroup': {
+  // Snapshot a keyframed group's shadows at the current time so the
+
       // unpacked children keep the look the group had when it was removed.
       const group = p.layers.find((l) => l.id === a.groupId && l.type === 'group')
       const effG = group && group.keyframes && group.keyframes.length > 0
@@ -1079,6 +1217,8 @@ interface Ctx extends State {
   duplicate: (id: string, ids?: string[]) => void
   reorder: (id: string, dir: number) => void
   createGroup: (ids?: string[], name?: string, isComponent?: boolean) => void
+  maskSelection: (ids?: string[]) => void
+  unmaskGroup: (groupId: string) => void
   ungroup: (groupId: string) => void
   toggleGroupCollapse: (groupId: string) => void
   insertComponent: (component: ComponentItem) => void
@@ -1165,6 +1305,8 @@ export function EditorProvider({ project, children }: { project: Project; childr
   const duplicate = useCallback((id: string, ids?: string[]) => dispatch({ t: 'duplicate', id, ids }), [])
   const reorder = useCallback((id: string, dir: number) => dispatch({ t: 'reorder', id, dir }), [])
   const createGroup = useCallback((ids?: string[], name?: string, isComponent = false) => dispatch({ t: 'createGroup', ids, name, isComponent }), [])
+  const maskSelection = useCallback((ids?: string[]) => dispatch({ t: 'maskSelection', ids }), [])
+  const unmaskGroup = useCallback((groupId: string) => dispatch({ t: 'unmaskGroup', groupId }), [])
   const ungroup = useCallback((groupId: string) => dispatch({ t: 'ungroup', groupId }), [])
   const toggleGroupCollapse = useCallback((groupId: string) => dispatch({ t: 'toggleGroupCollapse', groupId }), [])
   const insertComponent = useCallback((component: ComponentItem) => dispatch({ t: 'insertComponent', component }), [])
@@ -1301,6 +1443,8 @@ export function EditorProvider({ project, children }: { project: Project; childr
       duplicate,
       reorder,
       createGroup,
+      maskSelection,
+      unmaskGroup,
       ungroup,
       toggleGroupCollapse,
       insertComponent,
@@ -1357,6 +1501,8 @@ export function EditorProvider({ project, children }: { project: Project; childr
       duplicate,
       reorder,
       createGroup,
+      maskSelection,
+      unmaskGroup,
       ungroup,
       toggleGroupCollapse,
       insertComponent,

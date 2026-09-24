@@ -39,6 +39,38 @@ export function getDirectChildren(groupId: string, allLayers: Layer[]): Layer[] 
 }
 
 /**
+ * Direct-child mask layers of a group (top-most first in panel order).
+ */
+export function getGroupMasks(groupId: string, allLayers: Layer[]): Layer[] {
+  return allLayers.filter((l) => l.groupId === groupId && l.isMask)
+}
+
+/**
+ * Ids of groups that currently have at least one mask child.
+ */
+export function getMaskedGroupIds(allLayers: Layer[]): Set<string> {
+  const ids = new Set<string>()
+  for (const l of allLayers) {
+    if (l.isMask && l.groupId) ids.add(l.groupId)
+  }
+  return ids
+}
+
+/**
+ * Keep masks at the front of a group's direct-child stack. The first child is
+ * the top-most child in the layer panel, so masks are evaluated before content.
+ */
+export function orderGroupChildren(groupId: string, allLayers: Layer[]): Layer[] {
+  const children = allLayers.filter((layer) => layer.groupId === groupId)
+  if (children.length < 2) return allLayers
+
+  const childIds = new Set(children.map((child) => child.id))
+  const orderedChildren = [...children].sort((a, b) => Number(Boolean(b.isMask)) - Number(Boolean(a.isMask)))
+  let childIndex = 0
+  return allLayers.map((layer) => childIds.has(layer.id) ? orderedChildren[childIndex++] : layer)
+}
+
+/**
  * Find the topmost group containing a given layer
  */
 export function getTopmostGroup(layerId: string, allLayers: Layer[]): Layer | null {
@@ -232,8 +264,11 @@ export function ungroupLayer(
     .filter((l) => l.id !== groupId)
     .map((l) => {
       if (l.groupId === groupId) {
-        // Move children to the parent group of this group (or root if undefined)
-        const next: Layer = { ...l, groupId: group.groupId }
+        // Move children to the parent group of this group (or root if undefined).
+        // A released mask stops being a mask — the flag must not leak onto a
+        // layer that is no longer clipped by a masked group.
+        const { isMask: _released, ...rest } = l
+        const next: Layer = { ...rest, groupId: group.groupId }
         if (!next.dropShadow && drop) next.dropShadow = { ...drop }
         if (!next.innerShadow && inner) next.innerShadow = { ...inner }
         return next
