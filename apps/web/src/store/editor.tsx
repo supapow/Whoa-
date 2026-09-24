@@ -1,6 +1,7 @@
 import React, { createContext, useContext, useReducer, useCallback, useMemo } from 'react'
 import type { Project, Layer, LayerType, Background } from '#/types'
 import { createLayer } from '#/lib/data'
+import { usePrefs } from '#/store/prefs'
 import {
   createGroupFromSelection,
   ungroupLayer,
@@ -1423,13 +1424,32 @@ export function EditorProvider({ project, children }: { project: Project; childr
     [state.project.layers],
   )
 
+  const { autoAnimateNewLayers } = usePrefs()
+
   const addLayer = useCallback(
     (type: LayerType, extra?: Partial<Layer>) => {
-      const layer = createLayer(type, state.project.preset, extra)
+      // Opt-in (Settings → Animation): new elements get the classic per-type
+      // in-animation. Default is off — new elements are static ('none').
+      // Explicit anims in `extra` (e.g. templates) always win.
+      const needsDefaultAnim =
+        autoAnimateNewLayers && !extra?.anim && !extra?.inAnim && !extra?.outAnim
+      const layer = createLayer(type, state.project.preset, {
+        ...(needsDefaultAnim
+          ? {
+              anim:
+                type === 'text'
+                  ? 'rise'
+                  : type === 'image'
+                    ? 'fade'
+                    : ('pop' as const),
+            }
+          : null),
+        ...extra,
+      })
       layer.end = state.project.duration
       dispatch({ t: 'addLayer', layer })
     },
-    [state.project.preset, state.project.duration],
+    [state.project.preset, state.project.duration, autoAnimateNewLayers],
   )
 
   const value = useMemo<Ctx>(

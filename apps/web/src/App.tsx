@@ -1,14 +1,17 @@
 import { useState, useCallback, useEffect } from 'react'
 import type { Project } from '#/types'
 import { ThemeProvider } from '#/store/theme'
+import { PrefsProvider } from '#/store/prefs'
 import Home from '#/screens/Home'
 import Editor from '#/screens/Editor'
 
 export default function App() {
   return (
-    <ThemeProvider>
-      <AppInner />
-    </ThemeProvider>
+    <PrefsProvider>
+      <ThemeProvider>
+        <AppInner />
+      </ThemeProvider>
+    </PrefsProvider>
   )
 }
 

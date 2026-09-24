@@ -1,6 +1,7 @@
 import { useEffect } from 'react'
-import { X, Sun, Moon, Laptop, User, Check, Palette, Sliders, Info, ShieldCheck } from 'lucide-react'
+import { X, Sun, Moon, Laptop, User, Check, Palette, Sliders, Info, ShieldCheck, Sparkles } from 'lucide-react'
 import { useTheme, type Theme } from '#/store/theme'
+import { usePrefs } from '#/store/prefs'
 
 interface SettingsModalProps {
   isOpen: boolean
@@ -9,6 +10,7 @@ interface SettingsModalProps {
 
 export default function SettingsModal({ isOpen, onClose }: SettingsModalProps) {
   const { theme, resolvedTheme, setTheme } = useTheme()
+  const { autoAnimateNewLayers, setAutoAnimateNewLayers } = usePrefs()
 
   useEffect(() => {
     if (!isOpen) return
@@ -216,6 +218,49 @@ export default function SettingsModal({ isOpen, onClose }: SettingsModalProps) {
                   </button>
                 )
               })}
+            </div>
+          </div>
+
+          {/* Animation Preferences */}
+          <div data-testid="settings-animation-section">
+            <div className="mb-2.5 flex items-center gap-1.5">
+              <Sparkles className="h-4 w-4 text-accent" />
+              <h3 className="text-xs font-bold uppercase tracking-wider text-txt2">
+                Animation
+              </h3>
+            </div>
+
+            <div
+              onClick={() => setAutoAnimateNewLayers(!autoAnimateNewLayers)}
+              data-testid="auto-animate-toggle"
+              className="flex w-full items-center gap-3.5 rounded-2xl border border-line bg-surface2/40 p-3.5 text-left transition-all hover:bg-surface2/80 cursor-pointer"
+            >
+              <div className="flex-1 min-w-0">
+                <span className="text-xs font-bold text-txt">Auto-animate new elements</span>
+                <p className="text-[11px] text-txt3 leading-tight mt-0.5">
+                  New text, shapes, stickers and images get an in-animation automatically
+                </p>
+              </div>
+              <button
+                type="button"
+                role="switch"
+                aria-checked={autoAnimateNewLayers}
+                aria-label="Auto-animate new elements"
+                onClick={(e) => {
+                  e.stopPropagation()
+                  setAutoAnimateNewLayers(!autoAnimateNewLayers)
+                }}
+                data-testid="auto-animate-switch"
+                className={`relative inline-flex h-[22px] w-[38px] shrink-0 items-center rounded-full transition-colors ${
+                  autoAnimateNewLayers ? 'bg-accent' : 'bg-surface2 border border-line-strong'
+                }`}
+              >
+                <span
+                  className={`inline-block h-4 w-4 rounded-full bg-white shadow transition-transform ${
+                    autoAnimateNewLayers ? 'translate-x-[18px]' : 'translate-x-[3px]'
+                  }`}
+                />
+              </button>
             </div>
           </div>
 

@@ -104,7 +104,6 @@ export function createLayer(type: LayerType, preset: Preset, extra: Partial<Laye
       color: '#FFFFFF',
       align: 'left',
       h: fs,
-      anim: 'rise',
     })
   } else if (type === 'shape') {
     const isPill = extra?.shape === 'pill'
@@ -121,7 +120,6 @@ export function createLayer(type: LayerType, preset: Preset, extra: Partial<Laye
       h,
       x: (preset.w - w) / 2,
       y: (preset.h - h) / 2,
-      anim: 'pop',
     })
   } else if (type === 'path') {
     const w = Math.round(preset.w * 0.4)
@@ -142,7 +140,6 @@ export function createLayer(type: LayerType, preset: Preset, extra: Partial<Laye
         { x: w * 0.5, y: h * 0.92, cp1: { x: w * 0.75, y: h * 0.92 }, cp2: { x: w * 0.18, y: h * 0.85 } },
         { x: w * 0.08, y: h * 0.5, cp1: { x: w * 0.08, y: h * 0.72 }, cp2: { x: w * 0.12, y: h * 0.2 } },
       ],
-      anim: 'pop',
     })
   } else if (type === 'image') {
     const w = preset.w * 0.55
@@ -153,7 +150,6 @@ export function createLayer(type: LayerType, preset: Preset, extra: Partial<Laye
       h: w * 0.66,
       x: (preset.w - w) / 2,
       y: preset.h * 0.25,
-      anim: 'fade',
       lockProportions: false,
     })
   } else if (type === 'sticker') {
@@ -165,7 +161,6 @@ export function createLayer(type: LayerType, preset: Preset, extra: Partial<Laye
       h: s,
       x: (preset.w - s) / 2,
       y: (preset.h - s) / 2,
-      anim: 'pop',
     })
   }
   Object.assign(base, extra)
