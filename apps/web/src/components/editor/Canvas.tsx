@@ -3854,22 +3854,48 @@ export default function Canvas() {
             e.currentTarget.setPointerCapture?.(e.pointerId)
           }
         } else if (selectedLayers.length > 0) {
+          // Empty-canvas drag with an active selection moves the selection —
+          // never pans. (Mobile-first: the finger would cover a small element,
+          // so users drag from outside it.) Panning stays available via
+          // deselect-then-drag, space/middle-mouse, wheel, or pinch.
+          panGesture.current = null
+          const primary = selectedLayers.find((item) => item.id === selectedId)
+            ?? selectedLayers.find((item) => item.id === selectedIds[0])
+            ?? selectedLayers[0]
+          const pb = getLayerRenderBounds(primary, layerRefs.current.get(primary.id), preset.w, selH, selectedId)
+          let pcx = pb.x
+          let pcy = primary.y
+          if (primary.type === 'group' && (!pb.w || !pb.h)) {
+            const gb = computeGroupBounds(primary.id, project.layers)
+            pcx = primary.x || gb.x
+            pcy = primary.y || gb.y
+          }
+          if (primary.keyframes && primary.keyframes.length > 0) {
+            const effPrimary = interpolateKeyframes(primary, time)
+            pcx = effPrimary.x
+            pcy = effPrimary.y
+          }
+          const items = selectedLayers.length > 1 ? selectedLayers : [primary]
           gesture.current = {
-            id: '',
+            id: primary.id,
             mode: 'move',
             sx: e.clientX,
             sy: e.clientY,
-            ox: 0,
-            oy: 0,
-            ow: 0,
-            oh: 0,
-            fromCanvas: true,
+            ox: pcx,
+            oy: pcy,
+            ow: pb.w,
+            oh: pb.h,
+            fromCanvas: false,
             moved: false,
             deselectOnTap: true,
+            group: items.length > 1
+              ? items.map((item) => {
+                  const ib = getLayerRenderBounds(item, layerRefs.current.get(item.id), preset.w, selH, selectedId)
+                  return { id: item.id, x: ib.x, y: item.y, w: ib.w, h: ib.h }
+                })
+              : undefined,
           }
-          if (e.pointerType === 'touch') {
-            panGesture.current = { sx: e.clientX, sy: e.clientY, ox: v.x, oy: v.y, moved: false }
-          }
+          try { e.currentTarget.setPointerCapture?.(e.pointerId) } catch {}
         } else if (e.pointerType === 'touch') {
           // On touch, allow panning if no element is selected
           panGesture.current = { sx: e.clientX, sy: e.clientY, ox: v.x, oy: v.y, moved: false }
