@@ -26,10 +26,19 @@ function boxesOverlap(a: Layer, b: Layer): boolean {
 }
 
 /**
- * CTA heuristic v1: smallest pill/rect shape, or a rect with a text layer
+ * CTA heuristic v1: a real button layer wins outright (smallest one);
+ * otherwise smallest pill/rect shape, or a rect with a text layer
  * overlapping it. Returns the layer id or null.
  */
 export function detectCtaId(layers: Layer[]): string | null {
+  const buttons = layers.filter((l) => l.type === 'button')
+  if (buttons.length > 0) {
+    let best = buttons[0]
+    for (const b of buttons) {
+      if (b.w * b.h < best.w * best.h) best = b
+    }
+    return best.id
+  }
   const shapes = layers.filter(
     (l) => l.type === 'shape' && (l.shape === 'pill' || l.shape === 'rect' || l.shape === 'rectangle'),
   )

@@ -737,6 +737,12 @@ function MaskShape({ layer, ox, oy }: { layer: Layer; ox: number; oy: number }) 
     )
   }
 
+  if (layer.type === 'button') {
+    const maxR = Math.min(w, h) / 2
+    const r = layer.radius !== undefined ? Math.min(Math.max(0, layer.radius), maxR) : maxR
+    return wrap(<rect x={x} y={y} width={w} height={h} rx={r} ry={r} fill="#fff" transform={rot || undefined} />)
+  }
+
   return null
 }
 
@@ -2712,7 +2718,7 @@ export default function Canvas() {
         y: b.y,
         w: b.w,
         h: b.h,
-        fontSize: item.type === 'text' ? item.fontSize : undefined,
+        fontSize: item.type === 'text' || item.type === 'button' ? item.fontSize : undefined,
         crop0: item.type === 'image' && item.crop ? { ...item.crop } : undefined,
         isCroppedImage: item.type === 'image' && Boolean(item.crop),
         origPoints: item.type === 'path' && item.points ? cloneVectorPoints(item.points) : undefined,
@@ -2789,7 +2795,7 @@ export default function Canvas() {
         const x = Math.round(cx + (item.x - cx) * ratioToApply)
         const y = Math.round(cy + (item.y - cy) * ratioToApply)
         const layer = layersRef.current.find((candidate) => candidate.id === item.id)
-        if (layer?.type === 'text' && item.fontSize) {
+        if ((layer?.type === 'text' || layer?.type === 'button') && item.fontSize) {
           updateLayer(item.id, { x, y, w, h, fontSize: Math.max(6, Math.round(item.fontSize * ratioToApply)) })
         } else if (layer?.type === 'image' && item.crop0) {
           const scaleFactor = item.w > 0 ? w / item.w : 1
@@ -2861,7 +2867,9 @@ export default function Canvas() {
       const h = Math.max(20, Math.round(p.h0 * ratioToApply))
       const x = Math.round(p.x0 + (p.w0 - w) / 2)
       const y = Math.round(p.y0 + (p.h0 - h) / 2)
-      if (selected.type === 'text') {
+      if (selected.type === 'button') {
+        updateLayer(p.id, { x, y, w, h, fontSize: Math.max(6, Math.round(p.fontSize * ratioToApply)) })
+      } else if (selected.type === 'text') {
         updateLayer(p.id, { x, y, w, fontSize: Math.max(6, Math.round(p.fontSize * ratioToApply)) })
       } else if (selected.type === 'image' && p.crop0) {
         const scaleFactor = p.w0 > 0 ? w / p.w0 : 1
@@ -3325,7 +3333,7 @@ export default function Canvas() {
       tapTrackerRef.current.widenedInSequence = true
       updateLayer(l.id, { x: 0, w: preset.w })
       select(l.id)
-    } else if (l.type === 'text') {
+    } else if (l.type === 'text' || l.type === 'button') {
       setEditingId(l.id)
     } else if (l.type === 'path') {
       select(l.id)
@@ -3337,7 +3345,7 @@ export default function Canvas() {
 
   const handleTripleTap = (l: Layer, info?: { prevX?: number; prevW?: number; widened?: boolean }) => {
     if (l.locked) return
-    if (l.type === 'text') {
+    if (l.type === 'text' || l.type === 'button') {
       setEditingId(null)
     }
     if (l.type === 'group') {
@@ -4432,6 +4440,13 @@ export default function Canvas() {
                       const r = Math.min(Math.max(0, effectiveLayer.radius), maxR)
                       return { rx: r, ry: r }
                     }
+                    if (effectiveLayer.type === 'button') {
+                      const maxR = Math.min(effectiveLayer.w, effectiveLayer.h) / 2
+                      const r = effectiveLayer.radius !== undefined
+                        ? Math.min(Math.max(0, effectiveLayer.radius), maxR)
+                        : maxR
+                      return { rx: r, ry: r }
+                    }
                     return { rx: 0, ry: 0 }
                   })()
 
@@ -4570,7 +4585,7 @@ export default function Canvas() {
                 y: rect.y,
                 w: rect.w,
                 h: rect.h,
-                fontSize: layer.type === 'text' ? layer.fontSize : undefined,
+                fontSize: layer.type === 'text' || layer.type === 'button' ? layer.fontSize : undefined,
                 crop0: layer.type === 'image' && layer.crop ? { ...layer.crop } : undefined,
                 isCroppedImage: layer.type === 'image' && Boolean(layer.crop),
                 origPoints: layer.type === 'path' && layer.points ? JSON.parse(JSON.stringify(layer.points)) : undefined,
@@ -6308,6 +6323,50 @@ function LayerContent({
       return <EditableText style={style} initial={layer.text || ''} onCommit={(t) => onEdit(t)} onDone={onEndEdit} />
     }
     return <div style={style}>{layer.text}</div>
+  }
+
+  if (layer.type === 'button') {
+    const maxR = Math.min(layer.w, layer.h) / 2
+    const r = layer.radius !== undefined ? Math.min(Math.max(0, layer.radius), maxR) : maxR
+    const hasGrad = Boolean(layer.fillGradient && layer.fillGradient.stops.length > 0)
+    const labelStyle: React.CSSProperties = {
+      fontFamily: layer.fontFamily,
+      fontSize: layer.fontSize,
+      fontWeight: layer.fontWeight,
+      color: layer.color,
+      textAlign: layer.align,
+      lineHeight: 1,
+      whiteSpace: 'pre',
+      wordBreak: 'normal',
+      margin: 0,
+      outline: 'none',
+      maxWidth: '100%',
+      overflow: 'hidden',
+      textOverflow: 'ellipsis',
+    }
+    return (
+      <div
+        style={{
+          position: 'relative',
+          width: '100%',
+          height: '100%',
+          display: 'grid',
+          placeItems: 'center',
+          overflow: 'hidden',
+          borderRadius: r,
+          background: hasGrad ? layerGradientToCss(layer.fillGradient!) : (layer.fill || '#007AFF'),
+          boxShadow: layer.strokeWidth ? `inset 0 0 0 ${layer.strokeWidth}px ${layer.stroke || '#000000'}` : undefined,
+          padding: '0 8px',
+          boxSizing: 'border-box',
+        }}
+      >
+        {editing ? (
+          <EditableText style={labelStyle} initial={layer.text || ''} onCommit={(t) => onEdit(t)} onDone={onEndEdit} />
+        ) : (
+          <div style={labelStyle}>{layer.text}</div>
+        )}
+      </div>
+    )
   }
 
   if (layer.type === 'shape') {

@@ -33,7 +33,7 @@ import {
 const TITLES: Record<string, string> = {
   text: 'Add Text', elements: 'Elements', stickers: 'Stickers', image: 'Image',
   components: 'Components Library',
-  background: 'Background', layers: 'Layers', font: 'Font', color: 'Color',
+  background: 'Background', layers: 'Layers', font: 'Font', color: 'Color', fill: 'Button Fill',
   blur: 'Blur & Effects',
   effects: 'Effects',
   style: 'Text Style', align: 'Alignment', shape: 'Shape', radius: 'Corner Radius',
@@ -102,7 +102,7 @@ function PanelBody({
   setFontSubView?: (v: 'standard' | 'googleSearch') => void
 }) {
   const { selected, updateLayer } = useEditor()
-  const needsLayer = ['font', 'color', 'blur', 'effects', 'style', 'align', 'shape', 'radius', 'animate', 'mask', 'crop', 'vector', 'convertText']
+  const needsLayer = ['font', 'color', 'fill', 'blur', 'effects', 'style', 'align', 'shape', 'radius', 'animate', 'mask', 'crop', 'vector', 'convertText']
   if (needsLayer.includes(tool) && !selected) {
     return <MockPanel text="Select a layer on the canvas first." />
   }
@@ -137,6 +137,7 @@ function PanelBody({
       )
     }
     case 'color': return <ColorPanel />
+    case 'fill': return <ColorPanel forceKey="fill" />
     case 'blur': return <BlurPanel />
     case 'effects': return <EffectsPanel />
     case 'style': return <StylePanel />
@@ -815,7 +816,7 @@ function LayersPanel() {
   } = useEditor()
 
   const label = (l: any) =>
-    l.type === 'text' ? (l.text || 'Text').slice(0, 18) : l.type === 'sticker' ? `Sticker ${l.emoji}` : l.name
+    l.type === 'text' ? (l.text || 'Text').slice(0, 18) : l.type === 'button' ? (l.text || 'Button').slice(0, 18) : l.type === 'sticker' ? `Sticker ${l.emoji}` : l.name
 
   // Hierarchical list of layers
   const layerMap = new Map(project.layers.map((l) => [l.id, l]))
@@ -1572,13 +1573,13 @@ function GradientEditor({
   )
 }
 
-function ColorPanel() {
+function ColorPanel({ forceKey }: { forceKey?: 'fill' | 'stroke' | 'color' }) {
   const { selected, selectedIds, updateLayers, updateLayer, time, startEyedropper } = useEditor()
   const [colorMode, setColorMode] = useState<'fill' | 'stroke'>('fill')
   const [isPickerExpanded, setIsPickerExpanded] = useState(false)
   const l = selected!
   const isPath = l.type === 'path'
-  const key = isPath ? (colorMode === 'stroke' ? 'stroke' : 'fill') : (l.type === 'shape' ? 'fill' : 'color')
+  const key = forceKey ?? (isPath ? (colorMode === 'stroke' ? 'stroke' : 'fill') : (l.type === 'shape' ? 'fill' : 'color'))
   const effective = l && l.keyframes && l.keyframes.length > 0 ? interpolateKeyframes(l, time) : l
   const cur = (effective as any)?.[key] || (l as any)?.[key]
   const up = (patch: Record<string, any>) => {

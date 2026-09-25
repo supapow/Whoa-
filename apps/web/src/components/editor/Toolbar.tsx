@@ -8,7 +8,7 @@ import {
   AlignHorizontalDistributeCenter, AlignVerticalDistributeCenter,
   Magnet, ChevronUp, ChevronDown, Lock, Unlock,
   Move, ArrowUpToLine, ArrowDownToLine, ArrowLeftToLine, ArrowRightToLine, Maximize2, Expand,
-  Droplet, PenTool, Download, Spline, Pipette, SunMedium,
+  Droplet, PenTool, Download, Spline, Pipette, SunMedium, RectangleHorizontal,
 } from 'lucide-react'
 import { useEditor, type AlignMode } from '#/store/editor'
 import { parseImagePosition } from '#/lib/imagePosition'
@@ -343,6 +343,12 @@ export default function Toolbar({ onExport }: { onExport?: () => void }) {
         icon: <Type />,
         onClick: () => addLayer('text'),
       },
+      {
+        key: 'button',
+        label: 'Button',
+        icon: <RectangleHorizontal />,
+        onClick: () => addLayer('button'),
+      },
       { key: 'elements', label: 'Elements', icon: <Shapes /> },
       { key: 'stickers', label: 'Stickers', icon: <Sticker /> },
       { key: 'image', label: 'Image', icon: <ImageIcon /> },
@@ -420,6 +426,17 @@ export default function Toolbar({ onExport }: { onExport?: () => void }) {
           accent: true,
           onClick: () => openTool('convertText'),
         },
+        ...common,
+      ]
+    } else if (selected.type === 'button') {
+      items = [
+        { key: 'font', label: 'Font', icon: <Type /> },
+        { key: 'color', label: 'Label', icon: <PaintBucket /> },
+        { key: 'fill', label: 'Fill', icon: <PaintBucket /> },
+        { key: 'style', label: 'Style', icon: <Bold /> },
+        { key: 'align', label: 'Align', icon: <AlignLeft /> },
+        { key: 'radius', label: 'Corners', icon: <Square /> },
+        { key: 'mask', label: 'Mask', icon: <Scissors />, onClick: handleMask },
         ...common,
       ]
     } else if (selected.type === 'shape') {

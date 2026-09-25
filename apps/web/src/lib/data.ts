@@ -162,6 +162,25 @@ export function createLayer(type: LayerType, preset: Preset, extra: Partial<Laye
       x: (preset.w - s) / 2,
       y: (preset.h - s) / 2,
     })
+  } else if (type === 'button') {
+    const fs = Math.max(14, Math.round(preset.w * 0.055))
+    const w = Math.round(preset.w * 0.5)
+    const h = Math.round(fs * 2.4)
+    Object.assign(base, {
+      name: 'Button',
+      text: 'SHOP NOW',
+      fontFamily: 'Manrope',
+      fontSize: fs,
+      fontWeight: 800,
+      color: '#FFFFFF',
+      align: 'center',
+      fill: '#007AFF',
+      radius: Math.round(h / 2),
+      w,
+      h,
+      x: (preset.w - w) / 2,
+      y: (preset.h - h) / 2,
+    })
   }
   Object.assign(base, extra)
   return base
