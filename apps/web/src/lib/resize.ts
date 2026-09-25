@@ -90,7 +90,7 @@ function fallbackTextWidth(text: string, fontSize: number): number {
 
 /** Shrink-to-fit a text layer inside maxW (canvas estimator with fallback). */
 function autoFitText(layer: Layer, maxW: number, fontScale: number): Layer {
-  if (layer.type !== 'text') return layer
+  if (layer.type !== 'text' && layer.type !== 'button') return layer
   const minFloor = 8
   // Never start below the readability floor: an over-wide box at 8px stays
   // legible (and inside the artboard via clamping); a 4px fit does not.
@@ -99,6 +99,8 @@ function autoFitText(layer: Layer, maxW: number, fontScale: number): Layer {
     const est = estimateTextBoxSize({ ...layer, fontSize })
     const w = est ? est.w : fallbackTextWidth(layer.text ?? '', fontSize)
     if (w <= Math.max(1, maxW) || fontSize <= minFloor) {
+      // Buttons keep their background box — only the label shrinks.
+      if (layer.type === 'button') return { ...layer, fontSize }
       return { ...layer, fontSize, w: Math.min(layer.w, Math.max(1, maxW)) }
     }
     fontSize -= 1

@@ -344,10 +344,9 @@ export default function Toolbar({ onExport }: { onExport?: () => void }) {
         onClick: () => addLayer('text'),
       },
       {
-        key: 'button',
-        label: 'Button',
+        key: 'buttons',
+        label: 'Buttons',
         icon: <RectangleHorizontal />,
-        onClick: () => addLayer('button'),
       },
       { key: 'elements', label: 'Elements', icon: <Shapes /> },
       { key: 'stickers', label: 'Stickers', icon: <Sticker /> },

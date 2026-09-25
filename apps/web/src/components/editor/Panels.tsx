@@ -12,6 +12,7 @@ import type { ShapeKind, Layer, LayerGradient, BlurFade, ShadowEffect, VectorPoi
 import { hasKeyframeAt, getAdjacentKeyframes, interpolateKeyframes } from '#/lib/keyframes'
 import {
   PALETTE, GRADIENTS, BG_IMAGES, STOCK_IMAGES, STICKERS, SHAPES,
+  DIV_BUTTON_PRESETS, VECTOR_BUTTON_PRESETS,
 } from '#/lib/data'
 import {
   LAYER_GRADIENT_PRESETS, BG_FADE_PRESETS, layerGradientToCss, defaultGradientForLayerType,
@@ -23,6 +24,7 @@ import {
   parseGoogleFontsInput, verifyGoogleFontExists,
 } from '#/lib/fonts'
 import GoogleFontsSearchView from '#/components/editor/GoogleFontsSearchView'
+import type { DivButtonPreset, VectorButtonPreset } from '#/lib/data'
 import { getLibraryComponents, deleteComponentFromLibrary, type ComponentItem } from '#/lib/groups'
 import {
   VECTOR_PRESETS, convertShapeToVector, buildSvgPath, tightenVectorLayer, simplifyVectorPoints,
@@ -33,7 +35,7 @@ import {
 const TITLES: Record<string, string> = {
   text: 'Add Text', elements: 'Elements', stickers: 'Stickers', image: 'Image',
   components: 'Components Library',
-  background: 'Background', layers: 'Layers', font: 'Font', color: 'Color', fill: 'Button Fill',
+  background: 'Background', layers: 'Layers', font: 'Font', color: 'Color', fill: 'Button Fill', buttons: 'Buttons',
   blur: 'Blur & Effects',
   effects: 'Effects',
   style: 'Text Style', align: 'Alignment', shape: 'Shape', radius: 'Corner Radius',
@@ -108,6 +110,7 @@ function PanelBody({
   }
   switch (tool) {
     case 'text': return <TextAdd />
+    case 'buttons': return <Buttons />
     case 'elements': return <Elements />
     case 'stickers': return <Stickers />
     case 'image': return <Images />
@@ -370,6 +373,147 @@ function ShapeGlyph({ kind }: { kind: ShapeKind }) {
   if (kind === 'star') return <div className="h-7 w-7 bg-white" style={{ clipPath: 'polygon(50% 0%, 61% 35%, 98% 35%, 68% 57%, 79% 91%, 50% 70%, 21% 91%, 32% 57%, 2% 35%, 39% 35%)' }} />
   if (kind === 'line') return <div className="h-1.5 w-11 rounded-full bg-white" />
   return <div className="h-7 w-7 rounded-none bg-white" />
+}
+
+function Buttons() {
+  const { addLayer, openTool, project } = useEditor()
+  const preset = project.preset
+
+  const addDiv = (p: DivButtonPreset) => {
+    addLayer('button', {
+      name: p.name,
+      text: p.text,
+      fill: p.fill,
+      fillGradient: p.fillGradient,
+      color: p.color,
+      radius: p.radius,
+      stroke: p.stroke,
+      strokeWidth: p.strokeWidth,
+      ...(p.shadow ? { dropShadow: { ...DEFAULT_DROP_SHADOW } } : {}),
+    })
+    openTool(null)
+  }
+
+  const addVector = (p: VectorButtonPreset) => {
+    const vp = VECTOR_PRESETS.find((v) => v.id === p.vectorId)
+    if (!vp) return
+    const aspect = (vp.defaultH || 120) / Math.max(1, vp.defaultW || 180)
+    let w = Math.round(preset.w * 0.55)
+    let h = Math.round(w * aspect)
+    const maxH = Math.round(preset.h * 0.6)
+    if (h > maxH) {
+      h = maxH
+      w = Math.max(40, Math.round(h / aspect))
+    }
+    addLayer('button', {
+      name: p.name,
+      text: p.text,
+      fill: p.fill,
+      color: p.color,
+      fontSize: Math.max(10, Math.round(Math.min(w, h) * 0.2)),
+      fontWeight: 800,
+      align: 'center',
+      w,
+      h,
+      closed: vp.closed,
+      points: vp.getPoints(w, h),
+      fillRule: 'nonzero',
+    })
+    openTool(null)
+  }
+
+  return (
+    <div className="pb-6">
+      <div className="grid grid-cols-2 gap-3 sm:gap-4 items-start">
+        {/* COLUMN 1: Div Buttons */}
+        <div className="sticky top-0 self-start">
+          <div className="mb-2.5 flex items-center justify-between">
+            <span className="text-xs font-bold uppercase tracking-wider text-txt3">Div Buttons</span>
+            <span className="text-[10px] text-txt3">{DIV_BUTTON_PRESETS.length}</span>
+          </div>
+          <div className="grid grid-cols-1 gap-2">
+            {DIV_BUTTON_PRESETS.map((p) => (
+              <button
+                key={p.id}
+                data-testid={`add-button-${p.id}`}
+                id={`add-button-${p.id}`}
+                aria-label={p.name}
+                title={p.name}
+                onClick={() => addDiv(p)}
+                className="grid place-items-center rounded-2xl bg-surface2 px-2 py-2.5 transition-all hover:bg-surface2/75 active:scale-95 cursor-pointer"
+              >
+                <span
+                  style={{
+                    background: p.fillGradient ? layerGradientToCss(p.fillGradient) : p.fill,
+                    color: p.color,
+                    borderRadius: p.radius >= 9999 ? 9999 : p.radius,
+                    boxShadow: [
+                      p.strokeWidth ? `inset 0 0 0 ${p.strokeWidth}px ${p.stroke || '#000'}` : null,
+                      p.shadow ? '0 4px 12px rgba(0,0,0,0.45)' : null,
+                    ].filter(Boolean).join(', ') || undefined,
+                    fontSize: 11,
+                    fontWeight: 800,
+                    padding: '7px 14px',
+                    maxWidth: '100%',
+                    overflow: 'hidden',
+                    textOverflow: 'ellipsis',
+                    whiteSpace: 'nowrap',
+                  }}
+                >
+                  {p.text}
+                </span>
+              </button>
+            ))}
+          </div>
+        </div>
+
+        {/* COLUMN 2: Vector Buttons */}
+        <div>
+          <div className="mb-2.5 flex items-center justify-between">
+            <span className="text-xs font-bold uppercase tracking-wider text-txt3">Vector Buttons</span>
+            <span className="text-[10px] text-indigo-400 font-medium">{VECTOR_BUTTON_PRESETS.length}</span>
+          </div>
+          <div className="grid grid-cols-2 gap-2">
+            {VECTOR_BUTTON_PRESETS.map((p) => {
+              const vp = VECTOR_PRESETS.find((v) => v.id === p.vectorId)
+              if (!vp) return null
+              const baseW = 120
+              const baseH = Math.round(120 * ((vp.defaultH || 120) / Math.max(1, vp.defaultW || 180)))
+              const previewPts = vp.getPoints(baseW, baseH)
+              const bbox = getVectorBoundingBox(previewPts, vp.closed)
+              const pad = Math.max(bbox.width, bbox.height) * 0.08
+              const pathD = buildSvgPath(previewPts, vp.closed, baseW, baseH)
+              return (
+                <button
+                  key={p.id}
+                  data-testid={`add-button-${p.id}`}
+                  id={`add-button-${p.id}`}
+                  aria-label={p.name}
+                  title={p.name}
+                  onClick={() => addVector(p)}
+                  className="relative grid place-items-center rounded-2xl bg-surface2 transition-all hover:bg-surface2/75 active:scale-90 cursor-pointer aspect-square p-1"
+                >
+                  <svg
+                    viewBox={`${bbox.minX - pad} ${bbox.minY - pad} ${bbox.width + pad * 2} ${bbox.height + pad * 2}`}
+                    className="h-full w-full"
+                    preserveAspectRatio="xMidYMid meet"
+                  >
+                    <path d={pathD} fill={p.fill} strokeLinejoin="round" />
+                  </svg>
+                  <span
+                    className="pointer-events-none absolute inset-0 grid place-items-center px-2 text-center font-extrabold"
+                    style={{ color: p.color, fontSize: 9, lineHeight: 1.1 }}
+                  >
+                    {p.text}
+                  </span>
+                </button>
+              )
+            })}
+          </div>
+        </div>
+      </div>
+    </div>
+  )
 }
 
 function Stickers() {

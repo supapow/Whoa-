@@ -738,6 +738,13 @@ function MaskShape({ layer, ox, oy }: { layer: Layer; ox: number; oy: number }) 
   }
 
   if (layer.type === 'button') {
+    if (layer.points) {
+      const d = layer.points ? buildSvgPath(layer.points, layer.closed !== false, w, h) : ''
+      if (!d) return null
+      return wrap(
+        <path d={d} transform={`translate(${x} ${y})${rot}`} fill="#fff" stroke="none" fillRule={layer.fillRule || 'nonzero'} />,
+      )
+    }
     const maxR = Math.min(w, h) / 2
     const r = layer.radius !== undefined ? Math.min(Math.max(0, layer.radius), maxR) : maxR
     return wrap(<rect x={x} y={y} width={w} height={h} rx={r} ry={r} fill="#fff" transform={rot || undefined} />)
@@ -2721,7 +2728,7 @@ export default function Canvas() {
         fontSize: item.type === 'text' || item.type === 'button' ? item.fontSize : undefined,
         crop0: item.type === 'image' && item.crop ? { ...item.crop } : undefined,
         isCroppedImage: item.type === 'image' && Boolean(item.crop),
-        origPoints: item.type === 'path' && item.points ? cloneVectorPoints(item.points) : undefined,
+        origPoints: (item.type === 'path' || item.type === 'button') && item.points ? cloneVectorPoints(item.points) : undefined,
       }
     })
 
@@ -2796,7 +2803,13 @@ export default function Canvas() {
         const y = Math.round(cy + (item.y - cy) * ratioToApply)
         const layer = layersRef.current.find((candidate) => candidate.id === item.id)
         if ((layer?.type === 'text' || layer?.type === 'button') && item.fontSize) {
-          updateLayer(item.id, { x, y, w, h, fontSize: Math.max(6, Math.round(item.fontSize * ratioToApply)) })
+          const patch: Partial<Layer> = { x, y, w, h, fontSize: Math.max(6, Math.round(item.fontSize * ratioToApply)) }
+          if (layer?.type === 'button' && item.origPoints) {
+            const sx = item.w > 0 ? w / item.w : 1
+            const sy = item.h > 0 ? h / item.h : 1
+            patch.points = scaleVectorPoints(item.origPoints, sx, sy)
+          }
+          updateLayer(item.id, patch)
         } else if (layer?.type === 'image' && item.crop0) {
           const scaleFactor = item.w > 0 ? w / item.w : 1
           updateLayer(item.id, {
@@ -2868,7 +2881,13 @@ export default function Canvas() {
       const x = Math.round(p.x0 + (p.w0 - w) / 2)
       const y = Math.round(p.y0 + (p.h0 - h) / 2)
       if (selected.type === 'button') {
-        updateLayer(p.id, { x, y, w, h, fontSize: Math.max(6, Math.round(p.fontSize * ratioToApply)) })
+        const patch: Partial<Layer> = { x, y, w, h, fontSize: Math.max(6, Math.round(p.fontSize * ratioToApply)) }
+        if (p.points0) {
+          const sx = p.w0 > 0 ? w / p.w0 : 1
+          const sy = p.h0 > 0 ? h / p.h0 : 1
+          patch.points = scaleVectorPoints(p.points0, sx, sy)
+        }
+        updateLayer(p.id, patch)
       } else if (selected.type === 'text') {
         updateLayer(p.id, { x, y, w, fontSize: Math.max(6, Math.round(p.fontSize * ratioToApply)) })
       } else if (selected.type === 'image' && p.crop0) {
@@ -3009,7 +3028,7 @@ export default function Canvas() {
               group: info.measured,
               crop0: isCroppedImage && targetL?.crop ? { ...targetL.crop } : undefined,
               isCroppedImage,
-              points0: targetL?.type === 'path' && targetL.points ? cloneVectorPoints(targetL.points) : undefined,
+              points0: (targetL?.type === 'path' || targetL?.type === 'button') && targetL.points ? cloneVectorPoints(targetL.points) : undefined,
             }
           } else {
             select(null)
@@ -3726,7 +3745,7 @@ export default function Canvas() {
             group: info.measured,
             crop0: isCroppedImage && targetL?.crop ? { ...targetL.crop } : undefined,
             isCroppedImage,
-            points0: targetL?.type === 'path' && targetL.points ? cloneVectorPoints(targetL.points) : undefined,
+            points0: (targetL?.type === 'path' || targetL?.type === 'button') && targetL.points ? cloneVectorPoints(targetL.points) : undefined,
           }
           setPinchActive(true)
         } else {
@@ -4588,7 +4607,7 @@ export default function Canvas() {
                 fontSize: layer.type === 'text' || layer.type === 'button' ? layer.fontSize : undefined,
                 crop0: layer.type === 'image' && layer.crop ? { ...layer.crop } : undefined,
                 isCroppedImage: layer.type === 'image' && Boolean(layer.crop),
-                origPoints: layer.type === 'path' && layer.points ? JSON.parse(JSON.stringify(layer.points)) : undefined,
+                origPoints: (layer.type === 'path' || layer.type === 'button') && layer.points ? JSON.parse(JSON.stringify(layer.points)) : undefined,
               }
             }) : undefined
             const isImagePositioning = Boolean(imagePositioningId && imagePositioningId === sel.id && sel.type === 'image')
@@ -6326,9 +6345,6 @@ function LayerContent({
   }
 
   if (layer.type === 'button') {
-    const maxR = Math.min(layer.w, layer.h) / 2
-    const r = layer.radius !== undefined ? Math.min(Math.max(0, layer.radius), maxR) : maxR
-    const hasGrad = Boolean(layer.fillGradient && layer.fillGradient.stops.length > 0)
     const labelStyle: React.CSSProperties = {
       fontFamily: layer.fontFamily,
       fontSize: layer.fontSize,
@@ -6344,6 +6360,38 @@ function LayerContent({
       overflow: 'hidden',
       textOverflow: 'ellipsis',
     }
+    const label = editing ? (
+      <EditableText style={labelStyle} initial={layer.text || ''} onCommit={(t) => onEdit(t)} onDone={onEndEdit} />
+    ) : (
+      <div style={labelStyle}>{layer.text}</div>
+    )
+    // Vector-background variant (badge buttons): SVG path behind the label.
+    if (layer.points) {
+      const d = buildSvgPath(layer.points, layer.closed !== false, layer.w, layer.h)
+      const hasGrad = Boolean(layer.fillGradient && layer.fillGradient.stops.length > 0)
+      const gradId = fillGradientDefId(layer.id)
+      return (
+        <div style={{ position: 'relative', width: '100%', height: '100%', display: 'grid', placeItems: 'center' }}>
+          <svg viewBox={`0 0 ${layer.w} ${layer.h}`} width="100%" height="100%" style={{ position: 'absolute', inset: 0, display: 'block', overflow: 'visible' }} shapeRendering="geometricPrecision">
+            {hasGrad && layer.fillGradient ? <GradientDef id={gradId} gradient={layer.fillGradient} /> : null}
+            <path
+              d={d}
+              fill={hasGrad ? `url(#${gradId})` : (layer.fill || '#007AFF')}
+              stroke={layer.stroke || undefined}
+              strokeWidth={layer.strokeWidth || 0}
+              strokeLinejoin="round"
+              shapeRendering="geometricPrecision"
+            />
+          </svg>
+          <div style={{ position: 'relative', zIndex: 1, display: 'grid', placeItems: 'center', maxWidth: '86%', maxHeight: '86%', overflow: 'hidden' }}>
+            {label}
+          </div>
+        </div>
+      )
+    }
+    const maxR = Math.min(layer.w, layer.h) / 2
+    const r = layer.radius !== undefined ? Math.min(Math.max(0, layer.radius), maxR) : maxR
+    const hasGrad = Boolean(layer.fillGradient && layer.fillGradient.stops.length > 0)
     return (
       <div
         style={{
@@ -6360,11 +6408,7 @@ function LayerContent({
           boxSizing: 'border-box',
         }}
       >
-        {editing ? (
-          <EditableText style={labelStyle} initial={layer.text || ''} onCommit={(t) => onEdit(t)} onDone={onEndEdit} />
-        ) : (
-          <div style={labelStyle}>{layer.text}</div>
-        )}
+        {label}
       </div>
     )
   }
