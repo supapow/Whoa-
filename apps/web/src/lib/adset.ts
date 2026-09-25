@@ -1,6 +1,6 @@
 import type { AdSet, Layer, Preset, Project } from '#/types'
 import { uid, newProject } from '#/lib/data'
-import { scaleLayersToPreset, scaleSingleLayer } from '#/lib/resize'
+import { scaleLayersToPreset, scaleSingleLayer, remapKeyframesToBounds } from '#/lib/resize'
 
 /** Fields that sync from master to linked variant layers (content + style). */
 export const CONTENT_SYNC_KEYS = [
@@ -31,6 +31,17 @@ export const CONTENT_SYNC_KEYS = [
   'outRotateMs',
 ] as const
 
+/**
+ * Animation fields that follow master too — keyframes are re-projected into
+ * each size's layer box (they store absolute artboard coordinates), while
+ * start/end are timeline values that stay identical across sizes.
+ */
+export const ANIM_SYNC_KEYS = [
+  'start',
+  'end',
+  'keyframes',
+] as const
+
 /** Fields that are per-size layout (detach on variant edit, never auto-push). */
 export const LAYOUT_KEYS = [
   'x',
@@ -55,9 +66,6 @@ export const LAYOUT_KEYS = [
   'paddingLeft',
   'dropShadow',
   'innerShadow',
-  'start',
-  'end',
-  'keyframes',
   'groupId',
   'isMask',
   'type',
@@ -66,6 +74,7 @@ export const LAYOUT_KEYS = [
 type Key = keyof Layer
 
 const CONTENT_SET = new Set<string>(CONTENT_SYNC_KEYS)
+const ANIM_SET = new Set<string>(ANIM_SYNC_KEYS)
 const LAYOUT_SET = new Set<string>(LAYOUT_KEYS)
 
 function changedKeys(a: Layer, b: Layer): Key[] {
@@ -161,6 +170,10 @@ export function reapplyVariantLayout(adSet: AdSet, variantId: string): AdSet {
       for (const k of CONTENT_SET) {
         ;(restored as unknown as Record<string, unknown>)[k] = (prev as unknown as Record<string, unknown>)[k]
       }
+      // Keep a customized animation, re-projected onto the re-applied layout.
+      restored.start = prev.start
+      restored.end = prev.end
+      restored.keyframes = remapKeyframesToBounds(prev.keyframes, prev, l)
       restored.contentDetached = true
       return restored
     }
@@ -218,9 +231,11 @@ export interface DiffResult {
  * Generic layer diff between the pre- and post-action active project.
  * - Master edits: added layers propagate (scaled) to variants; removed
  *   master layers delete linked variant layers; content changes push to
- *   linked (!contentDetached) variant layers. Layout changes stay local.
- * - Variant edits: layout changes set layoutDetached, content changes set
- *   contentDetached on the edited layers.
+ *   linked (!contentDetached) variant layers. Animations (in/out presets,
+ *   timing, keyframes) push too — keyframes re-projected onto each size's
+ *   layer box. Layout changes stay local.
+ * - Variant edits: layout changes set layoutDetached, content + animation
+ *   changes set contentDetached on the edited layers.
  * Returns the updated active project plus updated other-variants.
  */
 export function diffAndSync(prev: Project, next: Project, adSet: AdSet, activeId: string): DiffResult {
@@ -254,14 +269,18 @@ export function diffAndSync(prev: Project, next: Project, adSet: AdSet, activeId
   }
 
   // Per-layer updates.
-  const contentUpdates: { key: string; patch: Partial<Layer> }[] = []
+  const contentUpdates: { key: string; patch: Partial<Layer>; anim?: Key[]; src: Layer }[] = []
   let activeLayers = next.layers
   for (const l of next.layers) {
     const p = prevById.get(l.id)
     if (!p) continue
     const changed = changedKeys(p, l)
     if (changed.length === 0) continue
-    const isContent = changed.some((k) => CONTENT_SET.has(k))
+    const isContentKey = changed.some((k) => CONTENT_SET.has(k))
+    const animKeys = changed.filter((k) => ANIM_SET.has(k))
+    // Animation (timing + keyframes) follows the same rule as content: master
+    // pushes it, editing it on a size detaches that layer from master.
+    const isContent = isContentKey || animKeys.length > 0
     const isLayout = changed.some((k) => LAYOUT_SET.has(k))
     if (onMaster) {
       if (isContent) {
@@ -269,7 +288,7 @@ export function diffAndSync(prev: Project, next: Project, adSet: AdSet, activeId
         for (const k of changed) {
           if (CONTENT_SET.has(k)) (patch as Record<string, unknown>)[k] = (l as unknown as Record<string, unknown>)[k]
         }
-        contentUpdates.push({ key: masterKeyOf(l), patch })
+        contentUpdates.push({ key: masterKeyOf(l), patch, anim: animKeys.length > 0 ? animKeys : undefined, src: l })
       }
     } else {
       activeLayers = activeLayers.map((x) =>
@@ -293,9 +312,20 @@ export function diffAndSync(prev: Project, next: Project, adSet: AdSet, activeId
     if (v.id === activeId) return project
     let layers = v.layers
     for (const u of contentUpdates) {
-      layers = layers.map((l) =>
-        l.masterId === u.key && !l.contentDetached ? { ...l, ...u.patch } : l,
-      )
+      layers = layers.map((l) => {
+        if (l.masterId !== u.key || l.contentDetached) return l
+        const patched: Layer = { ...l, ...u.patch }
+        if (u.anim) {
+          if (u.anim.includes('start')) patched.start = u.src.start
+          if (u.anim.includes('end')) patched.end = u.src.end
+          // Keyframes store absolute artboard coordinates — re-project them
+          // from the master layer's box onto this size's layer box.
+          if (u.anim.includes('keyframes')) {
+            patched.keyframes = remapKeyframesToBounds(u.src.keyframes, u.src, l)
+          }
+        }
+        return patched
+      })
     }
     return { ...v, layers }
   })

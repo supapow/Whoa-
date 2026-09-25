@@ -83,6 +83,38 @@ export function remapKeyframe(kf: Keyframe, t: LayerTransform, fontScale: number
   }
 }
 
+/**
+ * Re-project keyframes authored in one layer box onto another box.
+ * Used to push master animations to linked sizes: coordinates stay relative
+ * to the layer, so a moved/resized layer on any size carries its timeline.
+ */
+export function remapKeyframesToBounds(
+  kfs: Keyframe[] | undefined,
+  from: { x: number; y: number; w: number; h: number },
+  to: { x: number; y: number; w: number; h: number },
+): Keyframe[] | undefined {
+  if (!kfs) return undefined
+  const fx = from.w > 0 ? to.w / from.w : 1
+  const fy = from.h > 0 ? to.h / from.h : 1
+  const s = Math.min(fx, fy)
+  const dx = to.x - from.x * fx
+  const dy = to.y - from.y * fy
+  return kfs.map((kf) => ({
+    ...kf,
+    id: uid(),
+    x: Math.round(kf.x * fx + dx),
+    y: Math.round(kf.y * fy + dy),
+    w: Math.max(1, Math.round(kf.w * fx)),
+    h: Math.max(1, Math.round(kf.h * fy)),
+    fontSize: kf.fontSize !== undefined ? Math.max(1, Math.round(kf.fontSize * s)) : undefined,
+    radius: kf.radius !== undefined ? Math.max(0, kf.radius * s) : undefined,
+    blur: kf.blur !== undefined ? Math.max(0, kf.blur * s) : undefined,
+    dropShadow: scaleShadow(kf.dropShadow, s),
+    innerShadow: scaleShadow(kf.innerShadow, s),
+    points: kf.points ? scaleVectorPoints(kf.points, fx, fy) : undefined,
+  }))
+}
+
 function fallbackTextWidth(text: string, fontSize: number): number {
   const longest = (text ?? '').split('\n').reduce((m, line) => Math.max(m, line.length), 0)
   return Math.max(1, longest * fontSize * 0.55)
