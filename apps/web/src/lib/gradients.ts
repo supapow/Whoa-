@@ -52,6 +52,40 @@ export function gradientAngleCoords(angle: number): { x1: number; y1: number; x2
   }
 }
 
+/** Unit direction vector for a compass angle (y grows downward). */
+function angleDir(angle: number): { dx: number; dy: number } {
+  const rad = (((angle % 360) + 360) % 360 * Math.PI) / 180
+  return { dx: Math.sin(rad), dy: -Math.cos(rad) }
+}
+
+export interface GradientEndpoints {
+  p1: { x: number; y: number }
+  p2: { x: number; y: number }
+}
+
+/**
+ * Render endpoints for a linear gradient: explicit drag handles when set,
+ * otherwise a centered span derived from `angle`. Coordinates are unit-box
+ * (0..1 inside the layer) and may lie outside for overhanging gradients.
+ */
+export function gradientEndpoints(g: LayerGradient): GradientEndpoints {
+  if (g.p1 && g.p2) return { p1: { ...g.p1 }, p2: { ...g.p2 } }
+  const { dx, dy } = angleDir(g.angle)
+  return {
+    p1: { x: 0.5 - dx / 2, y: 0.5 - dy / 2 },
+    p2: { x: 0.5 + dx / 2, y: 0.5 + dy / 2 },
+  }
+}
+
+/** Compass angle (0 = to top, 90 = to right) for a p1 → p2 drag vector. */
+export function angleFromEndpoints(p1: { x: number; y: number }, p2: { x: number; y: number }): number {
+  const dx = p2.x - p1.x
+  const dy = p2.y - p1.y
+  if (Math.abs(dx) < 1e-6 && Math.abs(dy) < 1e-6) return 0
+  const deg = (Math.atan2(dx, -dy) * 180) / Math.PI
+  return Math.round(((deg % 360) + 360) % 360)
+}
+
 /**
  * CSS mask that keeps the layer fully visible except for a fade ramp toward
  * one edge — used to dissolve (backdrop) blur to transparent.

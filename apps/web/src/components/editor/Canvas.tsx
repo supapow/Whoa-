@@ -8,7 +8,7 @@ import { findGapMatch, type GapMatchResult } from '#/lib/gapMatch'
 import { findElementAlignMatch, type ElementAlignResult } from '#/lib/elementAlign'
 import { parseImagePosition, formatImagePosition, calcImagePositionDelta } from '#/lib/imagePosition'
 import { interpolateKeyframes } from '#/lib/keyframes'
-import { fillGradientDefId, gradientAngleCoords, layerGradientToCss, blurFadeMaskCss } from '#/lib/gradients'
+import { fillGradientDefId, gradientEndpoints, angleFromEndpoints, layerGradientToCss, blurFadeMaskCss } from '#/lib/gradients'
 import { layerNeedsSvgFilter, shadowFilterId, dropShadowCss, shadowFilterRegion, dropCasterFilterId, innerCasterFilterId, estimateTextBoxSize, colorToRgba } from '#/lib/shadows'
 import {
   buildSvgPath, scaleVectorPoints, tightenVectorLayer,
@@ -846,10 +846,10 @@ function GradientDef({ id, gradient }: { id: string; gradient: LayerGradient }) 
       </defs>
     )
   }
-  const c = gradientAngleCoords(gradient.angle)
+  const c = gradientEndpoints(gradient)
   return (
     <defs>
-      <linearGradient id={id} x1={c.x1} y1={c.y1} x2={c.x2} y2={c.y2}>
+      <linearGradient id={id} x1={c.p1.x} y1={c.p1.y} x2={c.p2.x} y2={c.p2.y}>
         {nodes}
       </linearGradient>
     </defs>
@@ -4839,6 +4839,110 @@ export default function Canvas() {
                     </svg>
                   </div>
                 ))}
+
+                {/* ON-CANVAS GRADIENT START/END HANDLES — drag anywhere, inside or outside the element */}
+                {selected.length === 1 && !isGroup && !isImagePositioning && !isVectorEditing &&
+                  effSel.fillGradient && effSel.fillGradient.kind === 'linear' && effSel.fillGradient.stops.length > 0 && (() => {
+                    const g0 = effSel.fillGradient!
+                    const ep = gradientEndpoints(g0)
+                    const onHandleDown = (which: 'p1' | 'p2') => (e: React.PointerEvent) => {
+                      e.stopPropagation()
+                      e.preventDefault()
+                      try { (e.currentTarget as HTMLElement).setPointerCapture?.(e.pointerId) } catch {}
+                      const sx = e.clientX
+                      const sy = e.clientY
+                      const start = { ...ep[which] }
+                      const other = { ...ep[which === 'p1' ? 'p2' : 'p1'] }
+                      const rotRad = boxRot ? (boxRot * Math.PI) / 180 : 0
+                      const cos = Math.cos(rotRad)
+                      const sin = Math.sin(rotRad)
+                      const move = (ev: PointerEvent) => {
+                        let dx = (ev.clientX - sx) / eff / boxW
+                        let dy = (ev.clientY - sy) / eff / boxH
+                        if (rotRad) {
+                          const rx = dx * cos + dy * sin
+                          const ry = -dx * sin + dy * cos
+                          dx = rx
+                          dy = ry
+                        }
+                        const p = { x: start.x + dx, y: start.y + dy }
+                        const np1 = which === 'p1' ? p : other
+                        const np2 = which === 'p2' ? p : other
+                        updateLayer(sel.id, {
+                          fillGradient: { ...g0, p1: np1, p2: np2, angle: angleFromEndpoints(np1, np2) },
+                        })
+                      }
+                      const up = () => {
+                        window.removeEventListener('pointermove', move)
+                        window.removeEventListener('pointerup', up)
+                        window.removeEventListener('pointercancel', up)
+                        checkpoint()
+                      }
+                      window.addEventListener('pointermove', move)
+                      window.addEventListener('pointerup', up)
+                      window.addEventListener('pointercancel', up)
+                    }
+                    const handles = [
+                      { id: 'start', which: 'p1' as const, p: ep.p1, fill: '#ffffff', stroke: '#007AFF' },
+                      { id: 'end', which: 'p2' as const, p: ep.p2, fill: '#007AFF', stroke: '#ffffff' },
+                    ]
+                    return (
+                      <>
+                        <svg
+                          data-testid="gradient-handle-line"
+                          className="pointer-events-none absolute overflow-visible"
+                          style={{ left: 0, top: 0, width: boxW, height: boxH, zIndex: 65 }}
+                        >
+                          <line
+                            x1={ep.p1.x * boxW}
+                            y1={ep.p1.y * boxH}
+                            x2={ep.p2.x * boxW}
+                            y2={ep.p2.y * boxH}
+                            stroke="#007AFF"
+                            strokeWidth={Math.max(1, 1.5 / eff)}
+                            strokeDasharray={`${4 / eff} ${3 / eff}`}
+                          />
+                        </svg>
+                        {handles.map(({ id, which, p, fill, stroke }) => (
+                          <div
+                            key={id}
+                            data-testid={`gradient-handle-${id}`}
+                            onPointerDown={onHandleDown(which)}
+                            style={{
+                              position: 'absolute',
+                              left: p.x * boxW - size / 2,
+                              top: p.y * boxH - size / 2,
+                              width: size,
+                              height: size,
+                              display: 'grid',
+                              placeItems: 'center',
+                              pointerEvents: 'auto',
+                              cursor: 'grab',
+                              touchAction: 'none',
+                              zIndex: 66,
+                            }}
+                          >
+                            <svg
+                              width={dot + 4 / eff}
+                              height={dot + 4 / eff}
+                              viewBox={`0 0 ${dot + 4 / eff} ${dot + 4 / eff}`}
+                              className="pointer-events-none overflow-visible"
+                            >
+                              <circle
+                                cx={(dot + 4 / eff) / 2}
+                                cy={(dot + 4 / eff) / 2}
+                                r={dot / 2}
+                                fill={fill}
+                                stroke={stroke}
+                                strokeWidth={1.5 / eff}
+                                shapeRendering="geometricPrecision"
+                              />
+                            </svg>
+                          </div>
+                        ))}
+                      </>
+                    )
+                  })()}
 
                 {/* ON-CANVAS VECTOR ANCHOR POINTS & BÉZIER CONTROLS */}
                 {isVectorEditing && sel.points && sel.points.length > 0 && !multiSelectMode && (() => {

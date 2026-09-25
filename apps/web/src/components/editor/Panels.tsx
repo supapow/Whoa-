@@ -57,7 +57,7 @@ export default function ToolSheet() {
 
   const isFont = tool === 'font'
   const isFullHeightFont = isFont && fontSubView === 'googleSearch'
-  const sheetHeightClass = isFont && !isFullHeightFont ? 'max-h-[40vh] max-h-[40%] pb-4' : 'max-h-[85vh] h-[82vh] pb-8'
+  const sheetHeightClass = isFullHeightFont ? 'max-h-[85vh] h-[82vh] pb-8' : 'max-h-[40vh] pb-4'
 
   return (
     <div className="absolute inset-0 z-60 flex flex-col justify-end" data-testid="tool-sheet">
@@ -1386,13 +1386,13 @@ function GradientEditor({ value, onChange }: { value: LayerGradient; onChange: (
   }
 
   return (
-    <div className="space-y-4">
+    <div className="space-y-3">
       <div>
         <div className="mb-2 flex items-center justify-between">
           <p className="text-xs font-semibold uppercase tracking-wider text-txt3">Presets</p>
           <span className="text-[10px] text-txt3">incl. fades</span>
         </div>
-        <Grid cols={4}>
+        <Grid cols={6}>
           {LAYER_GRADIENT_PRESETS.map((p, i) => (
             <button
               key={p.label}
@@ -1435,7 +1435,7 @@ function GradientEditor({ value, onChange }: { value: LayerGradient; onChange: (
           min={0}
           max={360}
           suffix="°"
-          onChange={(v: number) => onChange({ ...value, angle: v })}
+          onChange={(v: number) => onChange({ ...value, angle: v, p1: undefined, p2: undefined })}
         />
       )}
 

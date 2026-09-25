@@ -35,6 +35,11 @@ export interface LayerGradient {
   kind: 'linear' | 'radial'
   angle: number // linear direction in degrees (0 = to top, 90 = to right)
   stops: GradientStop[]
+  // Explicit start/end in unit-box coords (0..1 = inside the layer box).
+  // Values may lie outside 0..1 — handles can be dragged beyond the element.
+  // When absent, endpoints are derived from `angle` (centered span).
+  p1?: { x: number; y: number }
+  p2?: { x: number; y: number }
 }
 
 /** Blur that dissolves toward one edge (gradient-masked backdrop blur). */
