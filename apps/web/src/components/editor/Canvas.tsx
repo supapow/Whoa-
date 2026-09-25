@@ -1182,6 +1182,9 @@ export default function Canvas() {
   })
   const lastGestureMovedRef = useRef(false)
   const lastPinchEndTime = useRef(0)
+  // Double-tap snap cycle position per image layer: 0 = fullscreen,
+  // 1 = first half, 2 = second half, 3 = fullscreen. -1/absent = fresh.
+  const imageCycleRef = useRef(new Map<string, number>())
 
   const getExcludeIds = useCallback((gId?: string, group?: { id: string }[]) => {
     const exclude = new Set<string>()
@@ -3349,8 +3352,23 @@ export default function Canvas() {
   const handleDoubleTap = (l: Layer) => {
     if (l.locked) return
     if (l.type === 'image') {
-      tapTrackerRef.current.widenedInSequence = true
-      updateLayer(l.id, { x: 0, w: preset.w })
+      // Snap cycle (tap memory): fullscreen → half → other half → fullscreen.
+      // Horizontal formats (w > h) split left/right, otherwise top/bottom.
+      const W = preset.w
+      const H = preset.h
+      const idx = ((imageCycleRef.current.get(l.id) ?? -1) + 1) % 4
+      imageCycleRef.current.set(l.id, idx)
+      let patch: Partial<Layer>
+      if (idx === 0 || idx === 3) {
+        patch = { x: 0, y: 0, w: W, h: H }
+      } else if (W > H) {
+        const w1 = Math.floor(W / 2)
+        patch = idx === 1 ? { x: 0, y: 0, w: w1, h: H } : { x: w1, y: 0, w: W - w1, h: H }
+      } else {
+        const h1 = Math.floor(H / 2)
+        patch = idx === 1 ? { x: 0, y: 0, w: W, h: h1 } : { x: 0, y: h1, w: W, h: h1 }
+      }
+      updateLayer(l.id, { ...patch, crop: undefined })
       select(l.id)
     } else if (l.type === 'text' || l.type === 'button') {
       setEditingId(l.id)
@@ -3362,8 +3380,16 @@ export default function Canvas() {
     }
   }
 
-  const handleTripleTap = (l: Layer, info?: { prevX?: number; prevW?: number; widened?: boolean }) => {
+  const handleTripleTap = (l: Layer) => {
     if (l.locked) return
+    if (l.type === 'image') {
+      // Triple-tap widens to full width (legacy); the next double-tap
+      // restarts the snap cycle at fullscreen.
+      imageCycleRef.current.set(l.id, -1)
+      updateLayer(l.id, { x: 0, w: preset.w, crop: undefined })
+      select(l.id)
+      return
+    }
     if (l.type === 'text' || l.type === 'button') {
       setEditingId(null)
     }
@@ -3382,10 +3408,6 @@ export default function Canvas() {
       return
     }
     const patch: Partial<Layer> = { y: 0, h: preset.h }
-    if (l.type === 'image' && info?.widened && info?.prevX !== undefined && info?.prevW !== undefined) {
-      patch.x = info.prevX
-      patch.w = info.prevW
-    }
     updateLayer(l.id, patch)
     select(l.id)
   }
@@ -3432,15 +3454,12 @@ export default function Canvas() {
       }
       handleDoubleTap(l)
     } else if (count >= 3) {
-      const prevX = tracker.initialX ?? l.x
-      const prevW = tracker.initialW ?? l.w
-      const widened = tracker.widenedInSequence ?? false
       tapTrackerRef.current = {
         layerId: '',
         time: 0,
         count: 0,
       }
-      handleTripleTap(l, { prevX, prevW, widened })
+      handleTripleTap(l)
     }
   }
 
