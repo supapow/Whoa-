@@ -140,15 +140,63 @@ function autoFitText(layer: Layer, maxW: number, fontScale: number): Layer {
   return { ...layer, fontSize, w: Math.min(layer.w, Math.max(1, maxW)) }
 }
 
+/** Margin around packed content, as a fraction of the artboard's short edge. */
+const PAD_RATIO = 0.08
+/** CTA height floor on wide targets, as a fraction of the short edge. */
+const WIDE_CTA_MIN_RATIO = 0.3
+/**
+ * CTA height floor on non-wide targets, as a fraction of the short edge —
+ * applied at full strength only on portrait artboards (see ctaEmphasis).
+ */
+const TALL_CTA_MIN_RATIO = 0.2
+/**
+ * Maximum height reserved below the CTA on non-wide targets, as a fraction
+ * of the artboard height. Keeps the button in the 20–30% band off the bottom
+ * edge instead of the ≈2% a pad-sized gap gives on a 160×600 skyscraper.
+ * At ctaEmphasis 0 the packed gap (PAD_RATIO) is kept instead.
+ */
+const CTA_BOTTOM_RATIO = 0.25
+/** Floor for how far the packer may shrink a stack that overflows its area. */
+const MIN_FIT = 0.3
+
+/**
+ * How strongly a non-wide target calls for CTA prominence: 0 on square or
+ * landscape artboards (they keep the plain packed gap), 1 once the target is
+ * 2:1 portrait or taller — a 160×600 skyscraper is 3.75:1, so it gets the
+ * full clearance (≈25% of the height below the CTA) and size floor
+ * (≈20% of the short edge) instead of a chip glued to the rim.
+ */
+function ctaEmphasis(tw: number, th: number): number {
+  return Math.max(0, Math.min(1, th / Math.max(1, tw) - 1))
+}
+
+/** Gap to reserve below the CTA on a non-wide target (packer pad at 0). */
+function ctaBottomPad(tw: number, th: number, pad: number, ratio: number): number {
+  const e = ctaEmphasis(tw, th)
+  return Math.max(pad, Math.round(th * (PAD_RATIO + (ratio - PAD_RATIO) * e)))
+}
+
+/** CTA height floor on a non-wide target (0 unless the target is portrait). */
+function ctaMinHeight(tw: number, th: number): number {
+  return Math.round(Math.min(tw, th) * TALL_CTA_MIN_RATIO * ctaEmphasis(tw, th))
+}
+
 export interface ScaleOptions {
   ctaMinH?: number
   padRatio?: number
+  /**
+   * Fraction of the target height reserved below the CTA at full portrait
+   * emphasis (1 on tall targets, 0 on square/landscape ones).
+   */
+  ctaBottomRatio?: number
 }
 
 /**
  * Scale a layer list from sourcePreset to targetPreset.
  * Pure + deterministic: fresh ids, masterId back-pointers, remapped keyframes.
  * Never distorts: non-uniform stretch only for same-family pairs.
+ * Cross-family: units are reflowed along the target's long axis, and the CTA
+ * keeps prominence rules (size floor, and on non-wide targets a bottom lift).
  */
 export function scaleLayersToPreset(
   sourceLayers: Layer[],
@@ -163,7 +211,8 @@ export function scaleLayersToPreset(
   const sx = tw / Math.max(1, sw)
   const sy = th / Math.max(1, sh)
   const s = Math.min(sx, sy)
-  const padRatio = opts.padRatio ?? 0.08
+  const padRatio = opts.padRatio ?? PAD_RATIO
+  const ctaBottomRatio = opts.ctaBottomRatio ?? CTA_BOTTOM_RATIO
   const idMap = new Map<string, string>()
   for (const l of sourceLayers) idMap.set(l.id, uid())
 
@@ -238,7 +287,7 @@ export function scaleLayersToPreset(
   const u = targetWide ? sy : sx // constrained-axis uniform scale
   const pad = Math.round((targetWide ? th : tw) * padRatio)
   const ctaId = detectCtaId(sourceLayers)
-  const ctaMinH = opts.ctaMinH ?? Math.max(20, Math.round(th * 0.3))
+  const wideCtaMinH = opts.ctaMinH ?? Math.max(20, Math.round(th * WIDE_CTA_MIN_RATIO))
 
   // Pack units: group roots + shapes with overlay-attached texts + standalone
   // layers. A text sitting mostly (≥50% of its area) inside a shape rides
@@ -398,7 +447,7 @@ export function scaleLayersToPreset(
     let ctaH = 0
     let ctaScale = u
     if (ctaFlowUnit) {
-      ctaH = Math.max(Math.max(1, Math.round(ctaFlowUnit.box.h * u)), Math.min(area.h - pad * 2, ctaMinH))
+      ctaH = Math.max(Math.max(1, Math.round(ctaFlowUnit.box.h * u)), Math.min(area.h - pad * 2, wideCtaMinH))
       ctaScale = ctaH / Math.max(1, ctaFlowUnit.box.h)
       ctaW = Math.min(Math.max(1, Math.round(ctaFlowUnit.box.w * ctaScale)), area.w - pad * 2)
       unitScale.set(ctaFlowUnit.id, ctaScale)
@@ -410,7 +459,7 @@ export function scaleLayersToPreset(
     const availW = Math.max(0, area.w - pad * 2 - (ctaFlowUnit ? ctaW + gap : 0))
     const sumW = restUnits.reduce((sum, un) => sum + un.box.w * u, 0)
     const gapsW = gap * Math.max(0, restUnits.length - 1)
-    const fit = sumW > 0 ? Math.min(1, Math.max(0.3, (availW - gapsW) / sumW)) : 1
+    const fit = sumW > 0 ? Math.min(1, Math.max(MIN_FIT, (availW - gapsW) / sumW)) : 1
     const ur = u * fit
     let cx = fit >= 1 ? Math.max(area.x + pad, area.x + pad + Math.round((availW - (sumW + gapsW)) / 2)) : area.x + pad
     for (const un of restUnits) {
@@ -420,17 +469,47 @@ export function scaleLayersToPreset(
       cx += Math.max(1, Math.round(un.box.w * ur)) + gap
     }
   } else {
-    let ctaH = 0
-    if (ctaFlowUnit) {
-      ctaH = Math.min(Math.max(1, Math.round(ctaFlowUnit.box.h * u)), area.h - pad * 2)
-      unitScale.set(ctaFlowUnit.id, u)
-      const w = Math.min(Math.max(1, Math.round(ctaFlowUnit.box.w * u)), area.w - pad * 2)
-      unitPos.set(ctaFlowUnit.id, { x: area.x + Math.round((area.w - w) / 2), y: Math.max(area.y, area.y + area.h - pad - ctaH) })
-    }
-    const availH = Math.max(0, area.h - pad * 2 - (ctaFlowUnit ? ctaH + gap : 0))
     const sumH = restUnits.reduce((sum, un) => sum + un.box.h * u, 0)
     const gapsH = gap * Math.max(0, restUnits.length - 1)
-    const fit = sumH > 0 ? Math.min(1, Math.max(0.3, (availH - gapsH) / sumH)) : 1
+    // Non-wide artboard: the CTA is bottom-anchored, and two things go wrong
+    // when a wide/square master is re-projected onto a tall one (160×600):
+    // a pad-sized gap leaves it glued to the rim (≈2% up), and width-matched
+    // scaling shrinks it to an unreadable chip. On portrait targets (scaled
+    // by ctaEmphasis) reserve up to a quarter of the height below it and
+    // floor its size at up to 20% of the short edge — square-ish targets
+    // keep the plain packed gap and scale.
+    let ctaH = 0
+    let bottomPad = pad
+    if (ctaFlowUnit) {
+      const box = ctaFlowUnit.box
+      const desiredBottom = ctaBottomPad(tw, th, pad, ctaBottomRatio)
+      const ctaMinH = opts.ctaMinH ?? ctaMinHeight(tw, th)
+      const maxW = Math.max(1, area.w - pad * 2)
+      const maxH = Math.max(1, area.h - pad - desiredBottom)
+      const ctaScale = Math.max(
+        0.01,
+        Math.min(
+          Math.max(u, ctaMinH / Math.max(1, box.h)),
+          maxW / Math.max(1, box.w),
+          maxH / Math.max(1, box.h),
+        ),
+      )
+      ctaH = Math.max(1, Math.round(box.h * ctaScale))
+      const w = Math.max(1, Math.round(box.w * ctaScale))
+      // Dense content may not leave room for the full lift — shrink it to
+      // what the packer can still stack above the CTA (never below pad, so
+      // overflow is no worse than it was before the lift existed).
+      const minStack = MIN_FIT * sumH + gapsH
+      const maxBottom = area.h - pad - ctaH - gap - minStack
+      bottomPad = Math.max(pad, Math.min(desiredBottom, maxBottom))
+      unitScale.set(ctaFlowUnit.id, ctaScale)
+      unitPos.set(ctaFlowUnit.id, {
+        x: area.x + Math.round((area.w - w) / 2),
+        y: area.y + area.h - bottomPad - ctaH,
+      })
+    }
+    const availH = Math.max(0, area.h - pad - bottomPad - (ctaFlowUnit ? ctaH + gap : 0))
+    const fit = sumH > 0 ? Math.min(1, Math.max(MIN_FIT, (availH - gapsH) / sumH)) : 1
     const ur = u * fit
     let cy = fit >= 1 ? Math.max(area.y + pad, area.y + pad + Math.round((availH - (sumH + gapsH)) / 2)) : area.y + pad
     for (const un of restUnits) {
@@ -558,7 +637,10 @@ export function scaleLayersToPreset(
 /**
  * Scale one layer between presets (used when a layer is added on master
  * after variants exist). Same-family: proportional; otherwise uniform
- * constrained-axis scale + clamp. Fresh id, masterId back-pointer.
+ * constrained-axis scale + clamp — except a button going to a non-wide
+ * cross-family size, which follows the CTA rules of scaleLayersToPreset
+ * (size floor, centred, lifted off the bottom edge).
+ * Fresh id, masterId back-pointer.
  */
 export function scaleSingleLayer(layer: Layer, sw: number, sh: number, tw: number, th: number): Layer {
   const sx = tw / Math.max(1, sw)
@@ -599,10 +681,44 @@ export function scaleSingleLayer(layer: Layer, sw: number, sh: number, tw: numbe
       }
     }
   }
-  const fx = same ? sx : fullBleed ? tw / Math.max(1, layer.w) : snapRect ? snapRect.w / Math.max(1, layer.w) : s
-  const fy = same ? sy : fullBleed ? th / Math.max(1, layer.h) : snapRect ? snapRect.h / Math.max(1, layer.h) : s
-  const ox = snapRect ? snapRect.x - layer.x * fx : 0
-  const oy = snapRect ? snapRect.y - layer.y * fy : 0
+  // A button pushed to a non-wide cross-family size gets the same treatment
+  // the reflow gives the CTA (see scaleLayersToPreset): a size floor so it
+  // stays readable, horizontal centring, and a lift off the bottom edge —
+  // instead of being uniform-scaled up toward the top-left. On portrait
+  // targets only (ctaEmphasis); square-ish sizes keep the plain packed gap.
+  let ctaScale: number | null = null
+  let ctaBottom = 0
+  if (!same && layer.type === 'button' && classifyShape(tw, th) !== 'wide') {
+    const ctaPad = Math.round(tw * PAD_RATIO)
+    const minH = ctaMinHeight(tw, th)
+    ctaBottom = ctaBottomPad(tw, th, ctaPad, CTA_BOTTOM_RATIO)
+    const maxW = Math.max(1, tw - ctaPad * 2)
+    const maxH = Math.max(1, th - ctaPad - ctaBottom)
+    ctaScale = Math.max(
+      0.01,
+      Math.min(
+        Math.max(s, minH / Math.max(1, layer.h)),
+        maxW / Math.max(1, layer.w),
+        maxH / Math.max(1, layer.h),
+      ),
+    )
+  }
+  // Size-derived props (font, radius, shadows) follow the box scale.
+  const k = ctaScale ?? s
+  const ctaW = ctaScale ? Math.max(1, Math.round(layer.w * ctaScale)) : 0
+  const ctaH = ctaScale ? Math.max(1, Math.round(layer.h * ctaScale)) : 0
+  const fx = ctaScale ?? (same ? sx : fullBleed ? tw / Math.max(1, layer.w) : snapRect ? snapRect.w / Math.max(1, layer.w) : s)
+  const fy = ctaScale ?? (same ? sy : fullBleed ? th / Math.max(1, layer.h) : snapRect ? snapRect.h / Math.max(1, layer.h) : s)
+  const ox = ctaScale
+    ? Math.round((tw - ctaW) / 2) - layer.x * ctaScale
+    : snapRect
+      ? snapRect.x - layer.x * fx
+      : 0
+  const oy = ctaScale
+    ? th - ctaBottom - ctaH - layer.y * ctaScale
+    : snapRect
+      ? snapRect.y - layer.y * fy
+      : 0
   const next: Layer = {
     ...layer,
     id: uid(),
@@ -613,25 +729,26 @@ export function scaleSingleLayer(layer: Layer, sw: number, sh: number, tw: numbe
     y: Math.round(layer.y * fy + oy),
     w: Math.max(1, Math.round(layer.w * fx)),
     h: Math.max(1, Math.round(layer.h * fy)),
-    fontSize: layer.fontSize !== undefined ? Math.max(1, Math.round(layer.fontSize * s)) : undefined,
-    radius: layer.radius !== undefined ? Math.max(0, layer.radius * s) : undefined,
-    blur: layer.blur !== undefined ? Math.max(0, layer.blur * s) : undefined,
-    strokeWidth: layer.strokeWidth !== undefined ? Math.max(0, layer.strokeWidth * s) : undefined,
-    dropShadow: scaleShadow(layer.dropShadow, s),
-    innerShadow: scaleShadow(layer.innerShadow, s),
+    fontSize: layer.fontSize !== undefined ? Math.max(1, Math.round(layer.fontSize * k)) : undefined,
+    radius: layer.radius !== undefined ? Math.max(0, layer.radius * k) : undefined,
+    blur: layer.blur !== undefined ? Math.max(0, layer.blur * k) : undefined,
+    strokeWidth: layer.strokeWidth !== undefined ? Math.max(0, layer.strokeWidth * k) : undefined,
+    dropShadow: scaleShadow(layer.dropShadow, k),
+    innerShadow: scaleShadow(layer.innerShadow, k),
     points: layer.points ? scaleVectorPoints(layer.points, fx, fy) : undefined,
     keyframes: layer.keyframes?.map((kf) => ({
       ...kf,
       id: uid(),
-      x: Math.round(kf.x * fx),
-      y: Math.round(kf.y * fy),
+      // Keyframes are absolute artboard coords — translate with the layer.
+      x: Math.round(kf.x * fx + ox),
+      y: Math.round(kf.y * fy + oy),
       w: Math.max(1, Math.round(kf.w * fx)),
       h: Math.max(1, Math.round(kf.h * fy)),
-      fontSize: kf.fontSize !== undefined ? Math.max(1, Math.round(kf.fontSize * s)) : undefined,
-      radius: kf.radius !== undefined ? Math.max(0, kf.radius * s) : undefined,
-      blur: kf.blur !== undefined ? Math.max(0, kf.blur * s) : undefined,
-      dropShadow: scaleShadow(kf.dropShadow, s),
-      innerShadow: scaleShadow(kf.innerShadow, s),
+      fontSize: kf.fontSize !== undefined ? Math.max(1, Math.round(kf.fontSize * k)) : undefined,
+      radius: kf.radius !== undefined ? Math.max(0, kf.radius * k) : undefined,
+      blur: kf.blur !== undefined ? Math.max(0, kf.blur * k) : undefined,
+      dropShadow: scaleShadow(kf.dropShadow, k),
+      innerShadow: scaleShadow(kf.innerShadow, k),
       points: kf.points ? scaleVectorPoints(kf.points, fx, fy) : undefined,
     })),
   }
