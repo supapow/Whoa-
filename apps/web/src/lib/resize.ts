@@ -82,8 +82,10 @@ function fallbackTextWidth(text: string, fontSize: number): number {
 /** Shrink-to-fit a text layer inside maxW (canvas estimator with fallback). */
 function autoFitText(layer: Layer, maxW: number, fontScale: number): Layer {
   if (layer.type !== 'text') return layer
-  let fontSize = Math.max(1, Math.round((layer.fontSize ?? 32) * fontScale))
   const minFloor = 8
+  // Never start below the readability floor: an over-wide box at 8px stays
+  // legible (and inside the artboard via clamping); a 4px fit does not.
+  let fontSize = Math.max(minFloor, Math.round((layer.fontSize ?? 32) * fontScale))
   for (let i = 0; i < 40; i++) {
     const est = estimateTextBoxSize({ ...layer, fontSize })
     const w = est ? est.w : fallbackTextWidth(layer.text ?? '', fontSize)
@@ -195,107 +197,174 @@ export function scaleLayersToPreset(
   const ctaId = detectCtaId(sourceLayers)
   const ctaMinH = opts.ctaMinH ?? Math.max(20, Math.round(th * 0.3))
 
-  // Pack units: group roots + ungrouped top-level layers (children move with unit).
+  // Pack units: group roots + shapes with overlay-attached texts + standalone
+  // layers. A text sitting mostly (≥50% of its area) inside a shape rides
+  // with that shape (e.g. a CTA label on its button) instead of becoming
+  // its own column. Children of groups move with their group unit.
   const childIds = new Set<string>()
   for (const l of sourceLayers) {
     if (l.type === 'group') {
       for (const d of getDescendantLayers(l.id, sourceLayers)) childIds.add(d.id)
     }
   }
-  const units = sourceLayers.filter((l) => !l.groupId && !childIds.has(l.id))
-  const ordered = [...units].sort((a, b) => a.y - b.y || a.x - b.x)
-  const cta = ctaId ? ordered.find((l) => l.id === ctaId) : undefined
-  const rest = cta ? ordered.filter((l) => l.id !== ctaId) : ordered
+  const topLevel = sourceLayers.filter((l) => !l.groupId && !childIds.has(l.id))
 
-  // Scaled unit boxes (uniform, aspect preserved).
-  const boxOf = (l: Layer) => {
-    if (l.type === 'group') {
-      const b = computeGroupBounds(l.id, sourceLayers)
-      return { w: Math.max(1, Math.round(b.w * u)), h: Math.max(1, Math.round(b.h * u)) }
-    }
-    let w = Math.max(1, Math.round(l.w * u))
-    let h = Math.max(1, Math.round(l.h * u))
-    if (l.id === ctaId && targetWide) h = Math.max(h, Math.min(th - pad * 2, ctaMinH))
-    if (l.id === ctaId && !targetWide) w = Math.max(w, 10)
-    return { w, h }
+  const areaOf = (l: Layer) => Math.max(1, l.w) * Math.max(1, l.h)
+  const overlapArea = (a: Layer, b: Layer) => {
+    const w = Math.max(0, Math.min(a.x + a.w, b.x + b.w) - Math.max(a.x, b.x))
+    const h = Math.max(0, Math.min(a.y + a.h, b.y + b.h) - Math.max(a.y, b.y))
+    return w * h
   }
 
-  const boxes = new Map<string, { w: number; h: number }>()
-  for (const l of ordered) boxes.set(l.id, boxOf(l))
-
-  // Positions along the long axis.
-  const pos = new Map<string, { x: number; y: number; w: number; h: number }>()
-  if (targetWide) {
-    const gap = pad
-    const totalW = [...boxes.values()].reduce((sum, b) => sum + b.w, 0) + gap * (boxes.size - 1)
-    let cx = Math.max(pad, Math.round((tw - totalW) / 2))
-    const place = (l: Layer) => {
-      const b = boxes.get(l.id)!
-      const y = Math.max(pad, Math.round((th - b.h) / 2))
-      pos.set(l.id, { x: cx, y, w: b.w, h: b.h })
-      cx += b.w + gap
+  // Attach each text to the smallest shape containing ≥50% of its area.
+  const attachedTo = new Map<string, string>()
+  for (const t of topLevel) {
+    if (t.type !== 'text') continue
+    let best: Layer | null = null
+    for (const s of topLevel) {
+      if (s.type !== 'shape' || s.id === t.id) continue
+      if (overlapArea(t, s) / areaOf(t) < 0.5) continue
+      if (!best || areaOf(s) < areaOf(best)) best = s
     }
-    for (const l of rest) place(l)
-    if (cta) {
-      // CTA pinned right with padding.
-      const b = boxes.get(cta.id)!
-      const w = Math.min(b.w, tw - pad * 2)
-      pos.set(cta.id, { x: Math.max(pad, tw - pad - w), y: Math.max(pad, Math.round((th - b.h) / 2)), w, h: b.h })
+    if (best) attachedTo.set(t.id, best.id)
+  }
+
+  interface Unit { id: string; members: Layer[]; box: { x: number; y: number; w: number; h: number } }
+  const bboxOf = (members: Layer[]) => {
+    const x = Math.min(...members.map((m) => m.x))
+    const y = Math.min(...members.map((m) => m.y))
+    return {
+      x,
+      y,
+      w: Math.max(...members.map((m) => m.x + m.w)) - x,
+      h: Math.max(...members.map((m) => m.y + m.h)) - y,
+    }
+  }
+  const units: Unit[] = []
+  const consumed = new Set<string>()
+  for (const l of topLevel) {
+    if (consumed.has(l.id)) continue
+    if (l.type === 'group') {
+      const members = [l, ...getDescendantLayers(l.id, sourceLayers)]
+      members.forEach((m) => consumed.add(m.id))
+      units.push({ id: l.id, members, box: computeGroupBounds(l.id, sourceLayers) })
+    } else if (l.type === 'shape') {
+      const riders = topLevel.filter((t) => attachedTo.get(t.id) === l.id)
+      const members = [l, ...riders]
+      members.forEach((m) => consumed.add(m.id))
+      units.push({ id: l.id, members, box: bboxOf(members) })
+    } else if (!attachedTo.has(l.id)) {
+      consumed.add(l.id)
+      units.push({ id: l.id, members: [l], box: { x: l.x, y: l.y, w: l.w, h: l.h } })
+    }
+  }
+  for (const l of topLevel) {
+    if (!consumed.has(l.id)) {
+      consumed.add(l.id)
+      units.push({ id: l.id, members: [l], box: { x: l.x, y: l.y, w: l.w, h: l.h } })
+    }
+  }
+
+  const orderedUnits = [...units].sort((a, b) => a.box.y - b.box.y || a.box.x - b.box.x)
+  const ctaUnit = ctaId ? orderedUnits.find((un) => un.members.some((m) => m.id === ctaId)) : undefined
+  const restUnits = ctaUnit ? orderedUnits.filter((un) => un !== ctaUnit) : orderedUnits
+
+  // Unit scales + origins. The CTA keeps the full constrained-axis scale;
+  // the rest fit down uniformly (aspect-safe) when they overflow the space
+  // left after reserving the CTA slot — this guarantees no pile-ups.
+  const gap = pad
+  const unitScale = new Map<string, number>()
+  const unitPos = new Map<string, { x: number; y: number }>()
+  if (targetWide) {
+    let ctaW = 0
+    let ctaH = 0
+    let ctaScale = u
+    if (ctaUnit) {
+      ctaH = Math.max(Math.max(1, Math.round(ctaUnit.box.h * u)), Math.min(th - pad * 2, ctaMinH))
+      ctaScale = ctaH / Math.max(1, ctaUnit.box.h)
+      ctaW = Math.min(Math.max(1, Math.round(ctaUnit.box.w * ctaScale)), tw - pad * 2)
+      unitScale.set(ctaUnit.id, ctaScale)
+      unitPos.set(ctaUnit.id, {
+        x: Math.max(pad, tw - pad - ctaW),
+        y: Math.max(pad, Math.round((th - ctaH) / 2)),
+      })
+    }
+    const availW = tw - pad * 2 - (ctaUnit ? ctaW + gap : 0)
+    const sumW = restUnits.reduce((sum, un) => sum + un.box.w * u, 0)
+    const gapsW = gap * Math.max(0, restUnits.length - 1)
+    const fit = sumW > 0 ? Math.min(1, Math.max(0.3, (availW - gapsW) / sumW)) : 1
+    const ur = u * fit
+    let cx = fit >= 1 ? Math.max(pad, pad + Math.round((availW - (sumW + gapsW)) / 2)) : pad
+    for (const un of restUnits) {
+      const h = Math.max(1, Math.round(un.box.h * ur))
+      unitScale.set(un.id, ur)
+      unitPos.set(un.id, { x: cx, y: Math.max(pad, Math.round((th - h) / 2)) })
+      cx += Math.max(1, Math.round(un.box.w * ur)) + gap
     }
   } else {
-    const gap = pad
-    const totalH = [...boxes.values()].reduce((sum, b) => sum + b.h, 0) + gap * (boxes.size - 1)
-    let cy = Math.max(pad, Math.round((th - totalH) / 2))
-    const place = (l: Layer) => {
-      const b = boxes.get(l.id)!
-      const w = Math.min(b.w, tw - pad * 2)
-      const x = Math.round((tw - w) / 2)
-      pos.set(l.id, { x, y: cy, w, h: b.h })
-      cy += b.h + gap
+    let ctaH = 0
+    if (ctaUnit) {
+      ctaH = Math.min(Math.max(1, Math.round(ctaUnit.box.h * u)), th - pad * 2)
+      unitScale.set(ctaUnit.id, u)
+      const w = Math.min(Math.max(1, Math.round(ctaUnit.box.w * u)), tw - pad * 2)
+      unitPos.set(ctaUnit.id, { x: Math.round((tw - w) / 2), y: Math.max(pad, th - pad - ctaH) })
     }
-    for (const l of rest) place(l)
-    if (cta) {
-      const b = boxes.get(cta.id)!
-      const w = Math.min(b.w, tw - pad * 2)
-      pos.set(cta.id, { x: Math.round((tw - w) / 2), y: Math.max(pad, th - pad - b.h), w, h: b.h })
+    const availH = th - pad * 2 - (ctaUnit ? ctaH + gap : 0)
+    const sumH = restUnits.reduce((sum, un) => sum + un.box.h * u, 0)
+    const gapsH = gap * Math.max(0, restUnits.length - 1)
+    const fit = sumH > 0 ? Math.min(1, Math.max(0.3, (availH - gapsH) / sumH)) : 1
+    const ur = u * fit
+    let cy = fit >= 1 ? Math.max(pad, pad + Math.round((availH - (sumH + gapsH)) / 2)) : pad
+    for (const un of restUnits) {
+      const w = Math.min(Math.max(1, Math.round(un.box.w * ur)), tw - pad * 2)
+      unitScale.set(un.id, ur)
+      unitPos.set(un.id, { x: Math.round((tw - w) / 2), y: cy })
+      cy += Math.max(1, Math.round(un.box.h * ur)) + gap
     }
   }
 
-  // Unit deltas: new origin minus uniformly-scaled old origin.
-  const unitDelta = new Map<string, { dx: number; dy: number; s: number }>()
-  for (const l of ordered) {
-    const p = pos.get(l.id)!
-    const ox = l.type === 'group' ? computeGroupBounds(l.id, sourceLayers).x : l.x
-    const oy = l.type === 'group' ? computeGroupBounds(l.id, sourceLayers).y : l.y
-    unitDelta.set(l.id, { dx: Math.round(p.x - ox * u), dy: Math.round(p.y - oy * u), s: u })
+  // Member transform: new origin minus scaled old unit origin.
+  const memberT = new Map<string, { s: number; dx: number; dy: number }>()
+  for (const un of orderedUnits) {
+    const sUn = unitScale.get(un.id) ?? u
+    const p = unitPos.get(un.id) ?? { x: Math.round(un.box.x * sUn), y: Math.round(un.box.y * sUn) }
+    memberT.set(un.id, { s: sUn, dx: Math.round(p.x - un.box.x * sUn), dy: Math.round(p.y - un.box.y * sUn) })
   }
-  // Children inherit their root unit's delta.
+  // Group children inherit their root unit's transform.
   const ownerOf = (l: Layer): string | null => {
     if (!l.groupId) return null
     let g: string | undefined = l.groupId
     while (g) {
-      if (unitDelta.has(g)) return g
+      if (memberT.has(g)) return g
       g = sourceLayers.find((x) => x.id === g)?.groupId
     }
     return null
   }
+  const transformOf = (l: Layer): { s: number; dx: number; dy: number } => {
+    if (l.groupId) {
+      const o = ownerOf(l)
+      if (o) return memberT.get(o) ?? { s: u, dx: 0, dy: 0 }
+    }
+    const un = orderedUnits.find((x) => x.members.some((m) => m.id === l.id))
+    if (un) return memberT.get(un.id) ?? { s: u, dx: 0, dy: 0 }
+    return { s: u, dx: 0, dy: 0 }
+  }
 
   const out: Layer[] = sourceLayers.map((l) => {
     const base = cloneWithId(l)
-    const owner = l.groupId ? (ownerOf(l) ?? undefined) : l.id
-    const d = unitDelta.get(owner ?? l.id) ?? { dx: 0, dy: 0, s: u }
+    const d = transformOf(l)
     const t: LayerTransform = { s: d.s, dx: d.dx, dy: d.dy }
     let next: Layer
     if (l.type === 'group') {
       next = { ...base } // bounds recomputed below
     } else {
-      const p = !l.groupId && pos.has(l.id) ? pos.get(l.id)! : null
       next = {
         ...base,
-        x: p ? p.x : Math.round(l.x * d.s + d.dx),
-        y: p ? p.y : Math.round(l.y * d.s + d.dy),
-        w: p ? p.w : Math.max(1, Math.round(l.w * d.s)),
-        h: p ? p.h : Math.max(1, Math.round(l.h * d.s)),
+        x: Math.round(l.x * d.s + d.dx),
+        y: Math.round(l.y * d.s + d.dy),
+        w: Math.max(1, Math.round(l.w * d.s)),
+        h: Math.max(1, Math.round(l.h * d.s)),
+        fontSize: l.fontSize !== undefined ? Math.max(1, Math.round(l.fontSize * d.s)) : undefined,
         radius: l.radius !== undefined ? Math.max(0, l.radius * d.s) : undefined,
         blur: l.blur !== undefined ? Math.max(0, l.blur * d.s) : undefined,
         strokeWidth: l.strokeWidth !== undefined ? Math.max(0, l.strokeWidth * d.s) : undefined,
