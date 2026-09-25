@@ -180,6 +180,45 @@ function ImageSizeTip({ adSet, fallback }: { adSet: AdSet | null; fallback: Pres
   )
 }
 
+/** Natural pixel dimensions of a remote image, cached per URL. */
+const imageSizeCache = new Map<string, { w: number; h: number } | null>()
+
+function useImageSize(src: string): { w: number; h: number } | null | undefined {
+  const [size, setSize] = useState<{ w: number; h: number } | null | undefined>(
+    imageSizeCache.has(src) ? imageSizeCache.get(src) : undefined,
+  )
+  useEffect(() => {
+    if (imageSizeCache.has(src)) {
+      setSize(imageSizeCache.get(src))
+      return
+    }
+    let live = true
+    const img = new Image()
+    img.onload = () => {
+      const dims = { w: img.naturalWidth, h: img.naturalHeight }
+      imageSizeCache.set(src, dims)
+      if (live) setSize(dims)
+    }
+    img.onerror = () => {
+      imageSizeCache.set(src, null)
+      if (live) setSize(null)
+    }
+    img.src = src
+    return () => { live = false }
+  }, [src])
+  return size
+}
+
+function ImageSizeBadge({ src }: { src: string }) {
+  const size = useImageSize(src)
+  if (!size) return null
+  return (
+    <span className="pointer-events-none absolute bottom-1 right-1 rounded bg-black/55 px-1 py-px text-[9px] font-semibold text-white/90">
+      {size.w}×{size.h}
+    </span>
+  )
+}
+
 /* ---------- Add panels ---------- */
 function TextAdd() {
   const { addLayer, project } = useEditor()
@@ -635,9 +674,10 @@ function Images() {
             key={i}
             data-testid={`stock-image-${i}`}
             onClick={() => apply(src)}
-            className="aspect-square overflow-hidden rounded-xl border border-line active:border-accent"
+            className="relative aspect-square overflow-hidden rounded-xl border border-line active:border-accent"
           >
             <img src={src} alt="" draggable={false} className="pointer-events-none h-full w-full select-none object-cover" />
+            <ImageSizeBadge src={src} />
           </button>
         ))}
       </Grid>
@@ -661,9 +701,9 @@ function BackgroundPanel() {
     })
   }
 
-  const Swatch = ({ active, onClick, style, tid, children }: any) => (
+  const Swatch = ({ active, onClick, style, tid, children, badge }: any) => (
     <button onClick={onClick} data-testid={tid} style={style}
-      className={`aspect-square rounded-xl border-2 transition-transform active:scale-95 ${active ? 'border-accent' : 'border-line'}`}>{children}</button>
+      className={`relative aspect-square rounded-xl border-2 transition-transform active:scale-95 ${active ? 'border-accent' : 'border-line'}`}>{children}{badge}</button>
   )
   return (
     <div className="space-y-5 pb-4">
@@ -775,7 +815,8 @@ function BackgroundPanel() {
         <Grid cols={4}>
           {BG_IMAGES.map((src, i) => (
             <Swatch key={i} tid={`bg-image-${i}`} active={cur === src} onClick={() => setBackground({ type: 'image', value: src })}
-              style={{ backgroundImage: `url(${src})`, backgroundSize: 'cover', backgroundPosition: 'center' }} />
+              style={{ backgroundImage: `url(${src})`, backgroundSize: 'cover', backgroundPosition: 'center' }}
+              badge={<ImageSizeBadge src={src} />} />
           ))}
         </Grid>
       </div>
