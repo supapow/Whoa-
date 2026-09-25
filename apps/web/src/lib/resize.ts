@@ -57,7 +57,7 @@ interface LayerTransform {
 }
 
 /** Remap a keyframe through a layer's transform (preserves relative motion). */
-function remapKeyframe(kf: Keyframe, t: LayerTransform, fontScale: number): Keyframe {
+export function remapKeyframe(kf: Keyframe, t: LayerTransform, fontScale: number): Keyframe {
   return {
     ...kf,
     id: uid(),
@@ -330,4 +330,56 @@ export function scaleLayersToPreset(
     g.h = b.h
   }
   return out
+}
+
+/**
+ * Scale one layer between presets (used when a layer is added on master
+ * after variants exist). Same-family: proportional; otherwise uniform
+ * constrained-axis scale + clamp. Fresh id, masterId back-pointer.
+ */
+export function scaleSingleLayer(layer: Layer, sw: number, sh: number, tw: number, th: number): Layer {
+  const sx = tw / Math.max(1, sw)
+  const sy = th / Math.max(1, sh)
+  const s = Math.min(sx, sy)
+  const same = isSameFamily(sw, sh, tw, th)
+  const fx = same ? sx : s
+  const fy = same ? sy : s
+  const next: Layer = {
+    ...layer,
+    id: uid(),
+    masterId: layer.masterId ?? layer.id,
+    layoutDetached: false,
+    contentDetached: false,
+    x: Math.round(layer.x * fx),
+    y: Math.round(layer.y * fy),
+    w: Math.max(1, Math.round(layer.w * fx)),
+    h: Math.max(1, Math.round(layer.h * fy)),
+    fontSize: layer.fontSize !== undefined ? Math.max(1, Math.round(layer.fontSize * s)) : undefined,
+    radius: layer.radius !== undefined ? Math.max(0, layer.radius * s) : undefined,
+    blur: layer.blur !== undefined ? Math.max(0, layer.blur * s) : undefined,
+    strokeWidth: layer.strokeWidth !== undefined ? Math.max(0, layer.strokeWidth * s) : undefined,
+    dropShadow: scaleShadow(layer.dropShadow, s),
+    innerShadow: scaleShadow(layer.innerShadow, s),
+    points: layer.points ? scaleVectorPoints(layer.points, fx, fy) : undefined,
+    keyframes: layer.keyframes?.map((kf) => ({
+      ...kf,
+      id: uid(),
+      x: Math.round(kf.x * fx),
+      y: Math.round(kf.y * fy),
+      w: Math.max(1, Math.round(kf.w * fx)),
+      h: Math.max(1, Math.round(kf.h * fy)),
+      fontSize: kf.fontSize !== undefined ? Math.max(1, Math.round(kf.fontSize * s)) : undefined,
+      radius: kf.radius !== undefined ? Math.max(0, kf.radius * s) : undefined,
+      blur: kf.blur !== undefined ? Math.max(0, kf.blur * s) : undefined,
+      dropShadow: scaleShadow(kf.dropShadow, s),
+      innerShadow: scaleShadow(kf.innerShadow, s),
+      points: kf.points ? scaleVectorPoints(kf.points, fx, fy) : undefined,
+    })),
+  }
+  if (next.type === 'path' && next.points) {
+    next.pathData = buildSvgPath(next.points, next.closed !== false, next.w, next.h)
+  }
+  next.x = Math.max(0, Math.min(tw - next.w, next.x))
+  next.y = Math.max(0, Math.min(th - next.h, next.y))
+  return next
 }

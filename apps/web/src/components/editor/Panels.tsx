@@ -811,6 +811,7 @@ function LayersPanel() {
   const {
     project, selectedId, selectedIds, select, updateLayer, deleteLayer,
     reorder, createGroup, maskSelection, unmaskGroup, ungroup, saveAsComponent, toggleGroupCollapse,
+    isMaster, breakLink, relinkLayer,
   } = useEditor()
 
   const label = (l: any) =>
@@ -871,6 +872,43 @@ function LayersPanel() {
           <span className="flex-1 truncate text-xs font-medium">
             {label(layer)}
           </span>
+
+          {!isMaster && Boolean(layer.masterId) && (layer.layoutDetached || layer.contentDetached) && (
+            <span
+              className="rounded bg-amber-500/30 px-1.5 py-0.5 text-[9px] font-bold text-amber-200"
+              title={layer.contentDetached ? 'Content unlinked from master' : 'Layout adjusted for this size'}
+            >
+              {layer.contentDetached ? 'UNLINKED' : 'ADJUSTED'}
+            </span>
+          )}
+
+          {!isMaster && Boolean(layer.masterId) && (layer.layoutDetached || layer.contentDetached) && (
+            <button
+              data-testid={`layer-relink-${layer.id}`}
+              onClick={(e) => {
+                e.stopPropagation()
+                relinkLayer(layer.id)
+              }}
+              className="rounded bg-surface px-1.5 py-0.5 text-[10px] text-txt2 hover:text-white"
+              title="Re-link to master (re-scale this layer)"
+            >
+              Re-link
+            </button>
+          )}
+
+          {!isMaster && Boolean(layer.masterId) && !layer.layoutDetached && !layer.contentDetached && (
+            <button
+              data-testid={`layer-unlink-${layer.id}`}
+              onClick={(e) => {
+                e.stopPropagation()
+                breakLink(layer.id)
+              }}
+              className="rounded bg-surface px-1.5 py-0.5 text-[10px] text-txt2 hover:text-white"
+              title="Unlink from master"
+            >
+              Unlink
+            </button>
+          )}
 
           {isMask && (
             <span className="rounded bg-teal-500/30 px-1.5 py-0.5 text-[9px] font-bold text-teal-200">
