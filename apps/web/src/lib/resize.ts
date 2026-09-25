@@ -294,7 +294,66 @@ export function scaleLayersToPreset(
   }
   const packUnits = orderedUnits.filter((un) => !fullBleedUnits.has(un.id))
   const ctaPackUnit = ctaUnit && !fullBleedUnits.has(ctaUnit.id) ? ctaUnit : undefined
-  const restUnits = ctaPackUnit ? packUnits.filter((un) => un !== ctaPackUnit) : packUnits
+
+  // Snap-region images (e.g. an image filling the left ~half of a master
+  // banner) map onto the analogous snap region of the target instead of
+  // entering the generic packer. Orientation follows the snap-cycle rule:
+  // horizontal targets split left/right, others top/bottom.
+  type SnapKind = 'left' | 'right' | 'top' | 'bottom'
+  const detectSnapKind = (box: { x: number; y: number; w: number; h: number }): SnapKind | null => {
+    const fullH = box.y <= 2 && box.y + box.h >= sh - 2
+    const fullW = box.x <= 2 && box.x + box.w >= sw - 2
+    const wFrac = box.w / Math.max(1, sw)
+    const hFrac = box.h / Math.max(1, sh)
+    const mid = (f: number) => f >= 0.35 && f <= 0.65
+    if (fullH && mid(wFrac)) {
+      if (box.x <= 2) return 'left'
+      if (box.x + box.w >= sw - 2) return 'right'
+    }
+    if (fullW && mid(hFrac)) {
+      if (box.y <= 2) return 'top'
+      if (box.y + box.h >= sh - 2) return 'bottom'
+    }
+    return null
+  }
+  const targetHoriz = tw > th
+  const snapW1 = Math.floor(tw / 2)
+  const snapH1 = Math.floor(th / 2)
+  const snapRectFor = (kind: SnapKind): { x: number; y: number; w: number; h: number } => {
+    if (targetHoriz) {
+      if (kind === 'left' || kind === 'top') return { x: 0, y: 0, w: snapW1, h: th }
+      return { x: snapW1, y: 0, w: tw - snapW1, h: th }
+    }
+    if (kind === 'top' || kind === 'left') return { x: 0, y: 0, w: tw, h: snapH1 }
+    return { x: 0, y: snapH1, w: tw, h: th - snapH1 }
+  }
+  // Only standalone single-image units (never the CTA, never group members).
+  const snapUnits = new Map<string, { x: number; y: number; w: number; h: number }>()
+  for (const un of packUnits) {
+    if (un === ctaPackUnit) continue
+    if (un.members.length !== 1 || un.members[0].type !== 'image') continue
+    const kind = detectSnapKind(un.box)
+    if (kind) snapUnits.set(un.id, snapRectFor(kind))
+  }
+  const flowUnits = packUnits.filter((un) => !snapUnits.has(un.id))
+  const ctaFlowUnit = ctaPackUnit && !snapUnits.has(ctaPackUnit.id) ? ctaPackUnit : undefined
+  const restUnits = ctaFlowUnit ? flowUnits.filter((un) => un !== ctaFlowUnit) : flowUnits
+
+  // Packing area: with exactly one snap region, remaining content flows
+  // into the complementary strip; otherwise the full artboard.
+  let area = { x: 0, y: 0, w: tw, h: th }
+  if (snapUnits.size === 1) {
+    const r = [...snapUnits.values()][0]
+    if (targetHoriz) {
+      area = r.x === 0
+        ? { x: r.w, y: 0, w: tw - r.w, h: th }
+        : { x: 0, y: 0, w: tw - r.w, h: th }
+    } else {
+      area = r.y === 0
+        ? { x: 0, y: r.h, w: tw, h: th - r.h }
+        : { x: 0, y: 0, w: tw, h: th - r.h }
+    }
+  }
 
   // Unit scales + origins. The CTA keeps the full constrained-axis scale;
   // the rest fit down uniformly (aspect-safe) when they overflow the space
@@ -306,46 +365,46 @@ export function scaleLayersToPreset(
     let ctaW = 0
     let ctaH = 0
     let ctaScale = u
-    if (ctaPackUnit) {
-      ctaH = Math.max(Math.max(1, Math.round(ctaPackUnit.box.h * u)), Math.min(th - pad * 2, ctaMinH))
-      ctaScale = ctaH / Math.max(1, ctaPackUnit.box.h)
-      ctaW = Math.min(Math.max(1, Math.round(ctaPackUnit.box.w * ctaScale)), tw - pad * 2)
-      unitScale.set(ctaPackUnit.id, ctaScale)
-      unitPos.set(ctaPackUnit.id, {
-        x: Math.max(pad, tw - pad - ctaW),
-        y: Math.max(pad, Math.round((th - ctaH) / 2)),
+    if (ctaFlowUnit) {
+      ctaH = Math.max(Math.max(1, Math.round(ctaFlowUnit.box.h * u)), Math.min(area.h - pad * 2, ctaMinH))
+      ctaScale = ctaH / Math.max(1, ctaFlowUnit.box.h)
+      ctaW = Math.min(Math.max(1, Math.round(ctaFlowUnit.box.w * ctaScale)), area.w - pad * 2)
+      unitScale.set(ctaFlowUnit.id, ctaScale)
+      unitPos.set(ctaFlowUnit.id, {
+        x: Math.max(area.x, area.x + area.w - pad - ctaW),
+        y: Math.max(area.y, area.y + Math.round((area.h - ctaH) / 2)),
       })
     }
-    const availW = tw - pad * 2 - (ctaPackUnit ? ctaW + gap : 0)
+    const availW = Math.max(0, area.w - pad * 2 - (ctaFlowUnit ? ctaW + gap : 0))
     const sumW = restUnits.reduce((sum, un) => sum + un.box.w * u, 0)
     const gapsW = gap * Math.max(0, restUnits.length - 1)
     const fit = sumW > 0 ? Math.min(1, Math.max(0.3, (availW - gapsW) / sumW)) : 1
     const ur = u * fit
-    let cx = fit >= 1 ? Math.max(pad, pad + Math.round((availW - (sumW + gapsW)) / 2)) : pad
+    let cx = fit >= 1 ? Math.max(area.x + pad, area.x + pad + Math.round((availW - (sumW + gapsW)) / 2)) : area.x + pad
     for (const un of restUnits) {
       const h = Math.max(1, Math.round(un.box.h * ur))
       unitScale.set(un.id, ur)
-      unitPos.set(un.id, { x: cx, y: Math.max(pad, Math.round((th - h) / 2)) })
+      unitPos.set(un.id, { x: cx, y: Math.max(area.y, area.y + Math.round((area.h - h) / 2)) })
       cx += Math.max(1, Math.round(un.box.w * ur)) + gap
     }
   } else {
     let ctaH = 0
-    if (ctaPackUnit) {
-      ctaH = Math.min(Math.max(1, Math.round(ctaPackUnit.box.h * u)), th - pad * 2)
-      unitScale.set(ctaPackUnit.id, u)
-      const w = Math.min(Math.max(1, Math.round(ctaPackUnit.box.w * u)), tw - pad * 2)
-      unitPos.set(ctaPackUnit.id, { x: Math.round((tw - w) / 2), y: Math.max(pad, th - pad - ctaH) })
+    if (ctaFlowUnit) {
+      ctaH = Math.min(Math.max(1, Math.round(ctaFlowUnit.box.h * u)), area.h - pad * 2)
+      unitScale.set(ctaFlowUnit.id, u)
+      const w = Math.min(Math.max(1, Math.round(ctaFlowUnit.box.w * u)), area.w - pad * 2)
+      unitPos.set(ctaFlowUnit.id, { x: area.x + Math.round((area.w - w) / 2), y: Math.max(area.y, area.y + area.h - pad - ctaH) })
     }
-    const availH = th - pad * 2 - (ctaPackUnit ? ctaH + gap : 0)
+    const availH = Math.max(0, area.h - pad * 2 - (ctaFlowUnit ? ctaH + gap : 0))
     const sumH = restUnits.reduce((sum, un) => sum + un.box.h * u, 0)
     const gapsH = gap * Math.max(0, restUnits.length - 1)
     const fit = sumH > 0 ? Math.min(1, Math.max(0.3, (availH - gapsH) / sumH)) : 1
     const ur = u * fit
-    let cy = fit >= 1 ? Math.max(pad, pad + Math.round((availH - (sumH + gapsH)) / 2)) : pad
+    let cy = fit >= 1 ? Math.max(area.y + pad, area.y + pad + Math.round((availH - (sumH + gapsH)) / 2)) : area.y + pad
     for (const un of restUnits) {
-      const w = Math.min(Math.max(1, Math.round(un.box.w * ur)), tw - pad * 2)
+      const w = Math.min(Math.max(1, Math.round(un.box.w * ur)), area.w - pad * 2)
       unitScale.set(un.id, ur)
-      unitPos.set(un.id, { x: Math.round((tw - w) / 2), y: cy })
+      unitPos.set(un.id, { x: area.x + Math.round((area.w - w) / 2), y: cy })
       cy += Math.max(1, Math.round(un.box.h * ur)) + gap
     }
   }
@@ -359,6 +418,13 @@ export function scaleLayersToPreset(
       const fx = tw / Math.max(1, un.box.w)
       const fy = th / Math.max(1, un.box.h)
       memberT.set(un.id, { s: fx, sy: fy, dx: Math.round(-un.box.x * fx), dy: Math.round(-un.box.y * fy) })
+      continue
+    }
+    const snap = snapUnits.get(un.id)
+    if (snap) {
+      const fx = snap.w / Math.max(1, un.box.w)
+      const fy = snap.h / Math.max(1, un.box.h)
+      memberT.set(un.id, { s: fx, sy: fy, dx: Math.round(snap.x - un.box.x * fx), dy: Math.round(snap.y - un.box.y * fy) })
       continue
     }
     const sUn = unitScale.get(un.id) ?? u
@@ -392,7 +458,14 @@ export function scaleLayersToPreset(
     const d = transformOf(l)
     const t: LayerTransform = { s: d.s, dx: d.dx, dy: d.dy }
     const sMin = Math.min(d.s, d.sy)
-    const fb = (unitOf(l) && fullBleedUnits.has(unitOf(l)!.id)) || (l.groupId && fullBleedUnits.has(ownerOf(l) ?? ''))
+    // Full-bleed and snap members hold their target frame in every
+    // keyframe (cover crops at render); timings and fades are preserved.
+    const un = unitOf(l)
+    const frame = un
+      ? fullBleedUnits.has(un.id)
+        ? { x: 0, y: 0, w: tw, h: th }
+        : snapUnits.get(un.id)
+      : undefined
     let next: Layer
     if (l.type === 'group') {
       next = { ...base } // bounds recomputed below
@@ -423,16 +496,14 @@ export function scaleLayersToPreset(
       next.y = Math.max(0, Math.min(th - next.h, next.y))
     }
     if (l.keyframes) {
-      // Full-bleed members hold the full frame in every keyframe (cover
-      // crops at render); timings and fades are preserved.
-      next.keyframes = fb
+      next.keyframes = frame
         ? l.keyframes.map((kf) => ({
           ...kf,
           id: uid(),
-          x: 0,
-          y: 0,
-          w: tw,
-          h: th,
+          x: frame.x,
+          y: frame.y,
+          w: frame.w,
+          h: frame.h,
           fontSize: kf.fontSize !== undefined ? Math.max(1, Math.round(kf.fontSize * sMin)) : undefined,
         }))
         : l.keyframes.map((kf) => remapKeyframe(kf, t, d.s))
@@ -468,16 +539,46 @@ export function scaleSingleLayer(layer: Layer, sw: number, sh: number, tw: numbe
     (layer.type === 'image' || layer.type === 'shape' || layer.type === 'path') &&
     layer.x <= 2 && layer.y <= 2 &&
     layer.x + layer.w >= sw - 2 && layer.y + layer.h >= sh - 2
-  const fx = same ? sx : fullBleed ? tw / Math.max(1, layer.w) : s
-  const fy = same ? sy : fullBleed ? th / Math.max(1, layer.h) : s
+  // Snap-region images map onto the analogous target snap rect (see above).
+  let snapRect: { x: number; y: number; w: number; h: number } | null = null
+  if (!same && !fullBleed && (layer.type === 'image' || layer.type === 'shape')) {
+    const fullH = layer.y <= 2 && layer.y + layer.h >= sh - 2
+    const fullW = layer.x <= 2 && layer.x + layer.w >= sw - 2
+    const mid = (f: number) => f >= 0.35 && f <= 0.65
+    let kind: 'left' | 'right' | 'top' | 'bottom' | null = null
+    if (fullH && mid(layer.w / Math.max(1, sw))) {
+      if (layer.x <= 2) kind = 'left'
+      else if (layer.x + layer.w >= sw - 2) kind = 'right'
+    } else if (fullW && mid(layer.h / Math.max(1, sh))) {
+      if (layer.y <= 2) kind = 'top'
+      else if (layer.y + layer.h >= sh - 2) kind = 'bottom'
+    }
+    if (kind) {
+      const w1 = Math.floor(tw / 2)
+      const h1 = Math.floor(th / 2)
+      if (tw > th) {
+        snapRect = kind === 'left' || kind === 'top'
+          ? { x: 0, y: 0, w: w1, h: th }
+          : { x: w1, y: 0, w: tw - w1, h: th }
+      } else {
+        snapRect = kind === 'top' || kind === 'left'
+          ? { x: 0, y: 0, w: tw, h: h1 }
+          : { x: 0, y: h1, w: tw, h: th - h1 }
+      }
+    }
+  }
+  const fx = same ? sx : fullBleed ? tw / Math.max(1, layer.w) : snapRect ? snapRect.w / Math.max(1, layer.w) : s
+  const fy = same ? sy : fullBleed ? th / Math.max(1, layer.h) : snapRect ? snapRect.h / Math.max(1, layer.h) : s
+  const ox = snapRect ? snapRect.x - layer.x * fx : 0
+  const oy = snapRect ? snapRect.y - layer.y * fy : 0
   const next: Layer = {
     ...layer,
     id: uid(),
     masterId: layer.masterId ?? layer.id,
     layoutDetached: false,
     contentDetached: false,
-    x: Math.round(layer.x * fx),
-    y: Math.round(layer.y * fy),
+    x: Math.round(layer.x * fx + ox),
+    y: Math.round(layer.y * fy + oy),
     w: Math.max(1, Math.round(layer.w * fx)),
     h: Math.max(1, Math.round(layer.h * fy)),
     fontSize: layer.fontSize !== undefined ? Math.max(1, Math.round(layer.fontSize * s)) : undefined,
