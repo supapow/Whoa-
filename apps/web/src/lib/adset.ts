@@ -236,6 +236,13 @@ export interface DiffResult {
  *   layer box. Layout changes stay local.
  * - Variant edits: layout changes set layoutDetached, content + animation
  *   changes set contentDetached on the edited layers.
+ * - Scalars: `background` and `duration` follow master (master edit → every
+ *   variant). `mode` is ad-set-wide and follows *whichever* variant changed
+ *   it: `mode` gates animation evaluation and export formats on every size,
+ *   so a size created before an animation exists must flip with master (and
+ *   a flip on a size must not leave master stuck in 'static'). Scalars are
+ *   only rewritten when they actually differ, keeping variant object
+ *   identity stable for React and undo snapshots.
  * Returns the updated active project plus updated other-variants.
  */
 export function diffAndSync(prev: Project, next: Project, adSet: AdSet, activeId: string): DiffResult {
@@ -244,10 +251,31 @@ export function diffAndSync(prev: Project, next: Project, adSet: AdSet, activeId
   const onMaster = isMasterVariant(adSet, activeId)
   let project = next
 
+  // Project scalars. The active project already carries `next.mode` /
+  // `next.duration`, so only the *other* variants are written here — and only
+  // when the value actually changed, so variant identity stays stable for
+  // React and undo snapshots (see the doc comment).
+  // - `mode` is ad-set-wide: whichever variant flips it (master adding an
+  //   animation, a size previewing one) mirrors to every variant, master
+  //   included, so every size gates animation evaluation + export formats
+  //   the same way.
+  // - `duration` follows master only (like `background`): it must cover the
+  //   synced `layer.end`, or out-animations clip out of a size's timeline.
+  const modeChanged = prev.mode !== next.mode
+  const durationChanged = onMaster && prev.duration !== next.duration
+  const withScalars = (v: Project): Project => {
+    const mode = modeChanged ? next.mode : v.mode
+    const duration = durationChanged ? next.duration : v.duration
+    if (mode === v.mode && duration === v.duration) return v
+    return { ...v, mode, duration, updatedAt: Date.now() }
+  }
+
   const added = next.layers.filter((l) => !prevById.has(l.id))
   const removedIds = prev.layers.filter((l) => !nextById.has(l.id)).map((l) => l.id)
 
-  // Background + scalar project fields follow master.
+  // Background follows master. This early-return branch skips the per-layer
+  // loop, so it applies the scalar sync itself — `withScalars` runs on every
+  // return path of this function.
   let bgChanged = false
   if (onMaster && JSON.stringify(prev.background) !== JSON.stringify(next.background)) bgChanged = true
 
@@ -263,7 +291,7 @@ export function diffAndSync(prev: Project, next: Project, adSet: AdSet, activeId
         // nothing without children — still propagate so re-apply stays exact.
         layers = [...layers, scaleSingleLayer(a, prev.preset.w, prev.preset.h, v.preset.w, v.preset.h)]
       }
-      return { ...v, background: bgChanged ? { ...next.background } : v.background, layers }
+      return withScalars({ ...v, background: bgChanged ? { ...next.background } : v.background, layers })
     })
     return { project: next, variants }
   }
@@ -305,7 +333,7 @@ export function diffAndSync(prev: Project, next: Project, adSet: AdSet, activeId
   project = { ...next, layers: activeLayers }
 
   if (contentUpdates.length === 0) {
-    const variants = adSet.variants.map((v) => (v.id === activeId ? project : v))
+    const variants = adSet.variants.map((v) => (v.id === activeId ? project : withScalars(v)))
     return { project, variants }
   }
   const variants = adSet.variants.map((v) => {
@@ -327,7 +355,7 @@ export function diffAndSync(prev: Project, next: Project, adSet: AdSet, activeId
         return patched
       })
     }
-    return { ...v, layers }
+    return withScalars({ ...v, layers })
   })
   return { project, variants }
 }
