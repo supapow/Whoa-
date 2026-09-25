@@ -21,7 +21,7 @@ export default function Editor({ project, onExit }: { project: Project; onExit: 
 function EditorInner({ onExit }: { onExit: () => void }) {
   const [exportOpen, setExportOpen] = useState(false)
   const [settingsOpen, setSettingsOpen] = useState(false)
-  const { playing, time, setTime, project, undo, redo, canUndo, canRedo } = useEditor()
+  const { playing, time, setTime, project, undo, redo, canUndo, canRedo, selectedId, selectedIds, deleteLayer, deleteLayers } = useEditor()
   const raf = useRef(0)
   const last = useRef(0)
   const timeRef = useRef(time)
@@ -66,12 +66,24 @@ function EditorInner({ onExit }: { onExit: () => void }) {
           e.preventDefault()
           redo()
         }
+        return
+      }
+
+      // Desktop: Delete / Backspace removes the selected layer(s)
+      if ((e.key === 'Delete' || e.key === 'Backspace') && !isMod && !e.altKey) {
+        if (selectedIds.length > 1) {
+          e.preventDefault()
+          deleteLayers(selectedIds)
+        } else if (selectedId) {
+          e.preventDefault()
+          deleteLayer(selectedId)
+        }
       }
     }
 
     window.addEventListener('keydown', handleKeyDown)
     return () => window.removeEventListener('keydown', handleKeyDown)
-  }, [undo, redo])
+  }, [undo, redo, selectedId, selectedIds, deleteLayer, deleteLayers])
 
   return (
     <div className="relative flex h-full w-full flex-col overflow-hidden bg-bg text-txt select-none">
