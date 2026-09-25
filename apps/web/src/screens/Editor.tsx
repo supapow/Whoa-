@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef } from 'react'
-import { ChevronLeft, Undo2, Redo2, User } from 'lucide-react'
+import { ChevronLeft, Undo2, Redo2, Magnet, User } from 'lucide-react'
 import type { AdSet } from '#/types'
 import { EditorProvider, useEditor } from '#/store/editor'
 import Canvas from '#/components/editor/Canvas'
@@ -23,7 +23,7 @@ function EditorInner({ onExit }: { onExit: () => void }) {
   const [exportOpen, setExportOpen] = useState(false)
   const [settingsOpen, setSettingsOpen] = useState(false)
   const [sizeOpen, setSizeOpen] = useState(false)
-  const { playing, time, setTime, project, adSet, undo, redo, canUndo, canRedo, selectedId, selectedIds, deleteLayer, deleteLayers } = useEditor()
+  const { playing, time, setTime, project, adSet, undo, redo, canUndo, canRedo, artboardSnap, setArtboardSnap, selectedId, selectedIds, deleteLayer, deleteLayers } = useEditor()
   const raf = useRef(0)
   const last = useRef(0)
   const timeRef = useRef(time)
@@ -153,6 +153,24 @@ function EditorInner({ onExit }: { onExit: () => void }) {
           className="grid h-9 w-9 place-items-center rounded-full bg-surface/85 text-txt backdrop-blur-md border border-line shadow-lg hover:bg-surface2 active:scale-90 transition-all focus:outline-none disabled:pointer-events-none disabled:opacity-30 cursor-pointer"
         >
           <Redo2 className="h-4 w-4" />
+        </button>
+
+        {/* Snap toggle */}
+        <button
+          type="button"
+          onClick={() => setArtboardSnap(!artboardSnap)}
+          data-testid="snap-btn"
+          id="snap-btn"
+          aria-label={artboardSnap ? 'Disable snapping' : 'Enable snapping'}
+          aria-pressed={artboardSnap}
+          title="Snap to artboard edges"
+          className={`grid h-9 w-9 place-items-center rounded-full backdrop-blur-md border shadow-lg active:scale-90 transition-all focus:outline-none cursor-pointer ${
+            artboardSnap
+              ? 'bg-accent text-white border-accent'
+              : 'bg-surface/85 text-txt border-line hover:bg-surface2'
+          }`}
+        >
+          <Magnet className="h-4 w-4" />
         </button>
 
         {/* User Avatar - opens Settings menu */}
