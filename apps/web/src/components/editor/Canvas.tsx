@@ -3356,15 +3356,28 @@ export default function Canvas() {
     if (l.locked) return
     lastDoubleRef.current = { id: l.id, time: Date.now() }
     if (l.type === 'image') {
-      // Snap cycle (tap memory): fullscreen → half → other half → fullscreen.
-      // Horizontal formats (w > h) split left/right, otherwise top/bottom.
+      // Snap cycle (tap memory). Square-ish formats (aspect 0.5–2):
+      // fullscreen → top → bottom → left → right → fullscreen.
+      // Wide strips: fullscreen → left → right → fullscreen.
+      // Tall formats: fullscreen → top → bottom → fullscreen.
       const W = preset.w
       const H = preset.h
-      const idx = ((imageCycleRef.current.get(l.id) ?? -1) + 1) % 4
+      const aspect = W / Math.max(1, H)
+      const isSquare = aspect >= 0.5 && aspect <= 2
+      const len = isSquare ? 5 : 4
+      const idx = ((imageCycleRef.current.get(l.id) ?? -1) + 1) % len
       imageCycleRef.current.set(l.id, idx)
+      const full = { x: 0, y: 0, w: W, h: H }
       let patch: Partial<Layer>
-      if (idx === 0 || idx === 3) {
-        patch = { x: 0, y: 0, w: W, h: H }
+      if (idx === 0 || (!isSquare && idx === 3)) {
+        patch = full
+      } else if (isSquare) {
+        const w1 = Math.floor(W / 2)
+        const h1 = Math.floor(H / 2)
+        if (idx === 1) patch = { x: 0, y: 0, w: W, h: h1 }
+        else if (idx === 2) patch = { x: 0, y: h1, w: W, h: H - h1 }
+        else if (idx === 3) patch = { x: 0, y: 0, w: w1, h: H }
+        else patch = { x: w1, y: 0, w: W - w1, h: H }
       } else if (W > H) {
         const w1 = Math.floor(W / 2)
         patch = idx === 1 ? { x: 0, y: 0, w: w1, h: H } : { x: w1, y: 0, w: W - w1, h: H }
