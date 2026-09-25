@@ -3,6 +3,7 @@ import { Pipette, Check, X } from 'lucide-react'
 import { useEditor } from '#/store/editor'
 import type { Background, Layer, Preset } from '#/types'
 import { parseImagePosition } from '#/lib/imagePosition'
+import { shapePolygonPath } from '#/lib/vector'
 
 interface ImageCanvasEntry {
   canvas: HTMLCanvasElement
@@ -552,13 +553,29 @@ function renderLoupeLens(
         ctx.beginPath()
         ctx.ellipse(layer.w / 2, layer.h / 2, layer.w / 2, layer.h / 2, 0, 0, Math.PI * 2)
         ctx.fill()
+      } else if (layer.shape === 'triangle' || layer.shape === 'star') {
+        const polyPath = new Path2D(shapePolygonPath(layer.shape, layer.w, layer.h, layer.radius ?? 0))
+        ctx.fill(polyPath)
+        if (layer.stroke && layer.strokeWidth) {
+          ctx.strokeStyle = layer.stroke
+          ctx.lineWidth = layer.strokeWidth
+          ctx.stroke(polyPath)
+        }
+      } else if (layer.shape === 'line') {
+        ctx.strokeStyle = fillColor
+        ctx.lineWidth = Math.max(2, layer.h * 0.12)
+        ctx.lineCap = layer.strokeLinecap === 'butt' ? 'butt' : 'round'
+        ctx.beginPath()
+        ctx.moveTo(0, layer.h / 2)
+        ctx.lineTo(layer.w, layer.h / 2)
+        ctx.stroke()
       } else {
         ctx.beginPath()
         ctx.roundRect(0, 0, layer.w, layer.h, layer.radius || 0)
         ctx.fill()
       }
 
-      if (layer.stroke && layer.strokeWidth) {
+      if (layer.shape !== 'triangle' && layer.shape !== 'star' && layer.stroke && layer.strokeWidth) {
         ctx.strokeStyle = layer.stroke
         ctx.lineWidth = layer.strokeWidth
         ctx.stroke()

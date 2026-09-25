@@ -14,6 +14,7 @@ import {
   buildSvgPath, scaleVectorPoints, tightenVectorLayer,
   updateHandleWithMode, snapVectorAnchor, snapVectorHandle, switchPointBezierMode,
   cloneVectorPoints, getAdjacentVectorPoints,
+  shapePolygonPath,
   type VectorAlignResult,
 } from '#/lib/vector'
 
@@ -662,19 +663,29 @@ function MaskShape({ layer, ox, oy }: { layer: Layer; ox: number; oy: number }) 
       case 'circle':
         return wrap(<ellipse cx={cx} cy={cy} rx={w / 2} ry={h / 2} fill="#fff" transform={rot || undefined} />)
       case 'triangle':
-        return wrap(<polygon points={`${cx},${y} ${x + w},${y + h} ${x},${y + h}`} fill="#fff" transform={rot || undefined} />)
+        return wrap(
+          <g transform={`translate(${x} ${y})`}>
+            <path
+              d={shapePolygonPath('triangle', w, h, layer.radius ?? 0)}
+              fill="#fff"
+              strokeLinejoin="round"
+              transform={layer.rotation ? `rotate(${layer.rotation} ${w / 2} ${h / 2})` : undefined}
+            />
+          </g>,
+        )
       case 'star':
         return wrap(
-          <g transform={`translate(${x} ${y}) scale(${w / 100} ${h / 100})`}>
-            <polygon
-              points="50,0 61,35 98,35 68,57 79,91 50,70 21,91 32,57 2,35 39,35"
+          <g transform={`translate(${x} ${y})`}>
+            <path
+              d={shapePolygonPath('star', w, h, layer.radius ?? 0)}
               fill="#fff"
-              transform={layer.rotation ? `rotate(${layer.rotation} 50 50)` : undefined}
+              strokeLinejoin="round"
+              transform={layer.rotation ? `rotate(${layer.rotation} ${w / 2} ${h / 2})` : undefined}
             />
           </g>,
         )
       case 'line':
-        return wrap(<line x1={x} y1={cy} x2={x + w} y2={cy} stroke="#fff" strokeWidth={Math.max(2, h * 0.12)} strokeLinecap="round" transform={rot || undefined} />)
+        return wrap(<line x1={x} y1={cy} x2={x + w} y2={cy} stroke="#fff" strokeWidth={Math.max(2, h * 0.12)} strokeLinecap={layer.strokeLinecap || 'round'} transform={rot || undefined} />)
       case 'pill':
       case 'rectangle':
       case 'rect':
@@ -4489,6 +4500,11 @@ export default function Canvas() {
                       if (effectiveLayer.shape === 'circle') {
                         return { rx: effectiveLayer.w / 2, ry: effectiveLayer.h / 2 }
                       }
+                      // Polygon outlines trace the bounding box only — the shape's
+                      // own corner radius must not round the selection box.
+                      if (effectiveLayer.shape === 'triangle' || effectiveLayer.shape === 'star' || effectiveLayer.shape === 'line') {
+                        return { rx: 0, ry: 0 }
+                      }
                       const maxR = Math.min(effectiveLayer.w, effectiveLayer.h) / 2
                       if (effectiveLayer.shape === 'pill') {
                         const r = effectiveLayer.radius !== undefined
@@ -6490,31 +6506,35 @@ function LayerContent({
             )}
           </svg>
         )
-      case 'triangle':
+      case 'triangle': {
+        const triangleD = shapePolygonPath('triangle', layer.w, layer.h, layer.radius ?? 0)
         return (
           <svg viewBox={`0 0 ${layer.w} ${layer.h}`} width="100%" height="100%" style={{ display: 'block', overflow: 'visible' }} shapeRendering="geometricPrecision">
             {gradDef}
-            <polygon points={`${layer.w / 2},0 ${layer.w},${layer.h} 0,${layer.h}`} fill={paint} fillOpacity={fillOpacity} stroke={stroke} strokeWidth={strokeWidth} strokeOpacity={strokeOpacity} strokeLinejoin="round" shapeRendering="geometricPrecision" style={{ transition: 'fill-opacity 0.2s ease' }} />
+            <path d={triangleD} fill={paint} fillOpacity={fillOpacity} stroke={stroke} strokeWidth={strokeWidth} strokeOpacity={strokeOpacity} strokeLinejoin="round" shapeRendering="geometricPrecision" style={{ transition: 'fill-opacity 0.2s ease' }} />
             {isVectorEditing && (
-              <polygon points={`${layer.w / 2},0 ${layer.w},${layer.h} 0,${layer.h}`} fill="none" stroke="#d1d5db" strokeWidth={1 / eff} strokeLinejoin="round" shapeRendering="geometricPrecision" />
+              <path d={triangleD} fill="none" stroke="#d1d5db" strokeWidth={1 / eff} strokeLinejoin="round" shapeRendering="geometricPrecision" />
             )}
           </svg>
         )
-      case 'star':
+      }
+      case 'star': {
+        const starD = shapePolygonPath('star', layer.w, layer.h, layer.radius ?? 0)
         return (
-          <svg viewBox="0 0 100 100" width="100%" height="100%" style={{ display: 'block', overflow: 'visible' }} shapeRendering="geometricPrecision">
+          <svg viewBox={`0 0 ${layer.w} ${layer.h}`} width="100%" height="100%" style={{ display: 'block', overflow: 'visible' }} shapeRendering="geometricPrecision">
             {gradDef}
-            <polygon points="50,0 61,35 98,35 68,57 79,91 50,70 21,91 32,57 2,35 39,35" fill={paint} fillOpacity={fillOpacity} stroke={stroke} strokeWidth={strokeWidth} strokeOpacity={strokeOpacity} strokeLinejoin="round" shapeRendering="geometricPrecision" style={{ transition: 'fill-opacity 0.2s ease' }} />
+            <path d={starD} fill={paint} fillOpacity={fillOpacity} stroke={stroke} strokeWidth={strokeWidth} strokeOpacity={strokeOpacity} strokeLinejoin="round" shapeRendering="geometricPrecision" style={{ transition: 'fill-opacity 0.2s ease' }} />
             {isVectorEditing && (
-              <polygon points="50,0 61,35 98,35 68,57 79,91 50,70 21,91 32,57 2,35 39,35" fill="none" stroke="#d1d5db" strokeWidth={1 / eff} strokeLinejoin="round" shapeRendering="geometricPrecision" />
+              <path d={starD} fill="none" stroke="#d1d5db" strokeWidth={1 / eff} strokeLinejoin="round" shapeRendering="geometricPrecision" />
             )}
           </svg>
         )
+      }
       case 'line':
         return (
           <svg viewBox={`0 0 ${layer.w} ${layer.h}`} width="100%" height="100%" style={{ display: 'block', overflow: 'visible' }} shapeRendering="geometricPrecision">
             {gradDef}
-            <line x1={0} y1={layer.h / 2} x2={layer.w} y2={layer.h / 2} stroke={paint} strokeOpacity={fillOpacity} strokeWidth={Math.max(2, layer.h * 0.12)} strokeLinecap="round" shapeRendering="geometricPrecision" />
+            <line x1={0} y1={layer.h / 2} x2={layer.w} y2={layer.h / 2} stroke={paint} strokeOpacity={fillOpacity} strokeWidth={Math.max(2, layer.h * 0.12)} strokeLinecap={layer.strokeLinecap || 'round'} shapeRendering="geometricPrecision" />
           </svg>
         )
       case 'pill': {

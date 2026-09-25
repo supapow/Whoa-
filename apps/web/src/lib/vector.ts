@@ -629,6 +629,119 @@ export function tightenVectorLayer(layer: Layer): {
 }
 
 /**
+ * Canonical polygon vertices for the shapes that render as SVG polygons.
+ * Triangle matches the canvas `<polygon>` exactly; star matches the 100-box
+ * polygon the canvas renders, scaled into [w, h].
+ */
+export function triangleVertices(w: number, h: number): { x: number; y: number }[] {
+  return [
+    { x: w / 2, y: 0 },
+    { x: w, y: h },
+    { x: 0, y: h },
+  ]
+}
+
+/** Canonical star outline in a 100x100 box (matches the canvas render). */
+export const STAR_POINTS_100 = '50,0 61,35 98,35 68,57 79,91 50,70 21,91 32,57 2,35 39,35'
+
+export function starVertices(w: number, h: number): { x: number; y: number }[] {
+  return STAR_POINTS_100.split(' ').map((pair) => {
+    const [x, y] = pair.split(',').map(Number)
+    return { x: round((x / 100) * w), y: round((y / 100) * h) }
+  })
+}
+
+/**
+ * Rounds every corner of a polygon with a uniform radius (Figma-style).
+ *
+ * Each vertex V is replaced by two tangent-point anchors T1/T2 pulled back
+ * along the adjacent edges by `t = r / |tan(theta/2)|` (theta = interior
+ * angle), joined by a cubic approximating the tangent arc with control
+ * offset `(4/3) * tan(|pi - theta|/4) * r` along each edge. Works for convex
+ * corners (arc bulges away from V) and reflex corners such as star notches
+ * (arc bulges toward V).
+ *
+ * The tangent distance is clamped per corner to half the shortest adjacent
+ * edge, so oversized radii degrade gracefully instead of inverting the shape.
+ * A radius <= 0.01 returns the sharp vertices unchanged.
+ */
+export function roundedPolygonPoints(
+  vertices: { x: number; y: number }[],
+  radius: number,
+): VectorPoint[] {
+  const n = vertices.length
+  const sharp = () => vertices.map((v) => ({ x: round(v.x), y: round(v.y) }))
+  if (n < 3) return sharp()
+  const r = Math.max(0, radius)
+  if (!(r > 0.01)) return sharp()
+
+  let area2 = 0
+  for (let i = 0; i < n; i++) {
+    const p = vertices[i]
+    const q = vertices[(i + 1) % n]
+    area2 += p.x * q.y - q.x * p.y
+  }
+  const winding = area2 >= 0 ? 1 : -1
+
+  const pts: VectorPoint[] = []
+  for (let i = 0; i < n; i++) {
+    const V = vertices[i]
+    const P = vertices[(i - 1 + n) % n]
+    const N = vertices[(i + 1) % n]
+    const inLen = Math.hypot(V.x - P.x, V.y - P.y)
+    const outLen = Math.hypot(N.x - V.x, N.y - V.y)
+    if (!(inLen > 1e-6 && outLen > 1e-6)) {
+      pts.push({ x: round(V.x), y: round(V.y) })
+      continue
+    }
+    // Unit vectors from V back along the incoming edge and out along the outgoing edge.
+    const e1 = { x: (P.x - V.x) / inLen, y: (P.y - V.y) / inLen }
+    const e2 = { x: (N.x - V.x) / outLen, y: (N.y - V.y) / outLen }
+    // Travel direction turn at V determines convex vs reflex given the winding.
+    const uIn = { x: -e1.x, y: -e1.y }
+    const turn = Math.atan2(uIn.x * e2.y - uIn.y * e2.x, uIn.x * e2.x + uIn.y * e2.y)
+    const theta = Math.PI - turn * winding // interior angle, 0..2pi
+    const phi = Math.abs(Math.PI - theta) // arc span
+    if (phi < 1e-3) {
+      pts.push({ x: round(V.x), y: round(V.y) })
+      continue
+    }
+    const tanHalf = Math.tan(theta / 2)
+    if (!(Math.abs(tanHalf) > 1e-6)) {
+      pts.push({ x: round(V.x), y: round(V.y) })
+      continue
+    }
+    const t = Math.min(r / Math.abs(tanHalf), (Math.min(inLen, outLen) / 2) * (1 - 1e-4))
+    const rEff = t * Math.abs(tanHalf)
+    const d = (4 / 3) * Math.tan(phi / 4) * rEff
+    const convex = theta <= Math.PI
+    const s = convex ? -1 : 1 // controls run toward V (convex) or away (reflex)
+    const t1 = { x: V.x + e1.x * t, y: V.y + e1.y * t }
+    const t2 = { x: V.x + e2.x * t, y: V.y + e2.y * t }
+    pts.push({
+      x: round(t1.x),
+      y: round(t1.y),
+      cp2: { x: round(t1.x + s * e1.x * d), y: round(t1.y + s * e1.y * d) },
+    })
+    pts.push({
+      x: round(t2.x),
+      y: round(t2.y),
+      cp1: { x: round(t2.x + s * e2.x * d), y: round(t2.y + s * e2.y * d) },
+    })
+  }
+  return pts
+}
+
+/**
+ * SVG path data for a rounded triangle/star shape in a [w, h] box.
+ * With radius 0 this traces the sharp polygon exactly.
+ */
+export function shapePolygonPath(shape: 'triangle' | 'star', w: number, h: number, radius: number): string {
+  const vertices = shape === 'triangle' ? triangleVertices(w, h) : starVertices(w, h)
+  return buildSvgPath(roundedPolygonPoints(vertices, radius), true, w, h)
+}
+
+/**
  * Standard shape templates in absolute px within [w, h].
  */
 export function createShapeVectorPoints(shape: ShapeKind, w: number, h: number, radius: number = 0): VectorPoint[] {
@@ -652,28 +765,10 @@ export function createShapeVectorPoints(shape: ShapeKind, w: number, h: number, 
       ]
     }
     case 'triangle': {
-      return [
-        { x: w / 2, y: 0 },
-        { x: w, y: h },
-        { x: 0, y: h },
-      ]
+      return roundedPolygonPoints(triangleVertices(w, h), radius)
     }
     case 'star': {
-      // 5-point star
-      const pts: VectorPoint[] = []
-      const outerR = Math.min(w, h) / 2
-      const innerR = outerR * 0.42
-      const cx = w / 2
-      const cy = h / 2
-      for (let i = 0; i < 10; i++) {
-        const r = i % 2 === 0 ? outerR : innerR
-        const angle = -Math.PI / 2 + (i * Math.PI) / 5
-        pts.push({
-          x: round(cx + r * Math.cos(angle)),
-          y: round(cy + r * Math.sin(angle)),
-        })
-      }
-      return pts
+      return roundedPolygonPoints(starVertices(w, h), radius)
     }
     case 'line': {
       return [
@@ -1430,6 +1525,20 @@ export const VECTOR_PRESETS: VectorPreset[] = [
 ]
 
 /**
+ * Template points for a vector layer box. Shape templates are generated
+ * directly in [w, h], so refitting them to the box is a no-op for sharp
+ * shapes — but for rounded triangle/star it would stretch the shape back to
+ * full-bleed and distort the corner arcs (true rounded bounds shrink inward
+ * with rounding), so those templates are used as generated.
+ */
+export function shapeTemplatePoints(shape: ShapeKind, w: number, h: number, radius: number, closed: boolean): VectorPoint[] {
+  const raw = createShapeVectorPoints(shape, w, h, radius)
+  const isRoundedPolygon =
+    (shape === 'triangle' || shape === 'star') && Math.max(0, radius) > 0.01
+  return isRoundedPolygon ? raw : fitVectorPointsToBounds(raw, closed, w, h)
+}
+
+/**
  * Converts any standard shape layer into a vector path layer with editable anchor points.
  */
 export function convertShapeToVector(shapeLayer: Layer): Partial<Layer> {
@@ -1440,13 +1549,13 @@ export function convertShapeToVector(shapeLayer: Layer): Partial<Layer> {
   const effectiveRad = shapeLayer.radius !== undefined
     ? Math.max(0, shapeLayer.radius)
     : (isPill || isCircle ? Math.min(shapeLayer.w, shapeLayer.h) / 2 : 0)
-  const rawPts = createShapeVectorPoints(
+  const pts = shapeTemplatePoints(
     shapeLayer.shape || 'rect',
     shapeLayer.w,
     shapeLayer.h,
-    effectiveRad
+    effectiveRad,
+    isClosed
   )
-  const pts = fitVectorPointsToBounds(rawPts, isClosed, shapeLayer.w, shapeLayer.h)
   return {
     type: 'path',
     points: pts,

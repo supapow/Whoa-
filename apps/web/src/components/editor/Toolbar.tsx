@@ -433,7 +433,9 @@ export default function Toolbar({ onExport }: { onExport?: () => void }) {
       items = [
         { key: 'shape', label: 'Shape', icon: <Square /> },
         { key: 'color', label: 'Fill', icon: <PaintBucket /> },
-        { key: 'radius', label: 'Corners', icon: <Square /> },
+        ...(selected.shape === 'circle'
+          ? []
+          : [{ key: 'radius', label: selected.shape === 'line' ? 'Ends' : 'Corners', icon: <Square /> }]),
         { key: 'mask', label: 'Mask', icon: <Scissors />, onClick: handleMask },
         ...common,
       ]
