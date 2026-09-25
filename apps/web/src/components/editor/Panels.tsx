@@ -1359,7 +1359,16 @@ function FontPanel({
 }
 
 /* ---------- Gradient editor (layer fills + backgrounds) ---------- */
-function GradientEditor({ value, onChange }: { value: LayerGradient; onChange: (g: LayerGradient) => void }) {
+function GradientEditor({
+  value,
+  onChange,
+  onPreset,
+}: {
+  value: LayerGradient
+  onChange: (g: LayerGradient) => void
+  /** When set, preset taps go here (lets callers pair extra effects, e.g. frost). */
+  onPreset?: (p: (typeof LAYER_GRADIENT_PRESETS)[number]) => void
+}) {
   const [selIdx, setSelIdx] = useState(0)
   const stops = value.stops
   const sel = stops[Math.min(selIdx, stops.length - 1)]
@@ -1400,7 +1409,11 @@ function GradientEditor({ value, onChange }: { value: LayerGradient; onChange: (
               data-testid={`gradient-preset-${i}`}
               title={p.label}
               onClick={() => {
-                onChange({ ...p.gradient, stops: p.gradient.stops.map((s) => ({ ...s })) })
+                if (onPreset) {
+                  onPreset(p)
+                } else {
+                  onChange({ ...p.gradient, stops: p.gradient.stops.map((s) => ({ ...s })) })
+                }
                 setSelIdx(0)
               }}
               style={{ backgroundImage: layerGradientToCss(p.gradient) }}
@@ -1688,6 +1701,17 @@ function ColorPanel() {
           <GradientEditor
             value={curGradient}
             onChange={(g) => up({ fillGradient: g })}
+            onPreset={(p) => {
+              const patch: Record<string, any> = {
+                fillGradient: { ...p.gradient, stops: p.gradient.stops.map((s) => ({ ...s })) },
+              }
+              if (p.effect) {
+                patch.blur = p.effect.blur
+                patch.blurType = p.effect.blurType
+                patch.blurFade = { ...p.effect.blurFade }
+              }
+              up(patch)
+            }}
           />
         </div>
       ) : (

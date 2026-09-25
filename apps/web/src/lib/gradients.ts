@@ -1,6 +1,5 @@
 import type { BlurFade, LayerGradient } from '#/types'
 import { colorToRgba } from '#/lib/shadows'
-
 export const fillGradientDefId = (layerId: string) => `whoa-grad-${layerId}`
 
 const clampN = (v: number, lo: number, hi: number) => Math.max(lo, Math.min(hi, v))
@@ -108,6 +107,12 @@ export function blurFadeMaskCss(fade: BlurFade): string {
 export interface LayerGradientPreset {
   label: string
   gradient: LayerGradient
+  /** Optional paired look: applied together with the gradient (e.g. frosted fade). */
+  effect?: {
+    blur: number
+    blurType: 'element' | 'backdrop'
+    blurFade: BlurFade
+  }
 }
 
 /** Quick presets for layer fills, including fades to transparent. */
@@ -191,6 +196,28 @@ export const LAYER_GRADIENT_PRESETS: LayerGradientPreset[] = [
         { color: '#000000', opacity: 0.75, at: 100 },
       ],
     },
+  },
+  {
+    label: 'Frost fade down',
+    gradient: {
+      kind: 'linear', angle: 180,
+      stops: [
+        { color: '#FFFFFF', opacity: 0.55, at: 0 },
+        { color: '#FFFFFF', opacity: 0.05, at: 100 },
+      ],
+    },
+    effect: { blur: 24, blurType: 'backdrop', blurFade: { side: 'bottom', length: 60 } },
+  },
+  {
+    label: 'Frost fade up',
+    gradient: {
+      kind: 'linear', angle: 0,
+      stops: [
+        { color: '#FFFFFF', opacity: 0.55, at: 0 },
+        { color: '#FFFFFF', opacity: 0.05, at: 100 },
+      ],
+    },
+    effect: { blur: 24, blurType: 'backdrop', blurFade: { side: 'top', length: 60 } },
   },
 ]
 
