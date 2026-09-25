@@ -4,6 +4,7 @@ import {
   Component as ComponentIcon, ChevronRight, ChevronLeft, ChevronDown, Plus, Trash2,
   Lock, Unlock, CircleDot, Diamond, Droplet, PenTool, Spline, Magnet, Check, CheckSquare,
   Wand2, Globe, FileUp, Pipette, Search, Sparkles, Contrast, Scissors,
+  Shapes, Square, Sticker, RectangleHorizontal, Ungroup,
 } from 'lucide-react'
 import ColorPicker from '#/components/editor/ColorPicker'
 import BottomSheet from '#/components/BottomSheet'
@@ -3565,6 +3566,69 @@ export function VectorFloatingPanel() {
   )
 }
 
+/* ------------------------------------------------------------------ */
+/* Vertical element panels (bottom-right stack, above the reorder pill)   */
+/* Every element type gets one panel with the same behavior: a single     */
+/* round toggle button carrying the type icon; tapping it expands or      */
+/* collapses the vertical pill above it.                                  */
+/* ------------------------------------------------------------------ */
+
+function ElementSidePanel({
+  testid,
+  toggleTestid,
+  toggleLabel,
+  toggleTitle,
+  icon,
+  expanded,
+  onToggle,
+  children,
+}: {
+  testid: string
+  toggleTestid: string
+  toggleLabel: string
+  toggleTitle: string
+  icon: React.ReactNode
+  expanded: boolean
+  onToggle: () => void
+  children: React.ReactNode
+}) {
+  const toggle = (
+    <button
+      type="button"
+      data-testid={toggleTestid}
+      onClick={onToggle}
+      aria-label={toggleLabel}
+      title={toggleTitle}
+      aria-expanded={expanded}
+      className="pointer-events-auto grid h-9 w-9 place-items-center rounded-full border border-white/10 bg-black/60 text-white/90 shadow-lg backdrop-blur-md transition-all hover:bg-white/20 hover:text-white active:scale-90 focus:outline-none cursor-pointer"
+    >
+      {icon}
+    </button>
+  )
+  return (
+    <div
+      className="pointer-events-auto flex flex-col items-end gap-2"
+      onPointerDown={(e) => e.stopPropagation()}
+      onClick={(e) => e.stopPropagation()}
+    >
+      {expanded && (
+        <section
+          role="toolbar"
+          aria-label={toggleLabel}
+          data-testid={testid}
+          className="flex w-9 flex-col items-center gap-1 rounded-full border border-white/10 bg-black/60 p-1 text-xs font-semibold text-white shadow-2xl backdrop-blur-md"
+        >
+          {children}
+        </section>
+      )}
+      {toggle}
+    </div>
+  )
+}
+
+const sideBtnClass = 'grid h-8 w-8 place-items-center rounded-full transition-all active:scale-90 focus:outline-none cursor-pointer'
+const sideInactiveBtnClass = `${sideBtnClass} text-white/70 hover:bg-white/20 hover:text-white`
+
 export function TextFloatingPanel() {
   const { selected, tool, openTool, updateLayer, startEyedropper } = useEditor()
   const [expanded, setExpanded] = useState(true)
@@ -3577,136 +3641,415 @@ export function TextFloatingPanel() {
   const selectedFamily = l.fontFamily || 'Manrope'
   const currentWeight = getClosestAvailableWeight(selectedFamily, l.fontWeight || 700)
 
-  const btnClass = 'grid h-8 w-8 place-items-center rounded-full transition-all active:scale-90 focus:outline-none'
-  const inactiveBtnClass = `${btnClass} text-white/70 hover:bg-white/20 hover:text-white`
-  const activeBtnClass = `${btnClass} bg-accent text-white shadow-sm ring-1 ring-accent/60`
+  return (
+    <ElementSidePanel
+      testid="floating-text-panel"
+      toggleTestid="text-panel-toggle"
+      toggleLabel="Text tools"
+      toggleTitle="Text tools"
+      icon={<TypeIcon className="size-4" />}
+      expanded={expanded}
+      onToggle={() => setExpanded((v) => !v)}
+    >
+      {/* 1. Open font selector sheet */}
+      <button
+        type="button"
+        data-testid="text-floating-font-btn"
+        onClick={() => openTool('font')}
+        aria-label="Font family selection"
+        title={`Font: ${selectedFamily} (Click to change font)`}
+        className={sideInactiveBtnClass}
+      >
+        <TypeIcon className="size-4" />
+      </button>
+
+      {/* 2. Text style & weights */}
+      <button
+        type="button"
+        data-testid="text-floating-style-btn"
+        onClick={() => openTool('style')}
+        aria-label="Text style and real weights"
+        title={`Style & Weights (Current weight: ${currentWeight})`}
+        className={sideInactiveBtnClass}
+      >
+        <span className="text-[11px] font-bold">W</span>
+      </button>
+
+      {/* 3. Text color */}
+      <button
+        type="button"
+        data-testid="text-floating-color-btn"
+        onClick={() => openTool('color')}
+        aria-label="Text color"
+        title="Text color"
+        className={sideInactiveBtnClass}
+      >
+        <div
+          className="h-3.5 w-3.5 rounded-full border border-white/40 shadow-xs"
+          style={{ backgroundColor: l.color || '#FFFFFF' }}
+        />
+      </button>
+
+      {/* 3b. Color picker loupe icon beside color icon */}
+      <button
+        type="button"
+        data-testid="text-floating-picker-btn"
+        id="text-floating-picker-btn"
+        onClick={() => {
+          startEyedropper({
+            target: 'layer',
+            layerId: l.id,
+            key: 'color',
+            initialColor: l.color || '#FFFFFF',
+            currentColor: l.color || '#FFFFFF',
+          })
+        }}
+        aria-label="Color Loupe Eyedropper"
+        title="Pick text color from screen"
+        className={sideInactiveBtnClass}
+      >
+        <Pipette className="size-3.5" />
+      </button>
+
+      {/* 4. Text alignment cycle */}
+      <button
+        type="button"
+        data-testid="text-floating-align-btn"
+        onClick={() => {
+          const nextAlign = l.align === 'left' ? 'center' : l.align === 'center' ? 'right' : 'left'
+          up({ align: nextAlign })
+        }}
+        aria-label={`Alignment: ${l.align || 'left'}`}
+        title={`Alignment: ${l.align || 'left'} (Click to cycle)`}
+        className={sideInactiveBtnClass}
+      >
+        <span className="text-[10px] font-bold uppercase">{l.align ? l.align[0] : 'L'}</span>
+      </button>
+
+      {/* 5. Convert text to vector path */}
+      <button
+        type="button"
+        data-testid="text-floating-vector-btn"
+        onClick={() => openTool('convertText')}
+        aria-label="Convert text to vector paths"
+        title="Convert text to vector paths"
+        className={`${sideInactiveBtnClass} hover:text-accent`}
+      >
+        <Spline className="size-4 text-accent" />
+      </button>
+    </ElementSidePanel>
+  )
+}
+
+export function ShapeFloatingPanel() {
+  const { selected, tool, openTool, startEyedropper } = useEditor()
+  const [expanded, setExpanded] = useState(true)
+
+  if (!selected || selected.type !== 'shape' || tool) return null
+
+  const l = selected
+  const fill = l.fill || '#FFFFFF'
 
   return (
-    <section
-      role="toolbar"
-      aria-label="Text font toolbar"
-      data-testid="floating-text-panel"
-      className="pointer-events-auto absolute right-3 top-1/2 z-30 -translate-y-1/2 flex w-9 flex-col items-center gap-1 rounded-full border border-white/10 bg-black/60 p-1 text-xs font-semibold text-white shadow-2xl backdrop-blur-md transition-all duration-200"
+    <ElementSidePanel
+      testid="floating-shape-panel"
+      toggleTestid="shape-panel-toggle"
+      toggleLabel="Shape tools"
+      toggleTitle="Shape tools"
+      icon={<Shapes className="size-4" />}
+      expanded={expanded}
+      onToggle={() => setExpanded((v) => !v)}
     >
-      {expanded ? (
-        <div className="flex w-full flex-col items-center gap-1">
-          {/* 1. Open font selector sheet */}
-          <button
-            type="button"
-            data-testid="text-floating-font-btn"
-            onClick={() => openTool('font')}
-            aria-label="Font family selection"
-            title={`Font: ${selectedFamily} (Click to change font)`}
-            className={activeBtnClass}
-          >
-            <TypeIcon className="size-4" />
-          </button>
+      {/* 1. Swap shape preset */}
+      <button
+        type="button"
+        data-testid="shape-floating-shape-btn"
+        onClick={() => openTool('shape')}
+        aria-label="Swap shape"
+        title="Shape presets"
+        className={sideInactiveBtnClass}
+      >
+        <Square className="size-4" />
+      </button>
 
-          {/* 2. Text style & weights */}
-          <button
-            type="button"
-            data-testid="text-floating-style-btn"
-            onClick={() => openTool('style')}
-            aria-label="Text style and real weights"
-            title={`Style & Weights (Current weight: ${currentWeight})`}
-            className={inactiveBtnClass}
-          >
-            <span className="text-[11px] font-bold">W</span>
-          </button>
+      {/* 2. Shape fill color */}
+      <button
+        type="button"
+        data-testid="shape-floating-fill-btn"
+        onClick={() => openTool('color')}
+        aria-label="Shape fill color"
+        title="Shape fill color"
+        className={sideInactiveBtnClass}
+      >
+        <div
+          className="h-3.5 w-3.5 rounded-full border border-white/40 shadow-xs"
+          style={{ backgroundColor: fill }}
+        />
+      </button>
 
-          {/* 3. Text color */}
-          <button
-            type="button"
-            data-testid="text-floating-color-btn"
-            onClick={() => openTool('color')}
-            aria-label="Text color"
-            title="Text color"
-            className={inactiveBtnClass}
-          >
-            <div
-              className="h-3.5 w-3.5 rounded-full border border-white/40 shadow-xs"
-              style={{ backgroundColor: l.color || '#FFFFFF' }}
-            />
-          </button>
+      {/* 3. Fill color loupe */}
+      <button
+        type="button"
+        data-testid="shape-floating-picker-btn"
+        onClick={() => {
+          startEyedropper({
+            target: 'layer',
+            layerId: l.id,
+            key: 'fill',
+            initialColor: fill,
+            currentColor: fill,
+          })
+        }}
+        aria-label="Color Loupe Eyedropper"
+        title="Pick shape fill color from screen"
+        className={sideInactiveBtnClass}
+      >
+        <Pipette className="size-3.5" />
+      </button>
 
-          {/* 3b. Color picker loupe icon beside color icon */}
-          <button
-            type="button"
-            data-testid="text-floating-picker-btn"
-            id="text-floating-picker-btn"
-            onClick={() => {
-              startEyedropper({
-                target: 'layer',
-                layerId: l.id,
-                key: 'color',
-                initialColor: l.color || '#FFFFFF',
-                currentColor: l.color || '#FFFFFF',
-              })
-            }}
-            aria-label="Color Loupe Eyedropper"
-            title="Pick text color from screen"
-            className={inactiveBtnClass}
-          >
-            <Pipette className="size-3.5" />
-          </button>
+      {/* 4. Corner radius */}
+      <button
+        type="button"
+        data-testid="shape-floating-radius-btn"
+        onClick={() => openTool('radius')}
+        aria-label="Corner radius"
+        title="Corner radius"
+        className={sideInactiveBtnClass}
+      >
+        <CircleDot className="size-4" />
+      </button>
+    </ElementSidePanel>
+  )
+}
 
-          {/* 4. Text alignment cycle */}
-          <button
-            type="button"
-            data-testid="text-floating-align-btn"
-            onClick={() => {
-              const nextAlign = l.align === 'left' ? 'center' : l.align === 'center' ? 'right' : 'left'
-              up({ align: nextAlign })
-            }}
-            aria-label={`Alignment: ${l.align || 'left'}`}
-            title={`Alignment: ${l.align || 'left'} (Click to cycle)`}
-            className={inactiveBtnClass}
-          >
-            <span className="text-[10px] font-bold uppercase">{l.align ? l.align[0] : 'L'}</span>
-          </button>
+export function ButtonFloatingPanel() {
+  const { selected, tool, openTool } = useEditor()
+  const [expanded, setExpanded] = useState(true)
 
-          {/* 5. Convert text to vector path */}
-          <button
-            type="button"
-            data-testid="text-floating-vector-btn"
-            onClick={() => openTool('convertText')}
-            aria-label="Convert text to vector paths"
-            title="Convert text to vector paths"
-            className={`${inactiveBtnClass} hover:text-accent`}
-          >
-            <Spline className="size-4 text-accent" />
-          </button>
+  if (!selected || selected.type !== 'button' || tool) return null
 
-          <div className="my-0.5 h-px w-4 bg-white/20" />
+  const l = selected
 
-          {/* 6. Collapse toggle button */}
-          <button
-            type="button"
-            data-testid="text-panel-toggle"
-            onClick={() => setExpanded(false)}
-            aria-label="Collapse text panel"
-            title="Collapse text panel"
-            className={inactiveBtnClass}
-          >
-            <ChevronRight className="size-4" />
-          </button>
-        </div>
-      ) : (
-        /* Collapsed state: Toggle button with the same TypeIcon as horizontal toolbar */
-        <div className="flex flex-col items-center gap-1">
-          <button
-            type="button"
-            data-testid="text-panel-toggle"
-            onClick={() => setExpanded(true)}
-            aria-label="Open text element toolpanel"
-            title="Open text element toolpanel"
-            className={activeBtnClass}
-          >
-            <TypeIcon className="size-4" />
-          </button>
-        </div>
-      )}
-    </section>
+  return (
+    <ElementSidePanel
+      testid="floating-button-panel"
+      toggleTestid="button-panel-toggle"
+      toggleLabel="Button tools"
+      toggleTitle="Button tools"
+      icon={<RectangleHorizontal className="size-4" />}
+      expanded={expanded}
+      onToggle={() => setExpanded((v) => !v)}
+    >
+      {/* 1. Label font */}
+      <button
+        type="button"
+        data-testid="button-floating-font-btn"
+        onClick={() => openTool('font')}
+        aria-label="Button label font"
+        title="Button label font"
+        className={sideInactiveBtnClass}
+      >
+        <TypeIcon className="size-4" />
+      </button>
+
+      {/* 2. Label style & weights */}
+      <button
+        type="button"
+        data-testid="button-floating-style-btn"
+        onClick={() => openTool('style')}
+        aria-label="Button label style"
+        title="Button label style"
+        className={sideInactiveBtnClass}
+      >
+        <span className="text-[11px] font-bold">W</span>
+      </button>
+
+      {/* 3. Button fill */}
+      <button
+        type="button"
+        data-testid="button-floating-fill-btn"
+        onClick={() => openTool('fill')}
+        aria-label="Button fill"
+        title="Button fill"
+        className={sideInactiveBtnClass}
+      >
+        <div
+          className="h-3.5 w-3.5 rounded-full border border-white/40 shadow-xs"
+          style={{ backgroundColor: typeof l.fill === 'string' ? l.fill : '#007AFF' }}
+        />
+      </button>
+
+      {/* 4. Label color */}
+      <button
+        type="button"
+        data-testid="button-floating-label-btn"
+        onClick={() => openTool('color')}
+        aria-label="Button label color"
+        title="Button label color"
+        className={sideInactiveBtnClass}
+      >
+        <span className="text-[11px] font-bold" style={{ color: l.color || '#FFFFFF' }}>A</span>
+      </button>
+    </ElementSidePanel>
+  )
+}
+
+export function StickerFloatingPanel() {
+  const { selected, tool, openTool } = useEditor()
+  const [expanded, setExpanded] = useState(true)
+
+  if (!selected || selected.type !== 'sticker' || tool) return null
+
+  return (
+    <ElementSidePanel
+      testid="floating-sticker-panel"
+      toggleTestid="sticker-panel-toggle"
+      toggleLabel="Sticker tools"
+      toggleTitle="Sticker tools"
+      icon={<Sticker className="size-4" />}
+      expanded={expanded}
+      onToggle={() => setExpanded((v) => !v)}
+    >
+      {/* 1. Replace sticker */}
+      <button
+        type="button"
+        data-testid="sticker-floating-replace-btn"
+        onClick={() => openTool('stickers')}
+        aria-label="Replace sticker"
+        title="Replace sticker"
+        className={sideInactiveBtnClass}
+      >
+        <Sticker className="size-4" />
+      </button>
+    </ElementSidePanel>
+  )
+}
+
+export function GroupFloatingPanel() {
+  const { selected, tool, project, maskSelection, unmaskGroup, ungroup } = useEditor()
+  const [expanded, setExpanded] = useState(true)
+
+  if (!selected || selected.type !== 'group' || tool) return null
+
+  const l = selected
+  const hasMasks = project.layers.some((layer) => layer.groupId === l.id && layer.isMask)
+
+  const handleMaskToggle = () => {
+    if (hasMasks) {
+      unmaskGroup(l.id)
+    } else {
+      maskSelection([l.id])
+    }
+    window.dispatchEvent(new Event('whoa:selection-commit'))
+  }
+
+  return (
+    <ElementSidePanel
+      testid="floating-group-panel"
+      toggleTestid="group-panel-toggle"
+      toggleLabel="Group tools"
+      toggleTitle="Group tools"
+      icon={<Folder className="size-4" />}
+      expanded={expanded}
+      onToggle={() => setExpanded((v) => !v)}
+    >
+      {/* 1. Mask / unmask */}
+      <button
+        type="button"
+        data-testid="group-floating-mask-btn"
+        onClick={handleMaskToggle}
+        aria-label={hasMasks ? 'Unmask group' : 'Mask group'}
+        title={hasMasks ? 'Unmask group' : 'Mask group'}
+        className={sideInactiveBtnClass}
+      >
+        <Scissors className="size-4" />
+      </button>
+
+      {/* 2. Ungroup */}
+      <button
+        type="button"
+        data-testid="group-floating-ungroup-btn"
+        onClick={() => ungroup(l.id)}
+        aria-label="Ungroup"
+        title="Ungroup"
+        className={sideInactiveBtnClass}
+      >
+        <Ungroup className="size-4" />
+      </button>
+    </ElementSidePanel>
+  )
+}
+
+export function PathFloatingPanel() {
+  const { selected, tool, openTool, setVectorEditingId } = useEditor()
+  const [expanded, setExpanded] = useState(true)
+
+  if (!selected || selected.type !== 'path' || tool) return null
+
+  const l = selected
+  const fill = typeof l.fill === 'string' ? l.fill : undefined
+
+  return (
+    <ElementSidePanel
+      testid="floating-path-panel"
+      toggleTestid="path-panel-toggle"
+      toggleLabel="Vector tools"
+      toggleTitle="Vector tools"
+      icon={<Spline className="size-4" />}
+      expanded={expanded}
+      onToggle={() => setExpanded((v) => !v)}
+    >
+      {/* 1. Edit anchor points */}
+      <button
+        type="button"
+        data-testid="path-floating-edit-btn"
+        onClick={() => setVectorEditingId(l.id)}
+        aria-label="Edit vector path"
+        title="Edit vector path"
+        className={sideInactiveBtnClass}
+      >
+        <PenTool className="size-4" />
+      </button>
+
+      {/* 2. Swap shape preset */}
+      <button
+        type="button"
+        data-testid="path-floating-shape-btn"
+        onClick={() => openTool('shape')}
+        aria-label="Swap shape"
+        title="Shape presets"
+        className={sideInactiveBtnClass}
+      >
+        <Square className="size-4" />
+      </button>
+
+      {/* 3. Fill color */}
+      <button
+        type="button"
+        data-testid="path-floating-color-btn"
+        onClick={() => openTool('color')}
+        aria-label="Vector fill color"
+        title="Vector fill color"
+        className={sideInactiveBtnClass}
+      >
+        <div
+          className="h-3.5 w-3.5 rounded-full border border-white/40 shadow-xs"
+          style={{ backgroundColor: fill && fill !== 'transparent' ? fill : '#3a3a3f' }}
+        />
+      </button>
+
+      {/* 4. Corner radius */}
+      <button
+        type="button"
+        data-testid="path-floating-radius-btn"
+        onClick={() => openTool('radius')}
+        aria-label="Corner radius"
+        title="Corner radius"
+        className={sideInactiveBtnClass}
+      >
+        <CircleDot className="size-4" />
+      </button>
+    </ElementSidePanel>
   )
 }
 

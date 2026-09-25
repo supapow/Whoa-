@@ -7,11 +7,15 @@ import {
   AlignVerticalJustifyStart, AlignVerticalJustifyCenter, AlignVerticalJustifyEnd,
   AlignHorizontalDistributeCenter, AlignVerticalDistributeCenter,
   Lock, Unlock,
-  Move, ArrowUpToLine, ArrowDownToLine, ArrowLeftToLine, ArrowRightToLine, Maximize2, Expand,
-  Droplet, PenTool, Download, Spline, Pipette, SunMedium, RectangleHorizontal, ListVideo,
+  Move, ArrowUpToLine, ArrowDownToLine, ArrowLeftToLine, ArrowRightToLine, Maximize2,
+  Droplet, Download, Spline, SunMedium, RectangleHorizontal, ListVideo, Magnet,
 } from 'lucide-react'
 import { useEditor, type AlignMode } from '#/store/editor'
 import { parseImagePosition } from '#/lib/imagePosition'
+import {
+  TextFloatingPanel, ShapeFloatingPanel, ButtonFloatingPanel,
+  StickerFloatingPanel, GroupFloatingPanel, PathFloatingPanel,
+} from '#/components/editor/Panels'
 
 type Item = { key: string; label: string; icon: React.ReactNode; onClick?: () => void; danger?: boolean; accent?: boolean; active?: boolean }
 
@@ -20,7 +24,8 @@ export default function Toolbar({ onExport }: { onExport?: () => void }) {
     project, selected, selectedIds, alignSelected, openTool, addLayer, deleteLayer, deleteLayers, duplicate, reorder,
     createGroup, maskSelection, unmaskGroup, ungroup, saveAsComponent,
     timelineOpen, toggleTimeline, updateLayer, imagePositioningId, setImagePositioningId,
-    vectorEditingId, setVectorEditingId, startEyedropper,
+    vectorEditingId,
+    artboardSnap, setArtboardSnap,
   } = useEditor()
 
   const handleMask = () => {
@@ -34,20 +39,6 @@ export default function Toolbar({ onExport }: { onExport?: () => void }) {
   const selectedGroupHasMasks = Boolean(
     selected?.type === 'group' && project.layers.some((l) => l.groupId === selected.id && l.isMask),
   )
-
-  const handleStartEyedropper = () => {
-    if (!selected) return
-    const isPath = selected.type === 'path'
-    const key = isPath ? 'fill' : selected.type === 'shape' ? 'fill' : 'color'
-    const cur = (selected as any)[key] || '#007AFF'
-    startEyedropper({
-      target: 'layer',
-      layerId: selected.id,
-      key: key as any,
-      initialColor: cur === 'transparent' ? '#007AFF' : cur,
-      currentColor: cur === 'transparent' ? '#007AFF' : cur,
-    })
-  }
 
   const [isAlignExpanded, setIsAlignExpanded] = useState(false)
   const [positionMode, setPositionMode] = useState<string | null>(null)
@@ -546,9 +537,9 @@ export default function Toolbar({ onExport }: { onExport?: () => void }) {
       ]
     : alignOptions
 
-  const floatingActionKeys = new Set(['color', 'blur', 'lock-proportions', 'dup', 'del'])
-  const floatingItems = selected ? items.filter((it) => floatingActionKeys.has(it.key)) : []
-  const toolbarExcludeKeys = new Set(['color', 'lock-proportions', 'dup', 'del'])
+  // Bottom horizontal toolbar: type-specific actions vary per element type.
+  // The floating-action-group below stays constant (snap/blur/duplicate/delete).
+  const toolbarExcludeKeys = new Set(['dup', 'del'])
   const baseToolbarItems = selected ? items.filter((it) => !toolbarExcludeKeys.has(it.key)) : items
   const toolbarItems = onExport
     ? [...baseToolbarItems, { key: 'export', label: 'Export', icon: <Download />, onClick: onExport }]
@@ -624,8 +615,10 @@ export default function Toolbar({ onExport }: { onExport?: () => void }) {
     <>
       {Boolean(selected) && !isVectorEditing && (
         <div
+          // Bottom offset matches the nudge bar's bottom-3 gap above the toolbar:
+          // 4rem toolbar height + 0.75rem gap (timeline adds ~15rem when open).
           className={`absolute right-3 z-40 flex flex-col items-end gap-2 select-none pointer-events-none transition-[bottom] duration-200 ${
-            timelineOpen ? 'bottom-[19.5rem]' : 'bottom-[4.5rem]'
+            timelineOpen ? 'bottom-[19.75rem]' : 'bottom-[4.75rem]'
           }`}
         >
           {/* Floating background positions alignment button for image elements */}
@@ -764,7 +757,7 @@ export default function Toolbar({ onExport }: { onExport?: () => void }) {
                     onClick={() => setIsAlignExpanded(false)}
                     className="grid h-9 w-9 place-items-center rounded-full border border-white/10 bg-black/60 text-white/90 shadow-lg backdrop-blur-md transition-all hover:bg-white/20 hover:text-white active:scale-90 focus:outline-none"
                   >
-                    <Expand className="h-4 w-4" />
+                    <ImageIcon className="h-4 w-4" />
                   </button>
                 </>
               ) : (
@@ -778,38 +771,21 @@ export default function Toolbar({ onExport }: { onExport?: () => void }) {
                   onClick={() => setIsAlignExpanded(true)}
                   className="grid h-9 w-9 place-items-center rounded-full border border-white/10 bg-black/60 text-white/90 shadow-lg backdrop-blur-md transition-all hover:bg-white/20 hover:text-white active:scale-90 focus:outline-none"
                 >
-                  <Expand className="h-4 w-4" />
+                  <ImageIcon className="h-4 w-4" />
                 </button>
               )}
             </div>
           )}
 
-          {/* Floating edit button for vector path element */}
-          {selected?.type === 'path' && (
-            <div
-              id="vector-edit-container"
-              data-testid="vector-edit-container"
-              className="pointer-events-auto relative flex flex-col items-end"
-              onPointerDown={(e) => e.stopPropagation()}
-              onClick={(e) => e.stopPropagation()}
-            >
-              <button
-                type="button"
-                id="vector-edit-btn"
-                data-testid="vector-edit-btn"
-                aria-label={vectorEditingId === selected.id ? 'Finish editing vector' : 'Edit vector path'}
-                title={vectorEditingId === selected.id ? 'Finish editing vector (Done)' : 'Edit vector path'}
-                onClick={() => setVectorEditingId(vectorEditingId === selected.id ? null : selected.id)}
-                className={`grid h-9 w-9 place-items-center rounded-full border border-line bg-surface/85 shadow-lg backdrop-blur-md transition-all active:scale-90 focus:outline-none cursor-pointer ${
-                  vectorEditingId === selected.id
-                    ? 'bg-accent text-white ring-1 ring-accent/60'
-                    : 'text-txt hover:bg-surface2'
-                }`}
-              >
-                <PenTool className="h-4 w-4" />
-              </button>
-            </div>
-          )}
+          {/* Vertical element panel — one per element type, same toggle behavior,
+              rendered above the layer reorder pill. The image panel above and
+              the vector-editing panel (middle-right) are the only exceptions. */}
+          {selected?.type === 'text' && <TextFloatingPanel />}
+          {selected?.type === 'shape' && <ShapeFloatingPanel />}
+          {selected?.type === 'button' && <ButtonFloatingPanel />}
+          {selected?.type === 'sticker' && <StickerFloatingPanel />}
+          {selected?.type === 'group' && <GroupFloatingPanel />}
+          {selected?.type === 'path' && <PathFloatingPanel />}
 
           {/* Vertical pill button for layer Forward & Backward */}
           <div
@@ -855,64 +831,79 @@ export default function Toolbar({ onExport }: { onExport?: () => void }) {
           </div>
 
           {/* Floating element control panel */}
-          {floatingItems.length > 0 && (
-            <div
-              id="floating-action-group"
-              data-testid="floating-action-group"
-              aria-label="Layer actions"
-              onPointerDown={(e) => e.stopPropagation()}
-              onClick={(e) => e.stopPropagation()}
-              className="pointer-events-auto flex items-center gap-1 rounded-full border border-line bg-surface/85 px-2 py-1.5 text-xs font-semibold text-txt shadow-lg backdrop-blur-md"
+          <div
+            id="floating-action-group"
+            data-testid="floating-action-group"
+            aria-label="Layer actions"
+            onPointerDown={(e) => e.stopPropagation()}
+            onClick={(e) => e.stopPropagation()}
+            className="pointer-events-auto flex items-center gap-1 rounded-full border border-line bg-surface/85 px-2 py-1.5 text-xs font-semibold text-txt shadow-lg backdrop-blur-md"
+          >
+            <button
+              type="button"
+              id="snap-btn"
+              data-testid="snap-btn"
+              data-floating-tool="snap"
+              aria-label={artboardSnap ? 'Disable snapping' : 'Enable snapping'}
+              aria-pressed={artboardSnap}
+              title="Snap to artboard edges"
+              onClick={() => setArtboardSnap(!artboardSnap)}
+              className={`grid h-6 w-6 place-items-center rounded-full transition-all active:scale-90 focus:outline-none cursor-pointer ${
+                artboardSnap
+                  ? 'text-white hover:bg-surface2'
+                  : 'text-txt2 hover:bg-surface2 hover:text-txt'
+              }`}
             >
-              {floatingItems.map((it) => {
-                const isLockProp = it.key === 'lock-proportions'
-                const btn = (
-                  <button
-                    key={it.key}
-                    type="button"
-                    id={isLockProp ? 'lock-proportions-btn' : `floating-tool-${it.key}`}
-                    data-testid={isLockProp ? 'lock-proportions-btn' : `floating-tool-${it.key}`}
-                    data-floating-tool={it.key}
-                    aria-label={it.label}
-                    aria-pressed={isLockProp ? Boolean(it.active) : undefined}
-                    title={it.label}
-                    onClick={() => (it.onClick ? it.onClick() : openTool(it.key))}
-                    className={`grid h-6 w-6 place-items-center rounded-full transition-all active:scale-90 focus:outline-none cursor-pointer ${
-                      it.danger
-                        ? 'text-danger hover:bg-danger/20 hover:text-red-400'
-                        : it.active
-                          ? 'bg-accent text-white shadow-sm ring-1 ring-accent/60'
-                          : 'text-txt hover:bg-surface2'
-                    }`}
-                  >
-                    <span className="[&>svg]:h-3.5 [&>svg]:w-3.5">{it.icon}</span>
-                  </button>
-                )
-
-                if (it.key === 'color') {
-                  return (
-                    <Fragment key={it.key}>
-                      {btn}
-                      <button
-                        type="button"
-                        id="floating-tool-picker"
-                        data-testid="floating-tool-picker"
-                        data-floating-tool="picker"
-                        aria-label="Color Picker Loupe"
-                        title="Pick color from canvas with circular magnifier"
-                        onClick={handleStartEyedropper}
-                        className="grid h-6 w-6 place-items-center rounded-full text-txt hover:bg-surface2 transition-all active:scale-90 focus:outline-none cursor-pointer"
-                      >
-                        <Pipette className="h-3.5 w-3.5" />
-                      </button>
-                    </Fragment>
-                  )
-                }
-
-                return btn
-              })}
+              <Magnet className="h-3.5 w-3.5" fill={artboardSnap ? 'currentColor' : 'none'} />
+            </button>
+            {/* Blur — same icon for every element type; filled when active, no blue background */}
+            <button
+              type="button"
+              id="floating-tool-blur"
+              data-testid="floating-tool-blur"
+              data-floating-tool="blur"
+              aria-label="Blur"
+              aria-pressed={Boolean(selected && selected.blur && selected.blur > 0)}
+              title="Blur"
+              onClick={() => openTool('blur')}
+              className={`grid h-6 w-6 place-items-center rounded-full transition-all active:scale-90 focus:outline-none cursor-pointer ${
+                selected && selected.blur && selected.blur > 0
+                  ? 'text-white hover:bg-surface2'
+                  : 'text-txt hover:bg-surface2'
+              }`}
+            >
+              <Droplet
+                className="h-3.5 w-3.5"
+                fill={selected && selected.blur && selected.blur > 0 ? 'currentColor' : 'none'}
+              />
+            </button>
+            {/* Duplicate */}
+            <button
+              type="button"
+              id="floating-tool-dup"
+              data-testid="floating-tool-dup"
+              data-floating-tool="dup"
+              aria-label="Duplicate"
+              title="Duplicate"
+              onClick={() => selected && duplicate(selected.id, isMulti ? selectedIds : undefined)}
+              className="grid h-6 w-6 place-items-center rounded-full text-txt hover:bg-surface2 transition-all active:scale-90 focus:outline-none cursor-pointer"
+            >
+              <Copy className="h-3.5 w-3.5" />
+            </button>
+            {/* Delete */}
+            <button
+              type="button"
+              id="floating-tool-del"
+              data-testid="floating-tool-del"
+              data-floating-tool="del"
+              aria-label="Delete"
+              title="Delete"
+              onClick={() => selected && (isMulti ? deleteLayers(selectedIds) : deleteLayer(selected.id))}
+              className="grid h-6 w-6 place-items-center rounded-full text-danger hover:bg-danger/20 hover:text-red-400 transition-all active:scale-90 focus:outline-none cursor-pointer"
+            >
+              <Trash2 className="h-3.5 w-3.5" />
+            </button>
             </div>
-          )}
         </div>
       )}
       <div className="flex h-16 shrink-0 items-center gap-1 overflow-x-auto border-t border-line bg-toolbar px-2 no-scrollbar" data-testid="toolbar">
