@@ -1185,6 +1185,9 @@ export default function Canvas() {
   // Double-tap snap cycle position per image layer: 0 = fullscreen,
   // 1 = first half, 2 = second half, 3 = fullscreen. -1/absent = fresh.
   const imageCycleRef = useRef(new Map<string, number>())
+  // Last handleDoubleTap invocation — suppresses the redundant dblclick
+  // event browsers fire right after the click-counted double tap.
+  const lastDoubleRef = useRef<{ id: string; time: number } | null>(null)
 
   const getExcludeIds = useCallback((gId?: string, group?: { id: string }[]) => {
     const exclude = new Set<string>()
@@ -3351,6 +3354,7 @@ export default function Canvas() {
 
   const handleDoubleTap = (l: Layer) => {
     if (l.locked) return
+    lastDoubleRef.current = { id: l.id, time: Date.now() }
     if (l.type === 'image') {
       // Snap cycle (tap memory): fullscreen → half → other half → fullscreen.
       // Horizontal formats (w > h) split left/right, otherwise top/bottom.
@@ -4424,6 +4428,10 @@ export default function Canvas() {
                 onDoubleClick={(e) => {
                   e.stopPropagation()
                   if (l.locked) return
+                  // Skip the compatibility dblclick when the click-counted
+                  // double tap already handled this layer just now.
+                  const last = lastDoubleRef.current
+                  if (last && last.id === l.id && Date.now() - last.time < 500) return
                   handleDoubleTap(l)
                 }}
                 data-testid={`layer-${l.id}`}
@@ -4766,6 +4774,8 @@ export default function Canvas() {
                     onDoubleClick={(e) => {
                       e.stopPropagation()
                       if (sel.locked) return
+                      const last = lastDoubleRef.current
+                      if (last && last.id === sel.id && Date.now() - last.time < 500) return
                       handleDoubleTap(sel)
                     }}
                     style={{
