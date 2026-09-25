@@ -1,5 +1,6 @@
 import { useEffect } from 'react'
 import { X, Sun, Moon, Laptop, User, Check, Palette, Sliders, Info, ShieldCheck, Sparkles } from 'lucide-react'
+import BottomSheet from '#/components/BottomSheet'
 import { useTheme, type Theme } from '#/store/theme'
 import { usePrefs } from '#/store/prefs'
 
@@ -47,25 +48,8 @@ export default function SettingsModal({ isOpen, onClose }: SettingsModalProps) {
   ]
 
   return (
-    <div
-      className="absolute inset-0 z-70 flex flex-col justify-end"
-      data-testid="settings-menu"
-      id="settings-menu"
-      role="dialog"
-      aria-modal="true"
-      aria-labelledby="settings-heading"
-    >
-      {/* Backdrop */}
-      <div
-        className="absolute inset-0 bg-black/60 backdrop-blur-xs animate-fade"
-        onClick={onClose}
-        data-testid="settings-backdrop"
-      />
-
-      {/* Sheet Content */}
-      <div className="animate-sheet relative max-h-[88vh] overflow-y-auto rounded-t-3xl border-t border-line bg-surface text-txt shadow-2xl no-scrollbar pb-8">
-        {/* Drag handle pill */}
-        <div className="mx-auto mt-3 h-1 w-10 rounded-full bg-line-strong opacity-60" />
+    <BottomSheet testid="settings-menu" z="z-70" onClose={onClose} containerClass="max-h-[88vh] overflow-y-auto no-scrollbar pb-8">
+      <div role="dialog" aria-modal="true" aria-labelledby="settings-heading" id="settings-menu">
 
         {/* Header */}
         <div className="sticky top-0 z-10 flex items-center justify-between border-b border-line/40 bg-surface/95 px-5 pt-3 pb-3 backdrop-blur-md">
@@ -296,7 +280,7 @@ export default function SettingsModal({ isOpen, onClose }: SettingsModalProps) {
             <p className="text-[10px] text-txt3">Version 0.3.0 · Light & Dark mode support</p>
           </div>
         </div>
-      </div>
-    </div>
+        </div>
+    </BottomSheet>
   )
 }

@@ -9,6 +9,7 @@ import {
   seedProjects,
 } from '#/lib/data'
 import SettingsModal from '#/components/SettingsModal'
+import BottomSheet from '#/components/BottomSheet'
 
 const bgStyle = (v: string) =>
   v.startsWith('http')
@@ -154,9 +155,7 @@ function PresetPicker({ onClose, onPick, onPickMany }: { onClose: () => void; on
   }
 
   return (
-    <div className="absolute inset-0 z-50 flex flex-col justify-end" data-testid="preset-picker">
-      <div className="absolute inset-0 bg-black/60 animate-fade" onClick={onClose} />
-      <div className="animate-sheet relative max-h-[82vh] rounded-t-3xl border-t border-line bg-surface text-txt pb-8 shadow-2xl">
+    <BottomSheet testid="preset-picker" z="z-50" onClose={onClose} containerClass="max-h-[82vh] pb-8">
         <div className="flex items-center justify-between px-5 pt-4 pb-3 border-b border-line/40">
           <h3 className="text-xl font-bold text-txt">{multi ? 'Pick sizes (1st = master)' : 'Choose a size'}</h3>
           <div className="flex items-center gap-2">
@@ -240,7 +239,6 @@ function PresetPicker({ onClose, onPick, onPickMany }: { onClose: () => void; on
             </button>
           </div>
         )}
-      </div>
-    </div>
+    </BottomSheet>
   )
 }

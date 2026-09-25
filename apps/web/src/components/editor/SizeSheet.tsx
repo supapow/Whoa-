@@ -1,6 +1,7 @@
 import { useState } from 'react'
 import { X, Check, RefreshCw, Trash2, Plus } from 'lucide-react'
 import { PRESETS } from '#/lib/data'
+import BottomSheet from '#/components/BottomSheet'
 import { useEditor } from '#/store/editor'
 
 /**
@@ -19,9 +20,7 @@ export default function SizeSheet({ onClose }: { onClose: () => void }) {
   const remaining = PRESETS.filter((p) => !existing.has(p.id))
 
   return (
-    <div className="absolute inset-0 z-70 flex flex-col justify-end" data-testid="size-sheet">
-      <div className="absolute inset-0 bg-black/60 animate-fade" onClick={onClose} />
-      <div className="animate-sheet relative max-h-[82vh] rounded-t-3xl border-t border-line bg-surface text-txt pb-8 shadow-2xl">
+    <BottomSheet testid="size-sheet" z="z-70" onClose={onClose} containerClass="max-h-[82vh] pb-8">
         <div className="flex items-center justify-between px-5 pt-4 pb-3 border-b border-line/40">
           <h3 className="text-xl font-bold text-txt">Ad sizes</h3>
           <button onClick={onClose} data-testid="size-close" className="grid h-8 w-8 place-items-center rounded-full bg-surface2 text-txt2 hover:text-txt transition-colors cursor-pointer">
@@ -151,7 +150,6 @@ export default function SizeSheet({ onClose }: { onClose: () => void }) {
             </p>
           )}
         </div>
-      </div>
-    </div>
+    </BottomSheet>
   )
 }

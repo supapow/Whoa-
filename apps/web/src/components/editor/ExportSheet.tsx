@@ -1,5 +1,6 @@
 import { useState } from 'react'
 import { X, Check, Download } from 'lucide-react'
+import BottomSheet from '#/components/BottomSheet'
 import { useEditor } from '#/store/editor'
 
 export default function ExportSheet({ onClose }: { onClose: () => void }) {
@@ -29,9 +30,7 @@ export default function ExportSheet({ onClose }: { onClose: () => void }) {
   }
 
   return (
-    <div className="absolute inset-0 z-70 flex flex-col justify-end" data-testid="export-sheet">
-      <div className="absolute inset-0 bg-black/60 animate-fade" onClick={onClose} />
-      <div className="animate-sheet relative rounded-t-3xl border-t border-line bg-surface pb-8">
+    <BottomSheet testid="export-sheet" z="z-70" onClose={onClose} containerClass="pb-8">
         <div className="flex items-center justify-between px-5 pt-4 pb-3">
           <h3 className="text-xl font-bold text-txt">Export</h3>
           <button onClick={onClose} data-testid="export-close" className="grid h-8 w-8 place-items-center rounded-full bg-surface2 text-txt2 hover:text-txt transition-colors cursor-pointer">
@@ -94,7 +93,6 @@ export default function ExportSheet({ onClose }: { onClose: () => void }) {
             </>
           )}
         </div>
-      </div>
-    </div>
+    </BottomSheet>
   )
 }

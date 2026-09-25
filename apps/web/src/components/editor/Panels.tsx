@@ -6,6 +6,7 @@ import {
   Wand2, Globe, FileUp, Pipette, Search, Sparkles, Contrast, Scissors,
 } from 'lucide-react'
 import ColorPicker from '#/components/editor/ColorPicker'
+import BottomSheet from '#/components/BottomSheet'
 import { DEFAULT_DROP_SHADOW, DEFAULT_INNER_SHADOW } from '#/lib/shadows'
 import { useEditor } from '#/store/editor'
 import type { ShapeKind, Layer, LayerGradient, BlurFade, ShadowEffect, VectorPoint, AdSet, Preset } from '#/types'
@@ -62,9 +63,11 @@ export default function ToolSheet() {
   const sheetHeightClass = isFullHeightFont ? 'max-h-[85vh] h-[82vh] pb-8' : 'max-h-[40vh] pb-4'
 
   return (
-    <div className="absolute inset-0 z-60 flex flex-col justify-end" data-testid="tool-sheet">
-      <div className="absolute inset-0 bg-black/40 animate-fade" onClick={() => openTool(null)} />
-      <div className={`animate-sheet relative ${sheetHeightClass} overflow-y-auto rounded-t-3xl border-t border-line bg-surface no-scrollbar`}>
+    <BottomSheet
+      testid="tool-sheet"
+      onClose={() => openTool(null)}
+      containerClass={`${sheetHeightClass} overflow-y-auto no-scrollbar`}
+    >
         <div className={`sticky top-0 flex items-center justify-between bg-surface px-5 ${isFont && !isFullHeightFont ? 'pt-3 pb-2' : 'pt-4 pb-3'} z-10 border-b border-line/40`}>
           <div className="flex items-center gap-2">
             {isFullHeightFont && (
@@ -89,8 +92,7 @@ export default function ToolSheet() {
         <div className="px-5">
           <PanelBody tool={tool} fontSubView={fontSubView} setFontSubView={setFontSubView} />
         </div>
-      </div>
-    </div>
+    </BottomSheet>
   )
 }
 
