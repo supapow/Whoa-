@@ -8,7 +8,7 @@ import {
 import ColorPicker from '#/components/editor/ColorPicker'
 import { DEFAULT_DROP_SHADOW, DEFAULT_INNER_SHADOW } from '#/lib/shadows'
 import { useEditor } from '#/store/editor'
-import type { ShapeKind, Layer, LayerGradient, BlurFade, ShadowEffect, VectorPoint } from '#/types'
+import type { ShapeKind, Layer, LayerGradient, BlurFade, ShadowEffect, VectorPoint, AdSet, Preset } from '#/types'
 import { hasKeyframeAt, getAdjacentKeyframes, interpolateKeyframes } from '#/lib/keyframes'
 import {
   PALETTE, GRADIENTS, BG_IMAGES, STOCK_IMAGES, STICKERS, SHAPES,
@@ -159,6 +159,25 @@ function PanelBody({
 /* ---------- Grid helper ---------- */
 function Grid({ children, cols = 4 }: { children: React.ReactNode; cols?: number }) {
   return <div className={`grid gap-3 pb-4`} style={{ gridTemplateColumns: `repeat(${cols}, minmax(0,1fr))` }}>{children}</div>
+}
+
+/** Largest artboard in the ad set — source images should cover at least this. */
+function largestAdSize(adSet: AdSet | null, fallback: Preset): { w: number; h: number } {
+  if (!adSet || adSet.variants.length === 0) return { w: fallback.w, h: fallback.h }
+  return {
+    w: Math.max(...adSet.variants.map((v) => v.preset.w)),
+    h: Math.max(...adSet.variants.map((v) => v.preset.h)),
+  }
+}
+
+function ImageSizeTip({ adSet, fallback }: { adSet: AdSet | null; fallback: Preset }) {
+  const m = largestAdSize(adSet, fallback)
+  return (
+    <p data-testid="image-size-tip" className="mb-3 rounded-xl border border-line bg-surface2/60 px-3 py-2 text-[11px] leading-snug text-txt2">
+      For sharp results, use source images at least <strong className="text-txt">{m.w}×{m.h}px</strong>
+      {adSet && adSet.variants.length > 1 ? ' — the largest size in this ad set' : ''}. Smaller images get upscaled and turn soft.
+    </p>
+  )
 }
 
 /* ---------- Add panels ---------- */
@@ -539,7 +558,7 @@ function Stickers() {
 }
 
 function Images() {
-  const { selected, addLayer, updateLayer, openTool } = useEditor()
+  const { selected, addLayer, updateLayer, openTool, adSet, project } = useEditor()
   const fileRef = useRef<HTMLInputElement>(null)
   const apply = (src: string) => {
     if (selected && selected.type === 'image') { updateLayer(selected.id, { src }); openTool(null) }
@@ -608,6 +627,7 @@ function Images() {
         <Upload className="h-4 w-4" /> Upload from device
       </button>
       <input ref={fileRef} type="file" accept="image/*" hidden onChange={onFile} data-testid="file-input" />
+      <ImageSizeTip adSet={adSet} fallback={project.preset} />
       <p className="mb-2 text-xs font-semibold uppercase tracking-wider text-txt3">Stock</p>
       <Grid cols={3}>
         {STOCK_IMAGES.map((src, i) => (
@@ -627,7 +647,7 @@ function Images() {
 
 /* ---------- Background ---------- */
 function BackgroundPanel() {
-  const { setBackground, project, startEyedropper } = useEditor()
+  const { setBackground, project, startEyedropper, adSet } = useEditor()
   const [isBgPickerExpanded, setIsBgPickerExpanded] = useState(false)
   const [customGrad, setCustomGrad] = useState<LayerGradient | null>(null)
   const cur = project.background.value
@@ -751,6 +771,7 @@ function BackgroundPanel() {
       </div>
       <div>
         <p className="mb-2 text-xs font-semibold uppercase tracking-wider text-txt3">Image</p>
+        <ImageSizeTip adSet={adSet} fallback={project.preset} />
         <Grid cols={4}>
           {BG_IMAGES.map((src, i) => (
             <Swatch key={i} tid={`bg-image-${i}`} active={cur === src} onClick={() => setBackground({ type: 'image', value: src })}

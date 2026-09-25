@@ -278,7 +278,23 @@ export function scaleLayersToPreset(
 
   const orderedUnits = [...units].sort((a, b) => a.box.y - b.box.y || a.box.x - b.box.x)
   const ctaUnit = ctaId ? orderedUnits.find((un) => un.members.some((m) => m.id === ctaId)) : undefined
-  const restUnits = ctaUnit ? orderedUnits.filter((un) => un !== ctaUnit) : orderedUnits
+  // Full-bleed units (e.g. a photo filling the master) stay full-bleed in
+  // every shape: they take no packing slot and map exactly onto the target
+  // artboard. Cover-crop at render preserves aspect — never stretched.
+  // Lone full-bleed texts keep the normal (centered-template) path.
+  const isFullBleedUnit = (un: Unit): boolean => {
+    if (un.box.x > 2 || un.box.y > 2) return false
+    if (un.box.x + un.box.w < sw - 2 || un.box.y + un.box.h < sh - 2) return false
+    if (!un.members.some((m) => m.type === 'image' || m.type === 'shape' || m.type === 'path')) return false
+    return un.members.every((m) => m.type !== 'text' || attachedTo.has(m.id))
+  }
+  const fullBleedUnits = new Set<string>()
+  for (const un of orderedUnits) {
+    if (un !== ctaUnit && isFullBleedUnit(un)) fullBleedUnits.add(un.id)
+  }
+  const packUnits = orderedUnits.filter((un) => !fullBleedUnits.has(un.id))
+  const ctaPackUnit = ctaUnit && !fullBleedUnits.has(ctaUnit.id) ? ctaUnit : undefined
+  const restUnits = ctaPackUnit ? packUnits.filter((un) => un !== ctaPackUnit) : packUnits
 
   // Unit scales + origins. The CTA keeps the full constrained-axis scale;
   // the rest fit down uniformly (aspect-safe) when they overflow the space
@@ -290,17 +306,17 @@ export function scaleLayersToPreset(
     let ctaW = 0
     let ctaH = 0
     let ctaScale = u
-    if (ctaUnit) {
-      ctaH = Math.max(Math.max(1, Math.round(ctaUnit.box.h * u)), Math.min(th - pad * 2, ctaMinH))
-      ctaScale = ctaH / Math.max(1, ctaUnit.box.h)
-      ctaW = Math.min(Math.max(1, Math.round(ctaUnit.box.w * ctaScale)), tw - pad * 2)
-      unitScale.set(ctaUnit.id, ctaScale)
-      unitPos.set(ctaUnit.id, {
+    if (ctaPackUnit) {
+      ctaH = Math.max(Math.max(1, Math.round(ctaPackUnit.box.h * u)), Math.min(th - pad * 2, ctaMinH))
+      ctaScale = ctaH / Math.max(1, ctaPackUnit.box.h)
+      ctaW = Math.min(Math.max(1, Math.round(ctaPackUnit.box.w * ctaScale)), tw - pad * 2)
+      unitScale.set(ctaPackUnit.id, ctaScale)
+      unitPos.set(ctaPackUnit.id, {
         x: Math.max(pad, tw - pad - ctaW),
         y: Math.max(pad, Math.round((th - ctaH) / 2)),
       })
     }
-    const availW = tw - pad * 2 - (ctaUnit ? ctaW + gap : 0)
+    const availW = tw - pad * 2 - (ctaPackUnit ? ctaW + gap : 0)
     const sumW = restUnits.reduce((sum, un) => sum + un.box.w * u, 0)
     const gapsW = gap * Math.max(0, restUnits.length - 1)
     const fit = sumW > 0 ? Math.min(1, Math.max(0.3, (availW - gapsW) / sumW)) : 1
@@ -314,13 +330,13 @@ export function scaleLayersToPreset(
     }
   } else {
     let ctaH = 0
-    if (ctaUnit) {
-      ctaH = Math.min(Math.max(1, Math.round(ctaUnit.box.h * u)), th - pad * 2)
-      unitScale.set(ctaUnit.id, u)
-      const w = Math.min(Math.max(1, Math.round(ctaUnit.box.w * u)), tw - pad * 2)
-      unitPos.set(ctaUnit.id, { x: Math.round((tw - w) / 2), y: Math.max(pad, th - pad - ctaH) })
+    if (ctaPackUnit) {
+      ctaH = Math.min(Math.max(1, Math.round(ctaPackUnit.box.h * u)), th - pad * 2)
+      unitScale.set(ctaPackUnit.id, u)
+      const w = Math.min(Math.max(1, Math.round(ctaPackUnit.box.w * u)), tw - pad * 2)
+      unitPos.set(ctaPackUnit.id, { x: Math.round((tw - w) / 2), y: Math.max(pad, th - pad - ctaH) })
     }
-    const availH = th - pad * 2 - (ctaUnit ? ctaH + gap : 0)
+    const availH = th - pad * 2 - (ctaPackUnit ? ctaH + gap : 0)
     const sumH = restUnits.reduce((sum, un) => sum + un.box.h * u, 0)
     const gapsH = gap * Math.max(0, restUnits.length - 1)
     const fit = sumH > 0 ? Math.min(1, Math.max(0.3, (availH - gapsH) / sumH)) : 1
@@ -334,12 +350,20 @@ export function scaleLayersToPreset(
     }
   }
 
-  // Member transform: new origin minus scaled old unit origin.
-  const memberT = new Map<string, { s: number; dx: number; dy: number }>()
+  // Member transform: new origin minus scaled old unit origin. Full-bleed
+  // units map per-axis onto the whole target artboard instead.
+  interface MemberT { s: number; sy: number; dx: number; dy: number }
+  const memberT = new Map<string, MemberT>()
   for (const un of orderedUnits) {
+    if (fullBleedUnits.has(un.id)) {
+      const fx = tw / Math.max(1, un.box.w)
+      const fy = th / Math.max(1, un.box.h)
+      memberT.set(un.id, { s: fx, sy: fy, dx: Math.round(-un.box.x * fx), dy: Math.round(-un.box.y * fy) })
+      continue
+    }
     const sUn = unitScale.get(un.id) ?? u
     const p = unitPos.get(un.id) ?? { x: Math.round(un.box.x * sUn), y: Math.round(un.box.y * sUn) }
-    memberT.set(un.id, { s: sUn, dx: Math.round(p.x - un.box.x * sUn), dy: Math.round(p.y - un.box.y * sUn) })
+    memberT.set(un.id, { s: sUn, sy: sUn, dx: Math.round(p.x - un.box.x * sUn), dy: Math.round(p.y - un.box.y * sUn) })
   }
   // Group children inherit their root unit's transform.
   const ownerOf = (l: Layer): string | null => {
@@ -351,20 +375,24 @@ export function scaleLayersToPreset(
     }
     return null
   }
-  const transformOf = (l: Layer): { s: number; dx: number; dy: number } => {
+  const transformOf = (l: Layer): MemberT => {
     if (l.groupId) {
       const o = ownerOf(l)
-      if (o) return memberT.get(o) ?? { s: u, dx: 0, dy: 0 }
+      if (o) return memberT.get(o) ?? { s: u, sy: u, dx: 0, dy: 0 }
     }
     const un = orderedUnits.find((x) => x.members.some((m) => m.id === l.id))
-    if (un) return memberT.get(un.id) ?? { s: u, dx: 0, dy: 0 }
-    return { s: u, dx: 0, dy: 0 }
+    if (un) return memberT.get(un.id) ?? { s: u, sy: u, dx: 0, dy: 0 }
+    return { s: u, sy: u, dx: 0, dy: 0 }
   }
+  const unitOf = (l: Layer): Unit | undefined =>
+    orderedUnits.find((x) => x.members.some((m) => m.id === l.id))
 
   const out: Layer[] = sourceLayers.map((l) => {
     const base = cloneWithId(l)
     const d = transformOf(l)
     const t: LayerTransform = { s: d.s, dx: d.dx, dy: d.dy }
+    const sMin = Math.min(d.s, d.sy)
+    const fb = (unitOf(l) && fullBleedUnits.has(unitOf(l)!.id)) || (l.groupId && fullBleedUnits.has(ownerOf(l) ?? ''))
     let next: Layer
     if (l.type === 'group') {
       next = { ...base } // bounds recomputed below
@@ -372,20 +400,20 @@ export function scaleLayersToPreset(
       next = {
         ...base,
         x: Math.round(l.x * d.s + d.dx),
-        y: Math.round(l.y * d.s + d.dy),
+        y: Math.round(l.y * d.sy + d.dy),
         w: Math.max(1, Math.round(l.w * d.s)),
-        h: Math.max(1, Math.round(l.h * d.s)),
-        fontSize: l.fontSize !== undefined ? Math.max(1, Math.round(l.fontSize * d.s)) : undefined,
-        radius: l.radius !== undefined ? Math.max(0, l.radius * d.s) : undefined,
-        blur: l.blur !== undefined ? Math.max(0, l.blur * d.s) : undefined,
-        strokeWidth: l.strokeWidth !== undefined ? Math.max(0, l.strokeWidth * d.s) : undefined,
-        dropShadow: scaleShadow(l.dropShadow, d.s),
-        innerShadow: scaleShadow(l.innerShadow, d.s),
-        paddingTop: l.paddingTop !== undefined ? l.paddingTop * d.s : undefined,
-        paddingRight: l.paddingRight !== undefined ? l.paddingRight * d.s : undefined,
-        paddingBottom: l.paddingBottom !== undefined ? l.paddingBottom * d.s : undefined,
-        paddingLeft: l.paddingLeft !== undefined ? l.paddingLeft * d.s : undefined,
-        points: l.points ? scaleVectorPoints(l.points, d.s, d.s) : undefined,
+        h: Math.max(1, Math.round(l.h * d.sy)),
+        fontSize: l.fontSize !== undefined ? Math.max(1, Math.round(l.fontSize * sMin)) : undefined,
+        radius: l.radius !== undefined ? Math.max(0, l.radius * sMin) : undefined,
+        blur: l.blur !== undefined ? Math.max(0, l.blur * sMin) : undefined,
+        strokeWidth: l.strokeWidth !== undefined ? Math.max(0, l.strokeWidth * sMin) : undefined,
+        dropShadow: scaleShadow(l.dropShadow, sMin),
+        innerShadow: scaleShadow(l.innerShadow, sMin),
+        paddingTop: l.paddingTop !== undefined ? l.paddingTop * sMin : undefined,
+        paddingRight: l.paddingRight !== undefined ? l.paddingRight * sMin : undefined,
+        paddingBottom: l.paddingBottom !== undefined ? l.paddingBottom * sMin : undefined,
+        paddingLeft: l.paddingLeft !== undefined ? l.paddingLeft * sMin : undefined,
+        points: l.points ? scaleVectorPoints(l.points, d.s, d.sy) : undefined,
       }
       if (next.type === 'path' && next.points) {
         next.pathData = buildSvgPath(next.points, next.closed !== false, next.w, next.h)
@@ -395,7 +423,19 @@ export function scaleLayersToPreset(
       next.y = Math.max(0, Math.min(th - next.h, next.y))
     }
     if (l.keyframes) {
-      next.keyframes = l.keyframes.map((kf) => remapKeyframe(kf, t, d.s))
+      // Full-bleed members hold the full frame in every keyframe (cover
+      // crops at render); timings and fades are preserved.
+      next.keyframes = fb
+        ? l.keyframes.map((kf) => ({
+          ...kf,
+          id: uid(),
+          x: 0,
+          y: 0,
+          w: tw,
+          h: th,
+          fontSize: kf.fontSize !== undefined ? Math.max(1, Math.round(kf.fontSize * sMin)) : undefined,
+        }))
+        : l.keyframes.map((kf) => remapKeyframe(kf, t, d.s))
     }
     return next
   })
@@ -422,8 +462,14 @@ export function scaleSingleLayer(layer: Layer, sw: number, sh: number, tw: numbe
   const sy = th / Math.max(1, sh)
   const s = Math.min(sx, sy)
   const same = isSameFamily(sw, sh, tw, th)
-  const fx = same ? sx : s
-  const fy = same ? sy : s
+  // Full-bleed source layers stay full-bleed (cover crops at render).
+  const fullBleed =
+    !same &&
+    (layer.type === 'image' || layer.type === 'shape' || layer.type === 'path') &&
+    layer.x <= 2 && layer.y <= 2 &&
+    layer.x + layer.w >= sw - 2 && layer.y + layer.h >= sh - 2
+  const fx = same ? sx : fullBleed ? tw / Math.max(1, layer.w) : s
+  const fy = same ? sy : fullBleed ? th / Math.max(1, layer.h) : s
   const next: Layer = {
     ...layer,
     id: uid(),

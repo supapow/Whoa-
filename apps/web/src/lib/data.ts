@@ -58,17 +58,17 @@ export const GRADIENTS = [
 ]
 
 export const BG_IMAGES = [
-  'https://images.unsplash.com/photo-1635776062043-223faf322554?crop=entropy&cs=srgb&fm=jpg&ixid=M3w4NjAzOTB8MHwxfHNlYXJjaHwzfHxhYnN0cmFjdCUyMHZpYnJhbnQlMjBncmFkaWVudCUyMGJhY2tncm91bmR8ZW58MHx8fHwxNzg3NDkxOTg1fDA&ixlib=rb-4.1.0&q=85',
-  'https://images.unsplash.com/photo-1614849286521-4c58b2f0ff15?crop=entropy&cs=srgb&fm=jpg&ixid=M3w4NjAzOTB8MHwxfHNlYXJjaHw0fHxhYnN0cmFjdCUyMHZpYnJhbnQlMjBncmFkaWVudCUyMGJhY2tncm91bmR8ZW58MHx8fHwxNzg3NDkxOTg1fDA&ixlib=rb-4.1.0&q=85',
-  'https://images.unsplash.com/photo-1635776062127-d379bfcba9f8?crop=entropy&cs=srgb&fm=jpg&ixid=M3w4NjAzOTB8MHwxfHNlYXJjaHwyfHxhYnN0cmFjdCUyMHZpYnJhbnQlMjBncmFkaWVudCUyMGJhY2tncm91bmR8ZW58MHx8fHwxNzg3NDkxOTg1fDA&ixlib=rb-4.1.0&q=85',
-  'https://images.pexels.com/photos/6985132/pexels-photo-6985132.jpeg?auto=compress&cs=tinysrgb&dpr=2&h=650&w=940',
+  'https://images.unsplash.com/photo-1635776062043-223faf322554?crop=entropy&cs=srgb&fm=jpg&ixid=M3w4NjAzOTB8MHwxfHNlYXJjaHwzfHxhYnN0cmFjdCUyMHZpYnJhbnQlMjBncmFkaWVudCUyMGJhY2tncm91bmR8ZW58MHx8fHwxNzg3NDkxOTg1fDA&ixlib=rb-4.1.0&q=85&w=1920',
+  'https://images.unsplash.com/photo-1614849286521-4c58b2f0ff15?crop=entropy&cs=srgb&fm=jpg&ixid=M3w4NjAzOTB8MHwxfHNlYXJjaHw0fHxhYnN0cmFjdCUyMHZpYnJhbnQlMjBncmFkaWVudCUyMGJhY2tncm91bmR8ZW58MHx8fHwxNzg3NDkxOTg1fDA&ixlib=rb-4.1.0&q=85&w=1920',
+  'https://images.unsplash.com/photo-1635776062127-d379bfcba9f8?crop=entropy&cs=srgb&fm=jpg&ixid=M3w4NjAzOTB8MHwxfHNlYXJjaHwyfHxhYnN0cmFjdCUyMHZpYnJhbnQlMjBncmFkaWVudCUyMGJhY2tncm91bmR8ZW58MHx8fHwxNzg3NDkxOTg1fDA&ixlib=rb-4.1.0&q=85&w=1920',
+  'https://images.pexels.com/photos/6985132/pexels-photo-6985132.jpeg?auto=compress&cs=tinysrgb&w=1920',
 ]
 
 export const STOCK_IMAGES = [
-  'https://images.unsplash.com/photo-1624281043172-16ff234c2a14?crop=entropy&cs=srgb&fm=jpg&ixid=M3w4NjA1OTN8MHwxfHNlYXJjaHwxfHxzdW1tZXIlMjBzYWxlJTIwZmFzaGlvbiUyMGxpZmVzdHlsZXxlbnwwfHx8fDE3ODc0OTE5ODV8MA&ixlib=rb-4.1.0&q=85',
-  'https://images.pexels.com/photos/5622839/pexels-photo-5622839.jpeg?auto=compress&cs=tinysrgb&dpr=2&h=650&w=940',
-  'https://images.pexels.com/photos/5625045/pexels-photo-5625045.jpeg?auto=compress&cs=tinysrgb&dpr=2&h=650&w=940',
-  'https://images.unsplash.com/photo-1580828343064-fde4fc206bc6?crop=entropy&cs=srgb&fm=jpg&ixid=M3w4NjA1ODR8MHwxfHNlYXJjaHwxfHxwcm9kdWN0JTIwbWFya2V0aW5nJTIwc2FsZSUyMHByb21vdGlvbnxlbnwwfHx8fDE3ODc0OTE5ODV8MA&ixlib=rb-4.1.0&q=85',
+  'https://images.unsplash.com/photo-1624281043172-16ff234c2a14?crop=entropy&cs=srgb&fm=jpg&ixid=M3w4NjA1OTN8MHwxfHNlYXJjaHwxfHxzdW1tZXIlMjBzYWxlJTIwZmFzaGlvbiUyMGxpZmVzdHlsZXxlbnwwfHx8fDE3ODc0OTE5ODV8MA&ixlib=rb-4.1.0&q=85&w=1920',
+  'https://images.pexels.com/photos/5622839/pexels-photo-5622839.jpeg?auto=compress&cs=tinysrgb&w=1920',
+  'https://images.pexels.com/photos/5625045/pexels-photo-5625045.jpeg?auto=compress&cs=tinysrgb&w=1920',
+  'https://images.unsplash.com/photo-1580828343064-fde4fc206bc6?crop=entropy&cs=srgb&fm=jpg&ixid=M3w4NjA1ODR8MHwxfHNlYXJjaHwxfHxwcm9kdWN0JTIwbWFya2V0aW5nJTIwc2FsZSUyMHByb21vdGlvbnxlbnwwfHx8fDE3ODc0OTE5ODV8MA&ixlib=rb-4.1.0&q=85&w=1920',
 ]
 
 export const STICKERS = ['🔥', '⭐', '✨', '❤️', '👍', '🎉', '💯', '🏷️', '🛒', '⚡', '🎁', '📣', '💥', '✅', '👑', '🚀']
