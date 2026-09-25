@@ -31,7 +31,7 @@ import { getLibraryComponents, deleteComponentFromLibrary, type ComponentItem } 
 import {
   VECTOR_PRESETS, convertShapeToVector, buildSvgPath, tightenVectorLayer, simplifyVectorPoints,
   createShapeVectorPoints, fitVectorPointsToBounds, getPointBezierMode, switchPointBezierMode,
-  getAdjacentVectorPoints, getVectorBoundingBox,
+  getAdjacentVectorPoints, getVectorBoundingBox, shapeTemplatePoints, roundVectorPoints,
 } from '#/lib/vector'
 
 const TITLES: Record<string, string> = {
@@ -2750,8 +2750,7 @@ function ShapePanel() {
                     const defaultRad = s === 'pill'
                       ? Math.min(l.w, l.h) / 2
                       : (l.radius ?? 0)
-                    const rawPts = createShapeVectorPoints(s, l.w, l.h, defaultRad)
-                    const pts = fitVectorPointsToBounds(rawPts, s !== 'line', l.w, l.h)
+                    const pts = shapeTemplatePoints(s, l.w, l.h, defaultRad, s !== 'line')
                     up({ points: pts, closed: s !== 'line', shape: s, radius: defaultRad })
                   } else {
                     const patch: Partial<Layer> = { shape: s }
@@ -2830,6 +2829,40 @@ function ShapePanel() {
 
 function RadiusPanel() {
   const { l, up } = useSel()
+  // Line shapes have no corners — offer round vs sharp ends instead.
+  if (l.type === 'shape' && l.shape === 'line') {
+    const cap = l.strokeLinecap || 'round'
+    return (
+      <div className="pb-4">
+        <div className="mb-2 flex justify-between text-sm">
+          <span className="text-txt2">Line ends</span>
+          <span className="font-semibold capitalize">{cap === 'butt' ? 'Sharp' : 'Round'}</span>
+        </div>
+        <div className="flex gap-2">
+          {(['round', 'butt'] as const).map((c) => (
+            <button
+              key={c}
+              data-testid={`line-end-${c}`}
+              onClick={() => up({ strokeLinecap: c })}
+              className={`flex-1 rounded-xl border py-2.5 text-xs font-semibold transition-colors cursor-pointer ${cap === c ? 'border-accent bg-accent/10 text-white' : 'border-line bg-surface2 text-txt2'}`}
+            >
+              {c === 'round' ? 'Round' : 'Sharp'}
+            </button>
+          ))}
+        </div>
+      </div>
+    )
+  }
+  // Circles are already fully round — no corners to shape.
+  if (l.type === 'shape' && l.shape === 'circle') {
+    return (
+      <div className="pb-4">
+        <p className="rounded-2xl border border-line bg-surface2/60 p-3.5 text-center text-xs text-txt3">
+          A circle is already fully round — there are no corners to shape.
+        </p>
+      </div>
+    )
+  }
   return (
     <div className="pb-4">
       <Slider
@@ -2840,9 +2873,12 @@ function RadiusPanel() {
         max={200}
         onChange={(v: number) => {
           if (l.type === 'path') {
-            const sh = l.shape || 'rectangle'
-            const rawPts = createShapeVectorPoints(sh, l.w, l.h, v)
-            const pts = fitVectorPointsToBounds(rawPts, l.closed !== false, l.w, l.h)
+            // Round the existing anchors in place: identical to template
+            // regeneration on unedited shapes, but preserves hand edits and
+            // works on custom vector art (which has no shape template).
+            const pts = l.points && l.points.length > 0
+              ? roundVectorPoints(l.points, v, l.closed !== false)
+              : shapeTemplatePoints(l.shape || 'rectangle', l.w, l.h, v, l.closed !== false)
             up({ radius: v, points: pts })
           } else {
             up({ radius: v })
@@ -3807,17 +3843,19 @@ export function ShapeFloatingPanel() {
         <Pipette className="size-3.5" />
       </button>
 
-      {/* 4. Corner radius */}
-      <button
-        type="button"
-        data-testid="shape-floating-radius-btn"
-        onClick={() => openTool('radius')}
-        aria-label="Corner radius"
-        title="Corner radius"
-        className={sideInactiveBtnClass}
-      >
-        <CircleDot className="size-4" />
-      </button>
+      {/* 4. Corner radius (circles have no corners; lines offer ends instead) */}
+      {l.shape !== 'circle' && (
+        <button
+          type="button"
+          data-testid="shape-floating-radius-btn"
+          onClick={() => openTool('radius')}
+          aria-label={l.shape === 'line' ? 'Line ends' : 'Corner radius'}
+          title={l.shape === 'line' ? 'Line ends' : 'Corner radius'}
+          className={sideInactiveBtnClass}
+        >
+          <CircleDot className="size-4" />
+        </button>
+      )}
     </ElementSidePanel>
   )
 }
