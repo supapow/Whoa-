@@ -737,6 +737,19 @@ function MaskShape({ layer, ox, oy }: { layer: Layer; ox: number; oy: number }) 
     )
   }
 
+  if (layer.type === 'button') {
+    if (layer.points) {
+      const d = layer.points ? buildSvgPath(layer.points, layer.closed !== false, w, h) : ''
+      if (!d) return null
+      return wrap(
+        <path d={d} transform={`translate(${x} ${y})${rot}`} fill="#fff" stroke="none" fillRule={layer.fillRule || 'nonzero'} />,
+      )
+    }
+    const maxR = Math.min(w, h) / 2
+    const r = layer.radius !== undefined ? Math.min(Math.max(0, layer.radius), maxR) : maxR
+    return wrap(<rect x={x} y={y} width={w} height={h} rx={r} ry={r} fill="#fff" transform={rot || undefined} />)
+  }
+
   return null
 }
 
@@ -1169,6 +1182,12 @@ export default function Canvas() {
   })
   const lastGestureMovedRef = useRef(false)
   const lastPinchEndTime = useRef(0)
+  // Double-tap snap cycle position per image layer: 0 = fullscreen,
+  // 1 = first half, 2 = second half, 3 = fullscreen. -1/absent = fresh.
+  const imageCycleRef = useRef(new Map<string, number>())
+  // Last handleDoubleTap invocation — suppresses the redundant dblclick
+  // event browsers fire right after the click-counted double tap.
+  const lastDoubleRef = useRef<{ id: string; time: number } | null>(null)
 
   const getExcludeIds = useCallback((gId?: string, group?: { id: string }[]) => {
     const exclude = new Set<string>()
@@ -2712,10 +2731,10 @@ export default function Canvas() {
         y: b.y,
         w: b.w,
         h: b.h,
-        fontSize: item.type === 'text' ? item.fontSize : undefined,
+        fontSize: item.type === 'text' || item.type === 'button' ? item.fontSize : undefined,
         crop0: item.type === 'image' && item.crop ? { ...item.crop } : undefined,
         isCroppedImage: item.type === 'image' && Boolean(item.crop),
-        origPoints: item.type === 'path' && item.points ? cloneVectorPoints(item.points) : undefined,
+        origPoints: (item.type === 'path' || item.type === 'button') && item.points ? cloneVectorPoints(item.points) : undefined,
       }
     })
 
@@ -2789,8 +2808,14 @@ export default function Canvas() {
         const x = Math.round(cx + (item.x - cx) * ratioToApply)
         const y = Math.round(cy + (item.y - cy) * ratioToApply)
         const layer = layersRef.current.find((candidate) => candidate.id === item.id)
-        if (layer?.type === 'text' && item.fontSize) {
-          updateLayer(item.id, { x, y, w, h, fontSize: Math.max(6, Math.round(item.fontSize * ratioToApply)) })
+        if ((layer?.type === 'text' || layer?.type === 'button') && item.fontSize) {
+          const patch: Partial<Layer> = { x, y, w, h, fontSize: Math.max(6, Math.round(item.fontSize * ratioToApply)) }
+          if (layer?.type === 'button' && item.origPoints) {
+            const sx = item.w > 0 ? w / item.w : 1
+            const sy = item.h > 0 ? h / item.h : 1
+            patch.points = scaleVectorPoints(item.origPoints, sx, sy)
+          }
+          updateLayer(item.id, patch)
         } else if (layer?.type === 'image' && item.crop0) {
           const scaleFactor = item.w > 0 ? w / item.w : 1
           updateLayer(item.id, {
@@ -2861,7 +2886,15 @@ export default function Canvas() {
       const h = Math.max(20, Math.round(p.h0 * ratioToApply))
       const x = Math.round(p.x0 + (p.w0 - w) / 2)
       const y = Math.round(p.y0 + (p.h0 - h) / 2)
-      if (selected.type === 'text') {
+      if (selected.type === 'button') {
+        const patch: Partial<Layer> = { x, y, w, h, fontSize: Math.max(6, Math.round(p.fontSize * ratioToApply)) }
+        if (p.points0) {
+          const sx = p.w0 > 0 ? w / p.w0 : 1
+          const sy = p.h0 > 0 ? h / p.h0 : 1
+          patch.points = scaleVectorPoints(p.points0, sx, sy)
+        }
+        updateLayer(p.id, patch)
+      } else if (selected.type === 'text') {
         updateLayer(p.id, { x, y, w, fontSize: Math.max(6, Math.round(p.fontSize * ratioToApply)) })
       } else if (selected.type === 'image' && p.crop0) {
         const scaleFactor = p.w0 > 0 ? w / p.w0 : 1
@@ -3001,7 +3034,7 @@ export default function Canvas() {
               group: info.measured,
               crop0: isCroppedImage && targetL?.crop ? { ...targetL.crop } : undefined,
               isCroppedImage,
-              points0: targetL?.type === 'path' && targetL.points ? cloneVectorPoints(targetL.points) : undefined,
+              points0: (targetL?.type === 'path' || targetL?.type === 'button') && targetL.points ? cloneVectorPoints(targetL.points) : undefined,
             }
           } else {
             select(null)
@@ -3321,11 +3354,44 @@ export default function Canvas() {
 
   const handleDoubleTap = (l: Layer) => {
     if (l.locked) return
+    lastDoubleRef.current = { id: l.id, time: Date.now() }
     if (l.type === 'image') {
-      tapTrackerRef.current.widenedInSequence = true
-      updateLayer(l.id, { x: 0, w: preset.w })
+      // Snap cycle (tap memory). Square-ish formats (aspect 0.5–2):
+      // fullscreen → top → bottom → left → right → fullscreen.
+      // Wide strips: fullscreen → left → right → fullscreen.
+      // Tall formats: fullscreen → top → bottom → fullscreen.
+      const W = preset.w
+      const H = preset.h
+      const aspect = W / Math.max(1, H)
+      const isSquare = aspect >= 0.5 && aspect <= 2
+      const len = isSquare ? 5 : 4
+      const idx = ((imageCycleRef.current.get(l.id) ?? -1) + 1) % len
+      imageCycleRef.current.set(l.id, idx)
+      const full = { x: 0, y: 0, w: W, h: H }
+      let patch: Partial<Layer>
+      if (idx === 0 || (!isSquare && idx === 3)) {
+        patch = full
+      } else if (isSquare) {
+        const w1 = Math.floor(W / 2)
+        const h1 = Math.floor(H / 2)
+        if (idx === 1) patch = { x: 0, y: 0, w: W, h: h1 }
+        else if (idx === 2) patch = { x: 0, y: h1, w: W, h: H - h1 }
+        else if (idx === 3) patch = { x: 0, y: 0, w: w1, h: H }
+        else patch = { x: w1, y: 0, w: W - w1, h: H }
+      } else if (W > H) {
+        const w1 = Math.floor(W / 2)
+        patch = idx === 1 ? { x: 0, y: 0, w: w1, h: H } : { x: w1, y: 0, w: W - w1, h: H }
+      } else {
+        const h1 = Math.floor(H / 2)
+        patch = idx === 1 ? { x: 0, y: 0, w: W, h: h1 } : { x: 0, y: h1, w: W, h: h1 }
+      }
+      updateLayer(l.id, { ...patch, crop: undefined })
       select(l.id)
-    } else if (l.type === 'text') {
+      // The handles overlay measures the live DOM node, which still has
+      // the pre-snap layout during this commit — refresh after paint so
+      // the handles land on the new box instead of the previous step's.
+      requestAnimationFrame(() => select(l.id))
+    } else if (l.type === 'text' || l.type === 'button') {
       setEditingId(l.id)
     } else if (l.type === 'path') {
       select(l.id)
@@ -3335,9 +3401,18 @@ export default function Canvas() {
     }
   }
 
-  const handleTripleTap = (l: Layer, info?: { prevX?: number; prevW?: number; widened?: boolean }) => {
+  const handleTripleTap = (l: Layer) => {
     if (l.locked) return
-    if (l.type === 'text') {
+    if (l.type === 'image') {
+      // Triple-tap widens to full width (legacy); the next double-tap
+      // restarts the snap cycle at fullscreen.
+      imageCycleRef.current.set(l.id, -1)
+      updateLayer(l.id, { x: 0, w: preset.w, crop: undefined })
+      select(l.id)
+      requestAnimationFrame(() => select(l.id))
+      return
+    }
+    if (l.type === 'text' || l.type === 'button') {
       setEditingId(null)
     }
     if (l.type === 'group') {
@@ -3355,10 +3430,6 @@ export default function Canvas() {
       return
     }
     const patch: Partial<Layer> = { y: 0, h: preset.h }
-    if (l.type === 'image' && info?.widened && info?.prevX !== undefined && info?.prevW !== undefined) {
-      patch.x = info.prevX
-      patch.w = info.prevW
-    }
     updateLayer(l.id, patch)
     select(l.id)
   }
@@ -3405,15 +3476,12 @@ export default function Canvas() {
       }
       handleDoubleTap(l)
     } else if (count >= 3) {
-      const prevX = tracker.initialX ?? l.x
-      const prevW = tracker.initialW ?? l.w
-      const widened = tracker.widenedInSequence ?? false
       tapTrackerRef.current = {
         layerId: '',
         time: 0,
         count: 0,
       }
-      handleTripleTap(l, { prevX, prevW, widened })
+      handleTripleTap(l)
     }
   }
 
@@ -3718,7 +3786,7 @@ export default function Canvas() {
             group: info.measured,
             crop0: isCroppedImage && targetL?.crop ? { ...targetL.crop } : undefined,
             isCroppedImage,
-            points0: targetL?.type === 'path' && targetL.points ? cloneVectorPoints(targetL.points) : undefined,
+            points0: (targetL?.type === 'path' || targetL?.type === 'button') && targetL.points ? cloneVectorPoints(targetL.points) : undefined,
           }
           setPinchActive(true)
         } else {
@@ -4378,6 +4446,10 @@ export default function Canvas() {
                 onDoubleClick={(e) => {
                   e.stopPropagation()
                   if (l.locked) return
+                  // Skip the compatibility dblclick when the click-counted
+                  // double tap already handled this layer just now.
+                  const last = lastDoubleRef.current
+                  if (last && last.id === l.id && Date.now() - last.time < 500) return
                   handleDoubleTap(l)
                 }}
                 data-testid={`layer-${l.id}`}
@@ -4430,6 +4502,13 @@ export default function Canvas() {
                     if (effectiveLayer.type === 'text' && effectiveLayer.radius) {
                       const maxR = Math.min(effectiveLayer.w, effectiveLayer.h) / 2
                       const r = Math.min(Math.max(0, effectiveLayer.radius), maxR)
+                      return { rx: r, ry: r }
+                    }
+                    if (effectiveLayer.type === 'button') {
+                      const maxR = Math.min(effectiveLayer.w, effectiveLayer.h) / 2
+                      const r = effectiveLayer.radius !== undefined
+                        ? Math.min(Math.max(0, effectiveLayer.radius), maxR)
+                        : maxR
                       return { rx: r, ry: r }
                     }
                     return { rx: 0, ry: 0 }
@@ -4570,10 +4649,10 @@ export default function Canvas() {
                 y: rect.y,
                 w: rect.w,
                 h: rect.h,
-                fontSize: layer.type === 'text' ? layer.fontSize : undefined,
+                fontSize: layer.type === 'text' || layer.type === 'button' ? layer.fontSize : undefined,
                 crop0: layer.type === 'image' && layer.crop ? { ...layer.crop } : undefined,
                 isCroppedImage: layer.type === 'image' && Boolean(layer.crop),
-                origPoints: layer.type === 'path' && layer.points ? JSON.parse(JSON.stringify(layer.points)) : undefined,
+                origPoints: (layer.type === 'path' || layer.type === 'button') && layer.points ? JSON.parse(JSON.stringify(layer.points)) : undefined,
               }
             }) : undefined
             const isImagePositioning = Boolean(imagePositioningId && imagePositioningId === sel.id && sel.type === 'image')
@@ -4713,6 +4792,8 @@ export default function Canvas() {
                     onDoubleClick={(e) => {
                       e.stopPropagation()
                       if (sel.locked) return
+                      const last = lastDoubleRef.current
+                      if (last && last.id === sel.id && Date.now() - last.time < 500) return
                       handleDoubleTap(sel)
                     }}
                     style={{
@@ -6308,6 +6389,75 @@ function LayerContent({
       return <EditableText style={style} initial={layer.text || ''} onCommit={(t) => onEdit(t)} onDone={onEndEdit} />
     }
     return <div style={style}>{layer.text}</div>
+  }
+
+  if (layer.type === 'button') {
+    const labelStyle: React.CSSProperties = {
+      fontFamily: layer.fontFamily,
+      fontSize: layer.fontSize,
+      fontWeight: layer.fontWeight,
+      color: layer.color,
+      textAlign: layer.align,
+      lineHeight: 1,
+      whiteSpace: 'pre',
+      wordBreak: 'normal',
+      margin: 0,
+      outline: 'none',
+      maxWidth: '100%',
+      overflow: 'hidden',
+      textOverflow: 'ellipsis',
+    }
+    const label = editing ? (
+      <EditableText style={labelStyle} initial={layer.text || ''} onCommit={(t) => onEdit(t)} onDone={onEndEdit} />
+    ) : (
+      <div style={labelStyle}>{layer.text}</div>
+    )
+    // Vector-background variant (badge buttons): SVG path behind the label.
+    if (layer.points) {
+      const d = buildSvgPath(layer.points, layer.closed !== false, layer.w, layer.h)
+      const hasGrad = Boolean(layer.fillGradient && layer.fillGradient.stops.length > 0)
+      const gradId = fillGradientDefId(layer.id)
+      return (
+        <div style={{ position: 'relative', width: '100%', height: '100%', display: 'grid', placeItems: 'center' }}>
+          <svg viewBox={`0 0 ${layer.w} ${layer.h}`} width="100%" height="100%" style={{ position: 'absolute', inset: 0, display: 'block', overflow: 'visible' }} shapeRendering="geometricPrecision">
+            {hasGrad && layer.fillGradient ? <GradientDef id={gradId} gradient={layer.fillGradient} /> : null}
+            <path
+              d={d}
+              fill={hasGrad ? `url(#${gradId})` : (layer.fill || '#007AFF')}
+              stroke={layer.stroke || undefined}
+              strokeWidth={layer.strokeWidth || 0}
+              strokeLinejoin="round"
+              shapeRendering="geometricPrecision"
+            />
+          </svg>
+          <div style={{ position: 'relative', zIndex: 1, display: 'grid', placeItems: 'center', maxWidth: '86%', maxHeight: '86%', overflow: 'hidden' }}>
+            {label}
+          </div>
+        </div>
+      )
+    }
+    const maxR = Math.min(layer.w, layer.h) / 2
+    const r = layer.radius !== undefined ? Math.min(Math.max(0, layer.radius), maxR) : maxR
+    const hasGrad = Boolean(layer.fillGradient && layer.fillGradient.stops.length > 0)
+    return (
+      <div
+        style={{
+          position: 'relative',
+          width: '100%',
+          height: '100%',
+          display: 'grid',
+          placeItems: 'center',
+          overflow: 'hidden',
+          borderRadius: r,
+          background: hasGrad ? layerGradientToCss(layer.fillGradient!) : (layer.fill || '#007AFF'),
+          boxShadow: layer.strokeWidth ? `inset 0 0 0 ${layer.strokeWidth}px ${layer.stroke || '#000000'}` : undefined,
+          padding: '0 8px',
+          boxSizing: 'border-box',
+        }}
+      >
+        {label}
+      </div>
+    )
   }
 
   if (layer.type === 'shape') {

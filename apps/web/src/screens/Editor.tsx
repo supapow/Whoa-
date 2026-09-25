@@ -1,18 +1,19 @@
 import { useState, useEffect, useRef } from 'react'
-import { ChevronLeft, Undo2, Redo2, User } from 'lucide-react'
-import type { Project } from '#/types'
+import { ChevronLeft, Undo2, Redo2, Magnet, User } from 'lucide-react'
+import type { AdSet } from '#/types'
 import { EditorProvider, useEditor } from '#/store/editor'
 import Canvas from '#/components/editor/Canvas'
 import Toolbar from '#/components/editor/Toolbar'
 import Timeline from '#/components/editor/Timeline'
 import ToolSheet, { VectorFloatingPanel, TextFloatingPanel } from '#/components/editor/Panels'
 import ExportSheet from '#/components/editor/ExportSheet'
+import SizeSheet from '#/components/editor/SizeSheet'
 import ColorLoupe from '#/components/editor/ColorLoupe'
 import SettingsModal from '#/components/SettingsModal'
 
-export default function Editor({ project, onExit }: { project: Project; onExit: () => void }) {
+export default function Editor({ adSet, onExit }: { adSet: AdSet; onExit: () => void }) {
   return (
-    <EditorProvider project={project}>
+    <EditorProvider adSet={adSet}>
       <EditorInner onExit={onExit} />
     </EditorProvider>
   )
@@ -21,7 +22,8 @@ export default function Editor({ project, onExit }: { project: Project; onExit: 
 function EditorInner({ onExit }: { onExit: () => void }) {
   const [exportOpen, setExportOpen] = useState(false)
   const [settingsOpen, setSettingsOpen] = useState(false)
-  const { playing, time, setTime, project, undo, redo, canUndo, canRedo, selectedId, selectedIds, deleteLayer, deleteLayers } = useEditor()
+  const [sizeOpen, setSizeOpen] = useState(false)
+  const { playing, time, setTime, project, adSet, undo, redo, canUndo, canRedo, artboardSnap, setArtboardSnap, selectedId, selectedIds, deleteLayer, deleteLayers } = useEditor()
   const raf = useRef(0)
   const last = useRef(0)
   const timeRef = useRef(time)
@@ -101,6 +103,22 @@ function EditorInner({ onExit }: { onExit: () => void }) {
         <ChevronLeft className="h-5 w-5" />
       </button>
 
+      {/* Centered size chip: current variant + ad-set size count */}
+      {adSet && adSet.variants.length > 0 && (
+        <button
+          type="button"
+          onClick={() => setSizeOpen(true)}
+          onPointerDown={(e) => e.stopPropagation()}
+          data-testid="size-chip"
+          id="size-chip"
+          aria-label="Ad sizes"
+          title="Ad sizes"
+          className="absolute top-3 left-1/2 z-40 max-w-[45%] -translate-x-1/2 truncate rounded-full bg-surface/85 px-3 py-2 text-[11px] font-bold text-txt backdrop-blur-md border border-line shadow-lg hover:bg-surface2 active:scale-95 transition-all focus:outline-none cursor-pointer"
+        >
+          {project.preset.w}×{project.preset.h}{adSet.variants.length > 1 ? ` · ${adSet.variants.length} sizes` : ''}
+        </button>
+      )}
+
       {/* Floating Action Controls in top-right corner: undo, redo, user avatar */}
       <div
         data-testid="floating-top-actions"
@@ -137,6 +155,24 @@ function EditorInner({ onExit }: { onExit: () => void }) {
           <Redo2 className="h-4 w-4" />
         </button>
 
+        {/* Snap toggle */}
+        <button
+          type="button"
+          onClick={() => setArtboardSnap(!artboardSnap)}
+          data-testid="snap-btn"
+          id="snap-btn"
+          aria-label={artboardSnap ? 'Disable snapping' : 'Enable snapping'}
+          aria-pressed={artboardSnap}
+          title="Snap to artboard edges"
+          className={`grid h-9 w-9 place-items-center rounded-full backdrop-blur-md border shadow-lg active:scale-90 transition-all focus:outline-none cursor-pointer ${
+            artboardSnap
+              ? 'bg-accent text-white border-accent'
+              : 'bg-surface/85 text-txt border-line hover:bg-surface2'
+          }`}
+        >
+          <Magnet className="h-4 w-4" />
+        </button>
+
         {/* User Avatar - opens Settings menu */}
         <button
           type="button"
@@ -162,6 +198,7 @@ function EditorInner({ onExit }: { onExit: () => void }) {
       <ToolSheet />
       <ColorLoupe />
       {exportOpen && <ExportSheet onClose={() => setExportOpen(false)} />}
+      {sizeOpen && <SizeSheet onClose={() => setSizeOpen(false)} />}
       <SettingsModal isOpen={settingsOpen} onClose={() => setSettingsOpen(false)} />
     </div>
   )

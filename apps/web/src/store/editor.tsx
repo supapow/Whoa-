@@ -1,6 +1,15 @@
 import React, { createContext, useContext, useReducer, useCallback, useMemo } from 'react'
-import type { Project, Layer, LayerType, Background } from '#/types'
+import type { Project, Layer, LayerType, Background, AdSet, Preset } from '#/types'
 import { createLayer } from '#/lib/data'
+import {
+  addVariant as adSetAddVariant,
+  removeVariant as adSetRemoveVariant,
+  reapplyVariantLayout,
+  breakLayerLink,
+  relinkLayer as adSetRelinkLayer,
+  diffAndSync,
+  findVariant,
+} from '#/lib/adset'
 import { usePrefs } from '#/store/prefs'
 import {
   createGroupFromSelection,
@@ -28,6 +37,8 @@ import { estimateTextBoxSize } from '#/lib/shadows'
 
 export interface HistoryEntry {
   project: Project
+  adSet: AdSet | null
+  activeVariantId: string | null
   selectedId: string | null
   selectedIds: string[]
 }
@@ -42,6 +53,8 @@ export interface EyedropperSession {
 
 interface State {
   project: Project
+  adSet: AdSet | null
+  activeVariantId: string | null
   past: HistoryEntry[]
   future: HistoryEntry[]
   selectedId: string | null
@@ -119,6 +132,12 @@ type Action =
   | { t: 'updateEyedropperColor'; color: string }
   | { t: 'cancelEyedropper' }
   | { t: 'finishEyedropper' }
+  | { t: 'switchVariant'; id: string }
+  | { t: 'addVariant'; preset: Preset }
+  | { t: 'removeVariant'; id: string }
+  | { t: 'reapplyVariant'; id?: string }
+  | { t: 'breakLink'; layerId?: string }
+  | { t: 'relinkLayer'; layerId?: string }
   | { t: 'undo' }
   | { t: 'redo' }
   | { t: 'checkpoint' }
@@ -1059,6 +1078,74 @@ function innerReducer(state: State, a: Action): State {
         tool: null,
       }
     }
+    case 'switchVariant': {
+      if (!state.adSet) return state
+      const v = findVariant(state.adSet, a.id)
+      if (!v || v.id === state.activeVariantId) return state
+      return { ...state, project: v, activeVariantId: v.id, selectedId: null, selectedIds: [] }
+    }
+    case 'addVariant': {
+      if (!state.adSet) return state
+      const nextAdSet = adSetAddVariant(state.adSet, a.preset)
+      if (nextAdSet === state.adSet) return state
+      const v = nextAdSet.variants[nextAdSet.variants.length - 1]
+      return {
+        ...state,
+        adSet: nextAdSet,
+        project: v,
+        activeVariantId: v.id,
+        selectedId: null,
+        selectedIds: [],
+      }
+    }
+    case 'removeVariant': {
+      if (!state.adSet) return state
+      const nextAdSet = adSetRemoveVariant(state.adSet, a.id)
+      if (nextAdSet === state.adSet) return state
+      const removedActive = state.activeVariantId === a.id
+      const fallback = nextAdSet.variants[0]
+      return {
+        ...state,
+        adSet: nextAdSet,
+        project: removedActive ? fallback : state.project,
+        activeVariantId: removedActive ? fallback.id : state.activeVariantId,
+        selectedId: null,
+        selectedIds: [],
+      }
+    }
+    case 'reapplyVariant': {
+      if (!state.adSet) return state
+      const targetId = a.id ?? state.activeVariantId ?? state.project.id
+      const nextAdSet = reapplyVariantLayout(state.adSet, targetId)
+      if (nextAdSet === state.adSet) return state
+      const v = findVariant(nextAdSet, targetId)
+      if (!v) return state
+      return {
+        ...state,
+        adSet: nextAdSet,
+        project: targetId === state.activeVariantId ? v : state.project,
+        selectedId: null,
+        selectedIds: [],
+      }
+    }
+    case 'breakLink': {
+      if (!state.adSet || !state.activeVariantId) return state
+      const layerId = a.layerId ?? state.selectedId
+      if (!layerId) return state
+      const nextAdSet = breakLayerLink(state.adSet, state.activeVariantId, layerId)
+      const v = findVariant(nextAdSet, state.activeVariantId)
+      if (!v) return state
+      return { ...state, adSet: nextAdSet, project: v }
+    }
+    case 'relinkLayer': {
+      if (!state.adSet || !state.activeVariantId) return state
+      const layerId = a.layerId ?? state.selectedId
+      if (!layerId) return state
+      const nextAdSet = adSetRelinkLayer(state.adSet, state.activeVariantId, layerId)
+      const v = findVariant(nextAdSet, state.activeVariantId)
+      if (!v) return state
+      return { ...state, adSet: nextAdSet, project: v }
+    }
     default:
       return state
   }
@@ -1073,6 +1160,8 @@ function reducer(state: State, a: Action): State {
     const newPast = state.past.slice(0, -1)
     const currentEntry: HistoryEntry = {
       project: state.project,
+      adSet: state.adSet,
+      activeVariantId: state.activeVariantId,
       selectedId: state.selectedId,
       selectedIds: state.selectedIds,
     }
@@ -1088,6 +1177,8 @@ function reducer(state: State, a: Action): State {
     return {
       ...state,
       project: prev.project,
+      adSet: prev.adSet,
+      activeVariantId: prev.activeVariantId,
       selectedId: newSelectedId,
       selectedIds: newSelectedIds,
       past: newPast,
@@ -1103,6 +1194,8 @@ function reducer(state: State, a: Action): State {
     const newFuture = state.future.slice(0, -1)
     const currentEntry: HistoryEntry = {
       project: state.project,
+      adSet: state.adSet,
+      activeVariantId: state.activeVariantId,
       selectedId: state.selectedId,
       selectedIds: state.selectedIds,
     }
@@ -1118,6 +1211,8 @@ function reducer(state: State, a: Action): State {
     return {
       ...state,
       project: next.project,
+      adSet: next.adSet,
+      activeVariantId: next.activeVariantId,
       selectedId: newSelectedId,
       selectedIds: newSelectedIds,
       past: newPast,
@@ -1148,15 +1243,30 @@ function reducer(state: State, a: Action): State {
     a.t === 'setImagePositioningId' ||
     a.t === 'setAnimationSide' ||
     a.t === 'startEyedropper' ||
-    a.t === 'finishEyedropper'
+    a.t === 'finishEyedropper' ||
+    a.t === 'switchVariant'
   ) {
     return innerReducer(state, a)
   }
 
   // Mutating action: run inner reducer to calculate new state
-  const nextState = innerReducer(state, a)
-  if (nextState.project === state.project) {
+  let nextState = innerReducer(state, a)
+  if (nextState.project === state.project && nextState.adSet === state.adSet) {
     return nextState
+  }
+
+  // Layer-level edit inside an ad set: run the cross-variant link diff so
+  // master content edits propagate and variant edits detach. Actions that
+  // manage the ad set themselves (add/remove/reapply/link) set adSet
+  // directly and skip this step.
+  if (state.adSet && nextState.adSet === state.adSet && nextState.project !== state.project) {
+    const activeId = state.activeVariantId ?? state.project.id
+    const synced = diffAndSync(state.project, nextState.project, state.adSet, activeId)
+    nextState = {
+      ...nextState,
+      project: synced.project,
+      adSet: { ...state.adSet, variants: synced.variants, updatedAt: Date.now() },
+    }
   }
 
   const now = Date.now()
@@ -1196,6 +1306,8 @@ function reducer(state: State, a: Action): State {
 
   const snapshot: HistoryEntry = {
     project: state.project,
+    adSet: state.adSet,
+    activeVariantId: state.activeVariantId,
     selectedId: state.selectedId,
     selectedIds: state.selectedIds,
   }
@@ -1215,9 +1327,16 @@ interface Ctx extends State {
   selectedIds: string[]
   canUndo: boolean
   canRedo: boolean
+  isMaster: boolean
   undo: () => void
   redo: () => void
   checkpoint: () => void
+  switchVariant: (id: string) => void
+  addVariant: (preset: Preset) => void
+  removeVariant: (id: string) => void
+  reapplyVariant: (id?: string) => void
+  breakLink: (layerId?: string) => void
+  relinkLayer: (layerId?: string) => void
   select: (id: string | null, additive?: boolean, ids?: string[]) => void
   toggleSelect: (id: string) => void
   alignSelected: (mode: AlignMode, measured?: Record<string, { x: number; y: number; w: number; h: number }>, targetGroupId?: string) => void
@@ -1279,9 +1398,11 @@ interface Ctx extends State {
 
 const EditorCtx = createContext<Ctx | null>(null)
 
-export function EditorProvider({ project, children }: { project: Project; children: React.ReactNode }) {
+export function EditorProvider({ adSet: initialAdSet, children }: { adSet: AdSet; children: React.ReactNode }) {
   const [state, dispatch] = useReducer(reducer, {
-    project,
+    project: initialAdSet.variants[0],
+    adSet: initialAdSet,
+    activeVariantId: initialAdSet.variants[0].id,
     past: [],
     future: [],
     selectedId: null,
@@ -1305,6 +1426,12 @@ export function EditorProvider({ project, children }: { project: Project; childr
   const undo = useCallback(() => dispatch({ t: 'undo' }), [])
   const redo = useCallback(() => dispatch({ t: 'redo' }), [])
   const checkpoint = useCallback(() => dispatch({ t: 'checkpoint' }), [])
+  const switchVariant = useCallback((id: string) => dispatch({ t: 'switchVariant', id }), [])
+  const addVariant = useCallback((preset: Preset) => dispatch({ t: 'addVariant', preset }), [])
+  const removeVariant = useCallback((id: string) => dispatch({ t: 'removeVariant', id }), [])
+  const reapplyVariant = useCallback((id?: string) => dispatch({ t: 'reapplyVariant', id }), [])
+  const breakLink = useCallback((layerId?: string) => dispatch({ t: 'breakLink', layerId }), [])
+  const relinkLayer = useCallback((layerId?: string) => dispatch({ t: 'relinkLayer', layerId }), [])
 
   const select = useCallback((id: string | null, additive = false, ids?: string[]) => dispatch({ t: 'select', id, additive, ids }), [])
   const toggleSelect = useCallback((id: string) => dispatch({ t: 'toggleSelect', id }), [])
@@ -1460,9 +1587,16 @@ export function EditorProvider({ project, children }: { project: Project; childr
       selectedIds: state.selectedIds,
       canUndo: state.past.length > 0,
       canRedo: state.future.length > 0,
+      isMaster: !state.adSet || (state.adSet.variants[0]?.id ?? null) === state.activeVariantId,
       undo,
       redo,
       checkpoint,
+      switchVariant,
+      addVariant,
+      removeVariant,
+      reapplyVariant,
+      breakLink,
+      relinkLayer,
       select,
       toggleSelect,
       alignSelected,
@@ -1521,6 +1655,12 @@ export function EditorProvider({ project, children }: { project: Project; childr
       undo,
       redo,
       checkpoint,
+      switchVariant,
+      addVariant,
+      removeVariant,
+      reapplyVariant,
+      breakLink,
+      relinkLayer,
       select,
       toggleSelect,
       alignSelected,

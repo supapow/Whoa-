@@ -6,12 +6,14 @@ import {
   Wand2, Globe, FileUp, Pipette, Search, Sparkles, Contrast, Scissors,
 } from 'lucide-react'
 import ColorPicker from '#/components/editor/ColorPicker'
+import BottomSheet from '#/components/BottomSheet'
 import { DEFAULT_DROP_SHADOW, DEFAULT_INNER_SHADOW } from '#/lib/shadows'
 import { useEditor } from '#/store/editor'
-import type { ShapeKind, Layer, LayerGradient, BlurFade, ShadowEffect, VectorPoint } from '#/types'
+import type { ShapeKind, Layer, LayerGradient, BlurFade, ShadowEffect, VectorPoint, AdSet, Preset } from '#/types'
 import { hasKeyframeAt, getAdjacentKeyframes, interpolateKeyframes } from '#/lib/keyframes'
 import {
   PALETTE, GRADIENTS, BG_IMAGES, STOCK_IMAGES, STICKERS, SHAPES,
+  DIV_BUTTON_PRESETS, VECTOR_BUTTON_PRESETS,
 } from '#/lib/data'
 import {
   LAYER_GRADIENT_PRESETS, BG_FADE_PRESETS, layerGradientToCss, defaultGradientForLayerType,
@@ -23,6 +25,7 @@ import {
   parseGoogleFontsInput, verifyGoogleFontExists,
 } from '#/lib/fonts'
 import GoogleFontsSearchView from '#/components/editor/GoogleFontsSearchView'
+import type { DivButtonPreset, VectorButtonPreset } from '#/lib/data'
 import { getLibraryComponents, deleteComponentFromLibrary, type ComponentItem } from '#/lib/groups'
 import {
   VECTOR_PRESETS, convertShapeToVector, buildSvgPath, tightenVectorLayer, simplifyVectorPoints,
@@ -33,7 +36,7 @@ import {
 const TITLES: Record<string, string> = {
   text: 'Add Text', elements: 'Elements', stickers: 'Stickers', image: 'Image',
   components: 'Components Library',
-  background: 'Background', layers: 'Layers', font: 'Font', color: 'Color',
+  background: 'Background', layers: 'Layers', font: 'Font', color: 'Color', fill: 'Button Fill', buttons: 'Buttons',
   blur: 'Blur & Effects',
   effects: 'Effects',
   style: 'Text Style', align: 'Alignment', shape: 'Shape', radius: 'Corner Radius',
@@ -60,9 +63,11 @@ export default function ToolSheet() {
   const sheetHeightClass = isFullHeightFont ? 'max-h-[85vh] h-[82vh] pb-8' : 'max-h-[40vh] pb-4'
 
   return (
-    <div className="absolute inset-0 z-60 flex flex-col justify-end" data-testid="tool-sheet">
-      <div className="absolute inset-0 bg-black/40 animate-fade" onClick={() => openTool(null)} />
-      <div className={`animate-sheet relative ${sheetHeightClass} overflow-y-auto rounded-t-3xl border-t border-line bg-surface no-scrollbar`}>
+    <BottomSheet
+      testid="tool-sheet"
+      onClose={() => openTool(null)}
+      containerClass={`${sheetHeightClass} overflow-y-auto no-scrollbar`}
+    >
         <div className={`sticky top-0 flex items-center justify-between bg-surface px-5 ${isFont && !isFullHeightFont ? 'pt-3 pb-2' : 'pt-4 pb-3'} z-10 border-b border-line/40`}>
           <div className="flex items-center gap-2">
             {isFullHeightFont && (
@@ -87,8 +92,7 @@ export default function ToolSheet() {
         <div className="px-5">
           <PanelBody tool={tool} fontSubView={fontSubView} setFontSubView={setFontSubView} />
         </div>
-      </div>
-    </div>
+    </BottomSheet>
   )
 }
 
@@ -102,12 +106,13 @@ function PanelBody({
   setFontSubView?: (v: 'standard' | 'googleSearch') => void
 }) {
   const { selected, updateLayer } = useEditor()
-  const needsLayer = ['font', 'color', 'blur', 'effects', 'style', 'align', 'shape', 'radius', 'animate', 'mask', 'crop', 'vector', 'convertText']
+  const needsLayer = ['font', 'color', 'fill', 'blur', 'effects', 'style', 'align', 'shape', 'radius', 'animate', 'mask', 'crop', 'vector', 'convertText']
   if (needsLayer.includes(tool) && !selected) {
     return <MockPanel text="Select a layer on the canvas first." />
   }
   switch (tool) {
     case 'text': return <TextAdd />
+    case 'buttons': return <Buttons />
     case 'elements': return <Elements />
     case 'stickers': return <Stickers />
     case 'image': return <Images />
@@ -137,6 +142,7 @@ function PanelBody({
       )
     }
     case 'color': return <ColorPanel />
+    case 'fill': return <ColorPanel forceKey="fill" />
     case 'blur': return <BlurPanel />
     case 'effects': return <EffectsPanel />
     case 'style': return <StylePanel />
@@ -155,6 +161,64 @@ function PanelBody({
 /* ---------- Grid helper ---------- */
 function Grid({ children, cols = 4 }: { children: React.ReactNode; cols?: number }) {
   return <div className={`grid gap-3 pb-4`} style={{ gridTemplateColumns: `repeat(${cols}, minmax(0,1fr))` }}>{children}</div>
+}
+
+/** Largest artboard in the ad set — source images should cover at least this. */
+function largestAdSize(adSet: AdSet | null, fallback: Preset): { w: number; h: number } {
+  if (!adSet || adSet.variants.length === 0) return { w: fallback.w, h: fallback.h }
+  return {
+    w: Math.max(...adSet.variants.map((v) => v.preset.w)),
+    h: Math.max(...adSet.variants.map((v) => v.preset.h)),
+  }
+}
+
+function ImageSizeTip({ adSet, fallback }: { adSet: AdSet | null; fallback: Preset }) {
+  const m = largestAdSize(adSet, fallback)
+  return (
+    <p data-testid="image-size-tip" className="mb-3 rounded-xl border border-line bg-surface2/60 px-3 py-2 text-[11px] leading-snug text-txt2">
+      For sharp results, use source images at least <strong className="text-txt">{m.w}×{m.h}px</strong>
+      {adSet && adSet.variants.length > 1 ? ' — the largest size in this ad set' : ''}. Smaller images get upscaled and turn soft.
+    </p>
+  )
+}
+
+/** Natural pixel dimensions of a remote image, cached per URL. */
+const imageSizeCache = new Map<string, { w: number; h: number } | null>()
+
+function useImageSize(src: string): { w: number; h: number } | null | undefined {
+  const [size, setSize] = useState<{ w: number; h: number } | null | undefined>(
+    imageSizeCache.has(src) ? imageSizeCache.get(src) : undefined,
+  )
+  useEffect(() => {
+    if (imageSizeCache.has(src)) {
+      setSize(imageSizeCache.get(src))
+      return
+    }
+    let live = true
+    const img = new Image()
+    img.onload = () => {
+      const dims = { w: img.naturalWidth, h: img.naturalHeight }
+      imageSizeCache.set(src, dims)
+      if (live) setSize(dims)
+    }
+    img.onerror = () => {
+      imageSizeCache.set(src, null)
+      if (live) setSize(null)
+    }
+    img.src = src
+    return () => { live = false }
+  }, [src])
+  return size
+}
+
+function ImageSizeBadge({ src }: { src: string }) {
+  const size = useImageSize(src)
+  if (!size) return null
+  return (
+    <span className="pointer-events-none absolute bottom-1 right-1 rounded bg-black/55 px-1 py-px text-[9px] font-semibold text-white/90">
+      {size.w}×{size.h}
+    </span>
+  )
 }
 
 /* ---------- Add panels ---------- */
@@ -371,6 +435,147 @@ function ShapeGlyph({ kind }: { kind: ShapeKind }) {
   return <div className="h-7 w-7 rounded-none bg-white" />
 }
 
+function Buttons() {
+  const { addLayer, openTool, project } = useEditor()
+  const preset = project.preset
+
+  const addDiv = (p: DivButtonPreset) => {
+    addLayer('button', {
+      name: p.name,
+      text: p.text,
+      fill: p.fill,
+      fillGradient: p.fillGradient,
+      color: p.color,
+      radius: p.radius,
+      stroke: p.stroke,
+      strokeWidth: p.strokeWidth,
+      ...(p.shadow ? { dropShadow: { ...DEFAULT_DROP_SHADOW } } : {}),
+    })
+    openTool(null)
+  }
+
+  const addVector = (p: VectorButtonPreset) => {
+    const vp = VECTOR_PRESETS.find((v) => v.id === p.vectorId)
+    if (!vp) return
+    const aspect = (vp.defaultH || 120) / Math.max(1, vp.defaultW || 180)
+    let w = Math.round(preset.w * 0.55)
+    let h = Math.round(w * aspect)
+    const maxH = Math.round(preset.h * 0.6)
+    if (h > maxH) {
+      h = maxH
+      w = Math.max(40, Math.round(h / aspect))
+    }
+    addLayer('button', {
+      name: p.name,
+      text: p.text,
+      fill: p.fill,
+      color: p.color,
+      fontSize: Math.max(10, Math.round(Math.min(w, h) * 0.2)),
+      fontWeight: 800,
+      align: 'center',
+      w,
+      h,
+      closed: vp.closed,
+      points: vp.getPoints(w, h),
+      fillRule: 'nonzero',
+    })
+    openTool(null)
+  }
+
+  return (
+    <div className="pb-6">
+      <div className="grid grid-cols-2 gap-3 sm:gap-4 items-start">
+        {/* COLUMN 1: Div Buttons */}
+        <div className="sticky top-0 self-start">
+          <div className="mb-2.5 flex items-center justify-between">
+            <span className="text-xs font-bold uppercase tracking-wider text-txt3">Div Buttons</span>
+            <span className="text-[10px] text-txt3">{DIV_BUTTON_PRESETS.length}</span>
+          </div>
+          <div className="grid grid-cols-1 gap-2">
+            {DIV_BUTTON_PRESETS.map((p) => (
+              <button
+                key={p.id}
+                data-testid={`add-button-${p.id}`}
+                id={`add-button-${p.id}`}
+                aria-label={p.name}
+                title={p.name}
+                onClick={() => addDiv(p)}
+                className="grid place-items-center rounded-2xl bg-surface2 px-2 py-2.5 transition-all hover:bg-surface2/75 active:scale-95 cursor-pointer"
+              >
+                <span
+                  style={{
+                    background: p.fillGradient ? layerGradientToCss(p.fillGradient) : p.fill,
+                    color: p.color,
+                    borderRadius: p.radius >= 9999 ? 9999 : p.radius,
+                    boxShadow: [
+                      p.strokeWidth ? `inset 0 0 0 ${p.strokeWidth}px ${p.stroke || '#000'}` : null,
+                      p.shadow ? '0 4px 12px rgba(0,0,0,0.45)' : null,
+                    ].filter(Boolean).join(', ') || undefined,
+                    fontSize: 11,
+                    fontWeight: 800,
+                    padding: '7px 14px',
+                    maxWidth: '100%',
+                    overflow: 'hidden',
+                    textOverflow: 'ellipsis',
+                    whiteSpace: 'nowrap',
+                  }}
+                >
+                  {p.text}
+                </span>
+              </button>
+            ))}
+          </div>
+        </div>
+
+        {/* COLUMN 2: Vector Buttons */}
+        <div>
+          <div className="mb-2.5 flex items-center justify-between">
+            <span className="text-xs font-bold uppercase tracking-wider text-txt3">Vector Buttons</span>
+            <span className="text-[10px] text-indigo-400 font-medium">{VECTOR_BUTTON_PRESETS.length}</span>
+          </div>
+          <div className="grid grid-cols-2 gap-2">
+            {VECTOR_BUTTON_PRESETS.map((p) => {
+              const vp = VECTOR_PRESETS.find((v) => v.id === p.vectorId)
+              if (!vp) return null
+              const baseW = 120
+              const baseH = Math.round(120 * ((vp.defaultH || 120) / Math.max(1, vp.defaultW || 180)))
+              const previewPts = vp.getPoints(baseW, baseH)
+              const bbox = getVectorBoundingBox(previewPts, vp.closed)
+              const pad = Math.max(bbox.width, bbox.height) * 0.08
+              const pathD = buildSvgPath(previewPts, vp.closed, baseW, baseH)
+              return (
+                <button
+                  key={p.id}
+                  data-testid={`add-button-${p.id}`}
+                  id={`add-button-${p.id}`}
+                  aria-label={p.name}
+                  title={p.name}
+                  onClick={() => addVector(p)}
+                  className="relative grid place-items-center rounded-2xl bg-surface2 transition-all hover:bg-surface2/75 active:scale-90 cursor-pointer aspect-square p-1"
+                >
+                  <svg
+                    viewBox={`${bbox.minX - pad} ${bbox.minY - pad} ${bbox.width + pad * 2} ${bbox.height + pad * 2}`}
+                    className="h-full w-full"
+                    preserveAspectRatio="xMidYMid meet"
+                  >
+                    <path d={pathD} fill={p.fill} strokeLinejoin="round" />
+                  </svg>
+                  <span
+                    className="pointer-events-none absolute inset-0 grid place-items-center px-2 text-center font-extrabold"
+                    style={{ color: p.color, fontSize: 9, lineHeight: 1.1 }}
+                  >
+                    {p.text}
+                  </span>
+                </button>
+              )
+            })}
+          </div>
+        </div>
+      </div>
+    </div>
+  )
+}
+
 function Stickers() {
   const { selected, addLayer, updateLayer, openTool } = useEditor()
   const pick = (emoji: string) => {
@@ -394,7 +599,7 @@ function Stickers() {
 }
 
 function Images() {
-  const { selected, addLayer, updateLayer, openTool } = useEditor()
+  const { selected, addLayer, updateLayer, openTool, adSet, project } = useEditor()
   const fileRef = useRef<HTMLInputElement>(null)
   const apply = (src: string) => {
     if (selected && selected.type === 'image') { updateLayer(selected.id, { src }); openTool(null) }
@@ -463,6 +668,7 @@ function Images() {
         <Upload className="h-4 w-4" /> Upload from device
       </button>
       <input ref={fileRef} type="file" accept="image/*" hidden onChange={onFile} data-testid="file-input" />
+      <ImageSizeTip adSet={adSet} fallback={project.preset} />
       <p className="mb-2 text-xs font-semibold uppercase tracking-wider text-txt3">Stock</p>
       <Grid cols={3}>
         {STOCK_IMAGES.map((src, i) => (
@@ -470,9 +676,10 @@ function Images() {
             key={i}
             data-testid={`stock-image-${i}`}
             onClick={() => apply(src)}
-            className="aspect-square overflow-hidden rounded-xl border border-line active:border-accent"
+            className="relative aspect-square overflow-hidden rounded-xl border border-line active:border-accent"
           >
             <img src={src} alt="" draggable={false} className="pointer-events-none h-full w-full select-none object-cover" />
+            <ImageSizeBadge src={src} />
           </button>
         ))}
       </Grid>
@@ -482,7 +689,7 @@ function Images() {
 
 /* ---------- Background ---------- */
 function BackgroundPanel() {
-  const { setBackground, project, startEyedropper } = useEditor()
+  const { setBackground, project, startEyedropper, adSet } = useEditor()
   const [isBgPickerExpanded, setIsBgPickerExpanded] = useState(false)
   const [customGrad, setCustomGrad] = useState<LayerGradient | null>(null)
   const cur = project.background.value
@@ -496,9 +703,9 @@ function BackgroundPanel() {
     })
   }
 
-  const Swatch = ({ active, onClick, style, tid, children }: any) => (
+  const Swatch = ({ active, onClick, style, tid, children, badge }: any) => (
     <button onClick={onClick} data-testid={tid} style={style}
-      className={`aspect-square rounded-xl border-2 transition-transform active:scale-95 ${active ? 'border-accent' : 'border-line'}`}>{children}</button>
+      className={`relative aspect-square rounded-xl border-2 transition-transform active:scale-95 ${active ? 'border-accent' : 'border-line'}`}>{children}{badge}</button>
   )
   return (
     <div className="space-y-5 pb-4">
@@ -606,10 +813,12 @@ function BackgroundPanel() {
       </div>
       <div>
         <p className="mb-2 text-xs font-semibold uppercase tracking-wider text-txt3">Image</p>
+        <ImageSizeTip adSet={adSet} fallback={project.preset} />
         <Grid cols={4}>
           {BG_IMAGES.map((src, i) => (
             <Swatch key={i} tid={`bg-image-${i}`} active={cur === src} onClick={() => setBackground({ type: 'image', value: src })}
-              style={{ backgroundImage: `url(${src})`, backgroundSize: 'cover', backgroundPosition: 'center' }} />
+              style={{ backgroundImage: `url(${src})`, backgroundSize: 'cover', backgroundPosition: 'center' }}
+              badge={<ImageSizeBadge src={src} />} />
           ))}
         </Grid>
       </div>
@@ -811,10 +1020,11 @@ function LayersPanel() {
   const {
     project, selectedId, selectedIds, select, updateLayer, deleteLayer,
     reorder, createGroup, maskSelection, unmaskGroup, ungroup, saveAsComponent, toggleGroupCollapse,
+    isMaster, breakLink, relinkLayer,
   } = useEditor()
 
   const label = (l: any) =>
-    l.type === 'text' ? (l.text || 'Text').slice(0, 18) : l.type === 'sticker' ? `Sticker ${l.emoji}` : l.name
+    l.type === 'text' ? (l.text || 'Text').slice(0, 18) : l.type === 'button' ? (l.text || 'Button').slice(0, 18) : l.type === 'sticker' ? `Sticker ${l.emoji}` : l.name
 
   // Hierarchical list of layers
   const layerMap = new Map(project.layers.map((l) => [l.id, l]))
@@ -871,6 +1081,43 @@ function LayersPanel() {
           <span className="flex-1 truncate text-xs font-medium">
             {label(layer)}
           </span>
+
+          {!isMaster && Boolean(layer.masterId) && (layer.layoutDetached || layer.contentDetached) && (
+            <span
+              className="rounded bg-amber-500/30 px-1.5 py-0.5 text-[9px] font-bold text-amber-200"
+              title={layer.contentDetached ? 'Content unlinked from master' : 'Layout adjusted for this size'}
+            >
+              {layer.contentDetached ? 'UNLINKED' : 'ADJUSTED'}
+            </span>
+          )}
+
+          {!isMaster && Boolean(layer.masterId) && (layer.layoutDetached || layer.contentDetached) && (
+            <button
+              data-testid={`layer-relink-${layer.id}`}
+              onClick={(e) => {
+                e.stopPropagation()
+                relinkLayer(layer.id)
+              }}
+              className="rounded bg-surface px-1.5 py-0.5 text-[10px] text-txt2 hover:text-white"
+              title="Re-link to master (re-scale this layer)"
+            >
+              Re-link
+            </button>
+          )}
+
+          {!isMaster && Boolean(layer.masterId) && !layer.layoutDetached && !layer.contentDetached && (
+            <button
+              data-testid={`layer-unlink-${layer.id}`}
+              onClick={(e) => {
+                e.stopPropagation()
+                breakLink(layer.id)
+              }}
+              className="rounded bg-surface px-1.5 py-0.5 text-[10px] text-txt2 hover:text-white"
+              title="Unlink from master"
+            >
+              Unlink
+            </button>
+          )}
 
           {isMask && (
             <span className="rounded bg-teal-500/30 px-1.5 py-0.5 text-[9px] font-bold text-teal-200">
@@ -1534,13 +1781,13 @@ function GradientEditor({
   )
 }
 
-function ColorPanel() {
+function ColorPanel({ forceKey }: { forceKey?: 'fill' | 'stroke' | 'color' }) {
   const { selected, selectedIds, updateLayers, updateLayer, time, startEyedropper } = useEditor()
   const [colorMode, setColorMode] = useState<'fill' | 'stroke'>('fill')
   const [isPickerExpanded, setIsPickerExpanded] = useState(false)
   const l = selected!
   const isPath = l.type === 'path'
-  const key = isPath ? (colorMode === 'stroke' ? 'stroke' : 'fill') : (l.type === 'shape' ? 'fill' : 'color')
+  const key = forceKey ?? (isPath ? (colorMode === 'stroke' ? 'stroke' : 'fill') : (l.type === 'shape' ? 'fill' : 'color'))
   const effective = l && l.keyframes && l.keyframes.length > 0 ? interpolateKeyframes(l, time) : l
   const cur = (effective as any)?.[key] || (l as any)?.[key]
   const up = (patch: Record<string, any>) => {

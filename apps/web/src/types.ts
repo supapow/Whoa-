@@ -1,4 +1,4 @@
-export type LayerType = 'text' | 'shape' | 'path' | 'image' | 'sticker' | 'group'
+export type LayerType = 'text' | 'shape' | 'path' | 'image' | 'sticker' | 'button' | 'group'
 export type ShapeKind = 'rect' | 'rectangle' | 'pill' | 'circle' | 'triangle' | 'star' | 'line'
 export type BgType = 'color' | 'gradient' | 'image'
 
@@ -145,6 +145,10 @@ export interface Layer {
   }
   lockProportions?: boolean
   aspectRatio?: number
+  // cross-variant links (creative scaling)
+  masterId?: string
+  layoutDetached?: boolean
+  contentDetached?: boolean
   // group / component hierarchy
   groupId?: string
   // A mask is rendered above the sibling layers it clips. Multiple masks are supported.
@@ -171,5 +175,13 @@ export interface Project {
   layers: Layer[]
   duration: number // ms
   mode: 'static' | 'animated'
+  updatedAt: number
+}
+
+export interface AdSet {
+  id: string
+  name: string
+  masterPresetId: string
+  variants: Project[]
   updatedAt: number
 }

@@ -14,6 +14,7 @@ const TRACK_COLOR: Record<string, string> = {
   shape: 'var(--color-track-shape)',
   image: 'var(--color-track-image)',
   sticker: 'var(--color-track-sticker)',
+  button: 'var(--color-track-shape)',
   group: '#4338CA',
 }
 
@@ -598,8 +599,8 @@ function TimelineRow({
   onTrimGroup: (edge: 'l' | 'r', e: React.PointerEvent) => void
 }) {
   const { layer, depth, isGroup, isComponent, hasChildren, collapsed, effectiveStart, effectiveEnd } = item
-  const label = layer.type === 'text'
-    ? (layer.text || 'Text')
+  const label = layer.type === 'text' || layer.type === 'button'
+    ? (layer.text || (layer.type === 'button' ? 'Button' : 'Text'))
     : layer.type === 'sticker'
       ? `Sticker ${layer.emoji}`
       : layer.name

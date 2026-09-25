@@ -6,9 +6,9 @@ import {
   AlignHorizontalJustifyStart, AlignHorizontalJustifyCenter, AlignHorizontalJustifyEnd,
   AlignVerticalJustifyStart, AlignVerticalJustifyCenter, AlignVerticalJustifyEnd,
   AlignHorizontalDistributeCenter, AlignVerticalDistributeCenter,
-  Magnet, ChevronUp, ChevronDown, Lock, Unlock,
+  Lock, Unlock,
   Move, ArrowUpToLine, ArrowDownToLine, ArrowLeftToLine, ArrowRightToLine, Maximize2, Expand,
-  Droplet, PenTool, Download, Spline, Pipette, SunMedium,
+  Droplet, PenTool, Download, Spline, Pipette, SunMedium, RectangleHorizontal, ListVideo,
 } from 'lucide-react'
 import { useEditor, type AlignMode } from '#/store/editor'
 import { parseImagePosition } from '#/lib/imagePosition'
@@ -18,7 +18,7 @@ type Item = { key: string; label: string; icon: React.ReactNode; onClick?: () =>
 export default function Toolbar({ onExport }: { onExport?: () => void }) {
   const {
     project, selected, selectedIds, alignSelected, openTool, addLayer, deleteLayer, deleteLayers, duplicate, reorder,
-    createGroup, maskSelection, unmaskGroup, ungroup, saveAsComponent, artboardSnap, setArtboardSnap,
+    createGroup, maskSelection, unmaskGroup, ungroup, saveAsComponent,
     timelineOpen, toggleTimeline, updateLayer, imagePositioningId, setImagePositioningId,
     vectorEditingId, setVectorEditingId, startEyedropper,
   } = useEditor()
@@ -343,9 +343,14 @@ export default function Toolbar({ onExport }: { onExport?: () => void }) {
         icon: <Type />,
         onClick: () => addLayer('text'),
       },
+      {
+        key: 'buttons',
+        label: 'Buttons',
+        icon: <RectangleHorizontal />,
+      },
       { key: 'elements', label: 'Elements', icon: <Shapes /> },
-      { key: 'stickers', label: 'Stickers', icon: <Sticker /> },
       { key: 'image', label: 'Image', icon: <ImageIcon /> },
+      { key: 'stickers', label: 'Stickers', icon: <Sticker /> },
       { key: 'components', label: 'Components', icon: <ComponentIcon /> },
       { key: 'background', label: 'Background', icon: <Palette /> },
       { key: 'layers', label: 'Layers', icon: <LayersIcon /> },
@@ -420,6 +425,17 @@ export default function Toolbar({ onExport }: { onExport?: () => void }) {
           accent: true,
           onClick: () => openTool('convertText'),
         },
+        ...common,
+      ]
+    } else if (selected.type === 'button') {
+      items = [
+        { key: 'font', label: 'Font', icon: <Type /> },
+        { key: 'color', label: 'Label', icon: <PaintBucket /> },
+        { key: 'fill', label: 'Fill', icon: <PaintBucket /> },
+        { key: 'style', label: 'Style', icon: <Bold /> },
+        { key: 'align', label: 'Align', icon: <AlignLeft /> },
+        { key: 'radius', label: 'Corners', icon: <Square /> },
+        { key: 'mask', label: 'Mask', icon: <Scissors />, onClick: handleMask },
         ...common,
       ]
     } else if (selected.type === 'shape') {
@@ -560,7 +576,6 @@ export default function Toolbar({ onExport }: { onExport?: () => void }) {
       >
         <span className="[&>svg]:h-5 [&>svg]:w-5 flex items-center justify-center">{it.icon}</span>
         <span className="text-[10px] font-medium flex items-center justify-center gap-0.5">
-          {isTimeline && <span className="text-[9px] font-bold">^</span>}
           <span>{it.label}</span>
         </span>
       </button>
@@ -577,18 +592,10 @@ export default function Toolbar({ onExport }: { onExport?: () => void }) {
     return button
   }
 
-  const snapItem: Item = {
-    key: 'artboard-snap',
-    label: artboardSnap ? 'Snap on' : 'Snap',
-    icon: <Magnet />,
-    active: artboardSnap,
-    onClick: () => setArtboardSnap(!artboardSnap),
-  }
-
   const timelineItem: Item = {
     key: 'timeline',
     label: 'Timeline',
-    icon: timelineOpen ? <ChevronDown className="h-5 w-5" /> : <ChevronUp className="h-5 w-5" />,
+    icon: <ListVideo className="h-5 w-5" />,
     active: timelineOpen,
     onClick: () => toggleTimeline(),
   }
@@ -909,7 +916,6 @@ export default function Toolbar({ onExport }: { onExport?: () => void }) {
         </div>
       )}
       <div className="flex h-16 shrink-0 items-center gap-1 overflow-x-auto border-t border-line bg-toolbar px-2 no-scrollbar" data-testid="toolbar">
-        {renderItem(snapItem)}
         {renderItem(timelineItem)}
         <div className={`flex min-w-0 shrink-0 items-center gap-1 overflow-x-auto no-scrollbar transition-[max-width,opacity,transform] duration-300 ease-out ${isGroup ? 'max-w-[calc(100vw-7rem)] translate-x-0 opacity-100' : 'pointer-events-none max-w-0 -translate-x-3 opacity-0'}`} data-testid="group-alignment-controls" aria-hidden={!isGroup}>
           {groupItems.map(renderItem)}

@@ -9,6 +9,7 @@ import {
   seedProjects,
 } from '#/lib/data'
 import SettingsModal from '#/components/SettingsModal'
+import BottomSheet from '#/components/BottomSheet'
 
 const bgStyle = (v: string) =>
   v.startsWith('http')
@@ -17,7 +18,7 @@ const bgStyle = (v: string) =>
       ? { background: v }
       : { backgroundImage: v }
 
-export default function Home({ onOpen }: { onOpen: (p: Project) => void }) {
+export default function Home({ onOpen, onOpenAdSet }: { onOpen: (p: Project) => void; onOpenAdSet: (ps: Preset[]) => void }) {
   const [recents] = useState(() => seedProjects())
   const [picker, setPicker] = useState(false)
   const [settingsOpen, setSettingsOpen] = useState(false)
@@ -116,7 +117,13 @@ export default function Home({ onOpen }: { onOpen: (p: Project) => void }) {
         </div>
       </main>
 
-      {picker && <PresetPicker onClose={() => setPicker(false)} onPick={(p) => onOpen(newProject(p))} />}
+      {picker && (
+        <PresetPicker
+          onClose={() => setPicker(false)}
+          onPick={(p) => onOpen(newProject(p))}
+          onPickMany={(ps) => onOpenAdSet(ps)}
+        />
+      )}
       <SettingsModal isOpen={settingsOpen} onClose={() => setSettingsOpen(false)} />
     </div>
   )
@@ -131,19 +138,40 @@ function SectionTitle({ icon, title }: { icon: React.ReactNode; title: string })
   )
 }
 
-function PresetPicker({ onClose, onPick }: { onClose: () => void; onPick: (p: Preset) => void }) {
+function PresetPicker({ onClose, onPick, onPickMany }: { onClose: () => void; onPick: (p: Preset) => void; onPickMany: (ps: Preset[]) => void }) {
   const [cat, setCat] = useState(PRESET_CATEGORIES[0])
+  const [multi, setMulti] = useState(false)
+  const [selected, setSelected] = useState<string[]>([])
   const list = PRESETS.filter((p) => p.category === cat)
 
+  const toggleSelect = (id: string) =>
+    setSelected((prev) => (prev.includes(id) ? prev.filter((x) => x !== id) : [...prev, id]))
+
+  const createAdSet = () => {
+    const ordered = selected
+      .map((id) => PRESETS.find((p) => p.id === id)!)
+      .filter(Boolean)
+    if (ordered.length > 0) onPickMany(ordered)
+  }
+
   return (
-    <div className="absolute inset-0 z-50 flex flex-col justify-end" data-testid="preset-picker">
-      <div className="absolute inset-0 bg-black/60 animate-fade" onClick={onClose} />
-      <div className="animate-sheet relative max-h-[82vh] rounded-t-3xl border-t border-line bg-surface text-txt pb-8 shadow-2xl">
+    <BottomSheet testid="preset-picker" z="z-50" onClose={onClose} containerClass="max-h-[82vh] pb-8">
         <div className="flex items-center justify-between px-5 pt-4 pb-3 border-b border-line/40">
-          <h3 className="text-xl font-bold text-txt">Choose a size</h3>
-          <button onClick={onClose} data-testid="picker-close" className="grid h-8 w-8 place-items-center rounded-full bg-surface2 text-txt2 hover:text-txt transition-colors cursor-pointer">
-            <X className="h-4 w-4" />
-          </button>
+          <h3 className="text-xl font-bold text-txt">{multi ? 'Pick sizes (1st = master)' : 'Choose a size'}</h3>
+          <div className="flex items-center gap-2">
+            <button
+              onClick={() => { setMulti((m) => !m); setSelected([]) }}
+              data-testid="picker-multi-toggle"
+              className={`rounded-full px-3 py-1.5 text-xs font-bold transition-colors cursor-pointer ${
+                multi ? 'bg-accent text-white' : 'bg-surface2 text-txt2 hover:text-txt'
+              }`}
+            >
+              {multi ? 'Done' : 'Multi-size'}
+            </button>
+            <button onClick={onClose} data-testid="picker-close" className="grid h-8 w-8 place-items-center rounded-full bg-surface2 text-txt2 hover:text-txt transition-colors cursor-pointer">
+              <X className="h-4 w-4" />
+            </button>
+          </div>
         </div>
 
         <div className="flex gap-2 overflow-x-auto no-scrollbar px-5 pt-3 pb-4">
@@ -162,33 +190,55 @@ function PresetPicker({ onClose, onPick }: { onClose: () => void; onPick: (p: Pr
         </div>
 
         <div className="grid max-h-[52vh] grid-cols-3 gap-3 overflow-y-auto no-scrollbar px-5">
-          {list.map((p) => (
-            <button
-              key={p.id}
-              onClick={() => onPick(p)}
-              data-testid={`preset-${p.id}`}
-              className="flex flex-col items-center gap-2 rounded-2xl border border-line bg-surface2/60 p-3 transition-colors active:border-accent hover:border-line-strong cursor-pointer"
-            >
-              <div className="grid h-16 w-full place-items-center">
-                <div
-                  className="rounded-md border border-line-strong bg-toolbar shadow-2xs"
-                  style={{
-                    aspectRatio: `${p.w}/${p.h}`,
-                    maxWidth: '100%',
-                    maxHeight: '100%',
-                    width: p.w >= p.h ? '100%' : 'auto',
-                    height: p.h > p.w ? '100%' : 'auto',
-                  }}
-                />
-              </div>
-              <div className="text-center">
-                <p className="text-xs font-semibold leading-tight text-txt">{p.label}</p>
-                <p className="text-[10px] text-txt3">{p.w}×{p.h}</p>
-              </div>
-            </button>
-          ))}
+          {list.map((p) => {
+            const order = selected.indexOf(p.id)
+            const isSel = multi && order >= 0
+            return (
+              <button
+                key={p.id}
+                onClick={() => (multi ? toggleSelect(p.id) : onPick(p))}
+                data-testid={`preset-${p.id}`}
+                className={`relative flex flex-col items-center gap-2 rounded-2xl border p-3 transition-colors active:border-accent hover:border-line-strong cursor-pointer ${
+                  isSel ? 'border-accent bg-accent/10' : 'border-line bg-surface2/60'
+                }`}
+              >
+                {isSel && (
+                  <span className="absolute right-2 top-2 grid h-5 w-5 place-items-center rounded-full bg-accent text-[10px] font-black text-white">
+                    {order + 1}
+                  </span>
+                )}
+                <div className="grid h-16 w-full place-items-center">
+                  <div
+                    className="rounded-md border border-line-strong bg-toolbar shadow-2xs"
+                    style={{
+                      aspectRatio: `${p.w}/${p.h}`,
+                      maxWidth: '100%',
+                      maxHeight: '100%',
+                      width: p.w >= p.h ? '100%' : 'auto',
+                      height: p.h > p.w ? '100%' : 'auto',
+                    }}
+                  />
+                </div>
+                <div className="text-center">
+                  <p className="text-xs font-semibold leading-tight text-txt">{p.label}</p>
+                  <p className="text-[10px] text-txt3">{p.w}×{p.h}</p>
+                </div>
+              </button>
+            )
+          })}
         </div>
-      </div>
-    </div>
+        {multi && (
+          <div className="px-5 pt-4">
+            <button
+              onClick={createAdSet}
+              disabled={selected.length === 0}
+              data-testid="picker-create-adset"
+              className="w-full rounded-2xl bg-accent py-3.5 text-sm font-bold text-white transition-transform active:scale-[0.98] disabled:pointer-events-none disabled:opacity-40 cursor-pointer"
+            >
+              {selected.length === 0 ? 'Select sizes to start' : `Create ad set (${selected.length})`}
+            </button>
+          </div>
+        )}
+    </BottomSheet>
   )
 }

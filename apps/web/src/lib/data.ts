@@ -1,4 +1,4 @@
-import type { Preset, Project, Layer, LayerType, Background } from '#/types'
+import type { Preset, Project, Layer, LayerType, Background, LayerGradient } from '#/types'
 
 export const uid = () => Math.random().toString(36).slice(2, 10)
 
@@ -58,20 +58,64 @@ export const GRADIENTS = [
 ]
 
 export const BG_IMAGES = [
-  'https://images.unsplash.com/photo-1635776062043-223faf322554?crop=entropy&cs=srgb&fm=jpg&ixid=M3w4NjAzOTB8MHwxfHNlYXJjaHwzfHxhYnN0cmFjdCUyMHZpYnJhbnQlMjBncmFkaWVudCUyMGJhY2tncm91bmR8ZW58MHx8fHwxNzg3NDkxOTg1fDA&ixlib=rb-4.1.0&q=85',
-  'https://images.unsplash.com/photo-1614849286521-4c58b2f0ff15?crop=entropy&cs=srgb&fm=jpg&ixid=M3w4NjAzOTB8MHwxfHNlYXJjaHw0fHxhYnN0cmFjdCUyMHZpYnJhbnQlMjBncmFkaWVudCUyMGJhY2tncm91bmR8ZW58MHx8fHwxNzg3NDkxOTg1fDA&ixlib=rb-4.1.0&q=85',
-  'https://images.unsplash.com/photo-1635776062127-d379bfcba9f8?crop=entropy&cs=srgb&fm=jpg&ixid=M3w4NjAzOTB8MHwxfHNlYXJjaHwyfHxhYnN0cmFjdCUyMHZpYnJhbnQlMjBncmFkaWVudCUyMGJhY2tncm91bmR8ZW58MHx8fHwxNzg3NDkxOTg1fDA&ixlib=rb-4.1.0&q=85',
-  'https://images.pexels.com/photos/6985132/pexels-photo-6985132.jpeg?auto=compress&cs=tinysrgb&dpr=2&h=650&w=940',
+  'https://images.unsplash.com/photo-1635776062043-223faf322554?crop=entropy&cs=srgb&fm=jpg&ixid=M3w4NjAzOTB8MHwxfHNlYXJjaHwzfHxhYnN0cmFjdCUyMHZpYnJhbnQlMjBncmFkaWVudCUyMGJhY2tncm91bmR8ZW58MHx8fHwxNzg3NDkxOTg1fDA&ixlib=rb-4.1.0&q=85&w=1920',
+  'https://images.unsplash.com/photo-1614849286521-4c58b2f0ff15?crop=entropy&cs=srgb&fm=jpg&ixid=M3w4NjAzOTB8MHwxfHNlYXJjaHw0fHxhYnN0cmFjdCUyMHZpYnJhbnQlMjBncmFkaWVudCUyMGJhY2tncm91bmR8ZW58MHx8fHwxNzg3NDkxOTg1fDA&ixlib=rb-4.1.0&q=85&w=1920',
+  'https://images.unsplash.com/photo-1635776062127-d379bfcba9f8?crop=entropy&cs=srgb&fm=jpg&ixid=M3w4NjAzOTB8MHwxfHNlYXJjaHwyfHxhYnN0cmFjdCUyMHZpYnJhbnQlMjBncmFkaWVudCUyMGJhY2tncm91bmR8ZW58MHx8fHwxNzg3NDkxOTg1fDA&ixlib=rb-4.1.0&q=85&w=1920',
+  'https://images.pexels.com/photos/6985132/pexels-photo-6985132.jpeg?auto=compress&cs=tinysrgb&w=1920',
 ]
 
 export const STOCK_IMAGES = [
-  'https://images.unsplash.com/photo-1624281043172-16ff234c2a14?crop=entropy&cs=srgb&fm=jpg&ixid=M3w4NjA1OTN8MHwxfHNlYXJjaHwxfHxzdW1tZXIlMjBzYWxlJTIwZmFzaGlvbiUyMGxpZmVzdHlsZXxlbnwwfHx8fDE3ODc0OTE5ODV8MA&ixlib=rb-4.1.0&q=85',
-  'https://images.pexels.com/photos/5622839/pexels-photo-5622839.jpeg?auto=compress&cs=tinysrgb&dpr=2&h=650&w=940',
-  'https://images.pexels.com/photos/5625045/pexels-photo-5625045.jpeg?auto=compress&cs=tinysrgb&dpr=2&h=650&w=940',
-  'https://images.unsplash.com/photo-1580828343064-fde4fc206bc6?crop=entropy&cs=srgb&fm=jpg&ixid=M3w4NjA1ODR8MHwxfHNlYXJjaHwxfHxwcm9kdWN0JTIwbWFya2V0aW5nJTIwc2FsZSUyMHByb21vdGlvbnxlbnwwfHx8fDE3ODc0OTE5ODV8MA&ixlib=rb-4.1.0&q=85',
+  'https://images.unsplash.com/photo-1624281043172-16ff234c2a14?crop=entropy&cs=srgb&fm=jpg&ixid=M3w4NjA1OTN8MHwxfHNlYXJjaHwxfHxzdW1tZXIlMjBzYWxlJTIwZmFzaGlvbiUyMGxpZmVzdHlsZXxlbnwwfHx8fDE3ODc0OTE5ODV8MA&ixlib=rb-4.1.0&q=85&w=1920',
+  'https://images.pexels.com/photos/5622839/pexels-photo-5622839.jpeg?auto=compress&cs=tinysrgb&w=1920',
+  'https://images.pexels.com/photos/5625045/pexels-photo-5625045.jpeg?auto=compress&cs=tinysrgb&w=1920',
+  'https://images.unsplash.com/photo-1580828343064-fde4fc206bc6?crop=entropy&cs=srgb&fm=jpg&ixid=M3w4NjA1ODR8MHwxfHNlYXJjaHwxfHxwcm9kdWN0JTIwbWFya2V0aW5nJTIwc2FsZSUyMHByb21vdGlvbnxlbnwwfHx8fDE3ODc0OTE5ODV8MA&ixlib=rb-4.1.0&q=85&w=1920',
 ]
 
 export const STICKERS = ['🔥', '⭐', '✨', '❤️', '👍', '🎉', '💯', '🏷️', '🛒', '⚡', '🎁', '📣', '💥', '✅', '👑', '🚀']
+
+export interface DivButtonPreset {
+  id: string
+  name: string
+  text: string
+  fill?: string
+  fillGradient?: LayerGradient
+  color: string
+  radius: number // 9999 = pill (clamped to half height at render)
+  shadow?: boolean
+  stroke?: string
+  strokeWidth?: number
+}
+
+export interface VectorButtonPreset {
+  id: string
+  name: string
+  vectorId: string // VECTOR_PRESETS id used as the button background
+  text: string
+  fill: string
+  color: string
+}
+
+/** CSS-styled button examples for the Buttons gallery. */
+export const DIV_BUTTON_PRESETS: DivButtonPreset[] = [
+  { id: 'btn-pill', name: 'Pill', text: 'SHOP NOW', fill: '#007AFF', color: '#FFFFFF', radius: 9999 },
+  { id: 'btn-rounded', name: 'Rounded', text: 'LEARN MORE', fill: '#1A1A1A', color: '#FFFFFF', radius: 12 },
+  { id: 'btn-outline', name: 'Outline', text: 'SIGN UP', fill: 'transparent', color: '#FFFFFF', radius: 9999, stroke: '#FFFFFF', strokeWidth: 2 },
+  { id: 'btn-gradient', name: 'Gradient', text: 'GET STARTED', color: '#FFFFFF', radius: 9999, fillGradient: { kind: 'linear', angle: 135, stops: [{ color: '#7C3AED', opacity: 1, at: 0 }, { color: '#EC4899', opacity: 1, at: 100 }] } },
+  { id: 'btn-dark', name: 'Dark', text: 'BUY NOW', fill: '#000000', color: '#FFFFFF', radius: 8 },
+  { id: 'btn-light', name: 'Light', text: 'READ MORE', fill: '#FFFFFF', color: '#111111', radius: 8 },
+  { id: 'btn-shadow', name: 'Shadow', text: 'CLAIM OFFER', fill: '#FF3B30', color: '#FFFFFF', radius: 9999, shadow: true },
+  { id: 'btn-success', name: 'Success', text: 'ADD TO CART', fill: '#34C759', color: '#FFFFFF', radius: 12 },
+]
+
+/** Vector-badge button examples for the Buttons gallery. */
+export const VECTOR_BUTTON_PRESETS: VectorButtonPreset[] = [
+  { id: 'vbtn-burst', name: 'Burst', vectorId: 'sunburst', text: 'SALE!', fill: '#FF3B30', color: '#FFFFFF' },
+  { id: 'vbtn-ribbon', name: 'Ribbon', vectorId: 'badge-ribbon', text: 'NEW', fill: '#007AFF', color: '#FFFFFF' },
+  { id: 'vbtn-tag', name: 'Tag', vectorId: 'tag', text: '-50%', fill: '#FFCC00', color: '#111111' },
+  { id: 'vbtn-arrow', name: 'Arrow', vectorId: 'arrow-right', text: 'SHOP NOW', fill: '#34C759', color: '#FFFFFF' },
+  { id: 'vbtn-shield', name: 'Shield', vectorId: 'shield', text: '100%', fill: '#5856D6', color: '#FFFFFF' },
+  { id: 'vbtn-bubble', name: 'Bubble', vectorId: 'speech-bubble', text: 'HOT!', fill: '#FF9500', color: '#FFFFFF' },
+]
 
 export const SHAPES = ['rectangle', 'rect', 'pill', 'circle', 'triangle', 'star', 'line'] as const
 
@@ -161,6 +205,25 @@ export function createLayer(type: LayerType, preset: Preset, extra: Partial<Laye
       h: s,
       x: (preset.w - s) / 2,
       y: (preset.h - s) / 2,
+    })
+  } else if (type === 'button') {
+    const fs = Math.max(14, Math.round(preset.w * 0.055))
+    const w = Math.round(preset.w * 0.5)
+    const h = Math.round(fs * 2.4)
+    Object.assign(base, {
+      name: 'Button',
+      text: 'SHOP NOW',
+      fontFamily: 'Manrope',
+      fontSize: fs,
+      fontWeight: 800,
+      color: '#FFFFFF',
+      align: 'center',
+      fill: '#007AFF',
+      radius: Math.round(h / 2),
+      w,
+      h,
+      x: (preset.w - w) / 2,
+      y: (preset.h - h) / 2,
     })
   }
   Object.assign(base, extra)
