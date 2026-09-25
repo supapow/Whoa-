@@ -3,6 +3,9 @@
   "exclude": [
     "node_modules",
     "dist",
+    // bun test files import `bun:test`, whose types are not installed here
+    // (adding them would leak Bun globals into the app's type-check).
+    "tests",
     "src/components/ui",
     "src/routes",
     "src/router.tsx",

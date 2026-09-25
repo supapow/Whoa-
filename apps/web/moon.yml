@@ -24,7 +24,9 @@ tasks:
     command: 'bun run test'
     inputs:
       - 'src/**/*'
+      - 'tests/**/*'
       - 'tsconfig.json'
+      - 'package.json'
 
   deploy:
     command: 'bun run deploy'
