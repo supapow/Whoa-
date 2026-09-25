@@ -96,6 +96,71 @@ describe('star corner radius', () => {
   })
 })
 
+describe('rounded corner direction (regression)', () => {
+  const cubicMid = (
+    p0: { x: number; y: number },
+    c1: { x: number; y: number },
+    c2: { x: number; y: number },
+    p3: { x: number; y: number },
+  ) => {
+    const t = 0.5
+    const m = 1 - t
+    return {
+      x: m * m * m * p0.x + 3 * m * m * t * c1.x + 3 * m * t * t * c2.x + t * t * t * p3.x,
+      y: m * m * m * p0.y + 3 * m * m * t * c1.y + 3 * m * t * t * c2.y + t * t * t * p3.y,
+    }
+  }
+
+  // Every rounded corner's arc midpoint must lie strictly between the
+  // vertex and the tangent chord. If reflex (notch) controls point the
+  // wrong way, notch arcs balloon past the chord and notches bulge out.
+  const expectArcsInside = (
+    shape: 'triangle' | 'star',
+    verts: { x: number; y: number }[],
+    w: number,
+    h: number,
+    radius: number,
+  ) => {
+    const pts = createShapeVectorPoints(shape, w, h, radius)
+    expect(pts.length).toBe(verts.length * 2)
+    for (let i = 0; i < verts.length; i++) {
+      const V = verts[i]
+      const T1 = pts[2 * i]
+      const T2 = pts[2 * i + 1]
+      expect(T1.cp2).toBeDefined()
+      expect(T2.cp1).toBeDefined()
+      const mid = cubicMid(T1, T1.cp2!, T2.cp1!, T2)
+      const cx = (T1.x + T2.x) / 2 - V.x
+      const cy = (T1.y + T2.y) / 2 - V.y
+      const dot = (mid.x - V.x) * cx + (mid.y - V.y) * cy
+      const chord2 = cx * cx + cy * cy
+      expect(dot).toBeGreaterThan(0)
+      expect(dot).toBeLessThan(chord2)
+    }
+  }
+
+  test('triangle arcs stay inside at moderate and clamped radii', () => {
+    expectArcsInside('triangle', triangleVertices(200, 100), 200, 100, 12)
+    expectArcsInside('triangle', triangleVertices(200, 100), 200, 100, 999)
+  })
+
+  test('star tips and notches stay inside at moderate and clamped radii', () => {
+    expectArcsInside('star', starVertices(200, 200), 200, 200, 10)
+    expectArcsInside('star', starVertices(200, 200), 200, 200, 30)
+    expectArcsInside('star', starVertices(200, 200), 200, 200, 999)
+  })
+
+  test('star notch midpoint matches the true fillet position', () => {
+    const verts = starVertices(200, 200)
+    const pts = createShapeVectorPoints('star', 200, 200, 10)
+    const T1 = pts[2]
+    const T2 = pts[3]
+    const mid = cubicMid(T1, T1.cp2!, T2.cp1!, T2)
+    // True r=10 fillet at the (122,70) notch sits ~2.36px into the notch.
+    expect(Math.hypot(mid.x - verts[1].x, mid.y - verts[1].y)).toBeCloseTo(2.36, 0)
+  })
+})
+
 describe('helpers', () => {
   test('triangleVertices matches the canvas polygon', () => {
     expect(triangleVertices(200, 100)).toEqual([

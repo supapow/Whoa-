@@ -714,19 +714,21 @@ export function roundedPolygonPoints(
     const t = Math.min(r / Math.abs(tanHalf), (Math.min(inLen, outLen) / 2) * (1 - 1e-4))
     const rEff = t * Math.abs(tanHalf)
     const d = (4 / 3) * Math.tan(phi / 4) * rEff
-    const convex = theta <= Math.PI
-    const s = convex ? -1 : 1 // controls run toward V (convex) or away (reflex)
+    // Controls always run back toward V along each edge: the arc midpoint
+    // sits closer to V than the tangent points, for convex corners and
+    // reflex notches alike. (Flipping them for reflex corners inverts the
+    // arc so notches bulge outward instead of filleting inward.)
     const t1 = { x: V.x + e1.x * t, y: V.y + e1.y * t }
     const t2 = { x: V.x + e2.x * t, y: V.y + e2.y * t }
     pts.push({
       x: round(t1.x),
       y: round(t1.y),
-      cp2: { x: round(t1.x + s * e1.x * d), y: round(t1.y + s * e1.y * d) },
+      cp2: { x: round(t1.x - e1.x * d), y: round(t1.y - e1.y * d) },
     })
     pts.push({
       x: round(t2.x),
       y: round(t2.y),
-      cp1: { x: round(t2.x + s * e2.x * d), y: round(t2.y + s * e2.y * d) },
+      cp1: { x: round(t2.x - e2.x * d), y: round(t2.y - e2.y * d) },
     })
   }
   return pts
