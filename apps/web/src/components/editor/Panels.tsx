@@ -31,7 +31,7 @@ import { getLibraryComponents, deleteComponentFromLibrary, type ComponentItem } 
 import {
   VECTOR_PRESETS, convertShapeToVector, buildSvgPath, tightenVectorLayer, simplifyVectorPoints,
   createShapeVectorPoints, fitVectorPointsToBounds, getPointBezierMode, switchPointBezierMode,
-  getAdjacentVectorPoints, getVectorBoundingBox, shapeTemplatePoints,
+  getAdjacentVectorPoints, getVectorBoundingBox, shapeTemplatePoints, roundVectorPoints,
 } from '#/lib/vector'
 
 const TITLES: Record<string, string> = {
@@ -2873,8 +2873,12 @@ function RadiusPanel() {
         max={200}
         onChange={(v: number) => {
           if (l.type === 'path') {
-            const sh = l.shape || 'rectangle'
-            const pts = shapeTemplatePoints(sh, l.w, l.h, v, l.closed !== false)
+            // Round the existing anchors in place: identical to template
+            // regeneration on unedited shapes, but preserves hand edits and
+            // works on custom vector art (which has no shape template).
+            const pts = l.points && l.points.length > 0
+              ? roundVectorPoints(l.points, v, l.closed !== false)
+              : shapeTemplatePoints(l.shape || 'rectangle', l.w, l.h, v, l.closed !== false)
             up({ radius: v, points: pts })
           } else {
             up({ radius: v })

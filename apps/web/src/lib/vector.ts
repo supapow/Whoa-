@@ -652,6 +652,54 @@ export function starVertices(w: number, h: number): { x: number; y: number }[] {
 }
 
 /**
+ * Rounds a single polygon corner V (neighbors P, N) with radius r.
+ * Returns the two tangent anchors (with curve handles), or the sharp vertex
+ * when the radius is ~0 or the corner is degenerate. Works for convex
+ * corners and reflex notches alike with no winding needed: with gamma as the
+ * angle between the edge rays from V, the tangent distance is
+ * `t = r / tan(gamma/2)` and the arc spans `pi - gamma` in both cases, and
+ * the controls always run back toward V.
+ */
+function roundCorner(
+  V: { x: number; y: number },
+  P: { x: number; y: number },
+  N: { x: number; y: number },
+  r: number,
+): VectorPoint[] {
+  const sharp: VectorPoint[] = [{ x: round(V.x), y: round(V.y) }]
+  if (!(r > 0.01)) return sharp
+  const inLen = Math.hypot(V.x - P.x, V.y - P.y)
+  const outLen = Math.hypot(N.x - V.x, N.y - V.y)
+  if (!(inLen > 1e-6 && outLen > 1e-6)) return sharp
+  // Unit vectors from V back along the incoming edge and out along the outgoing edge.
+  const e1 = { x: (P.x - V.x) / inLen, y: (P.y - V.y) / inLen }
+  const e2 = { x: (N.x - V.x) / outLen, y: (N.y - V.y) / outLen }
+  const gamma = Math.acos(Math.min(1, Math.max(-1, e1.x * e2.x + e1.y * e2.y)))
+  if (gamma < 1e-3 || Math.PI - gamma < 1e-3) return sharp // spike or straight
+  const t = Math.min(r / Math.tan(gamma / 2), (Math.min(inLen, outLen) / 2) * (1 - 1e-4))
+  const rEff = t * Math.tan(gamma / 2)
+  const d = (4 / 3) * Math.tan((Math.PI - gamma) / 4) * rEff
+  // Controls always run back toward V along each edge: the arc midpoint
+  // sits closer to V than the tangent points, for convex corners and
+  // reflex notches alike. (Flipping them for reflex corners inverts the
+  // arc so notches bulge outward instead of filleting inward.)
+  const t1 = { x: V.x + e1.x * t, y: V.y + e1.y * t }
+  const t2 = { x: V.x + e2.x * t, y: V.y + e2.y * t }
+  return [
+    {
+      x: round(t1.x),
+      y: round(t1.y),
+      cp2: { x: round(t1.x - e1.x * d), y: round(t1.y - e1.y * d) },
+    },
+    {
+      x: round(t2.x),
+      y: round(t2.y),
+      cp1: { x: round(t2.x - e2.x * d), y: round(t2.y - e2.y * d) },
+    },
+  ]
+}
+
+/**
  * Rounds every corner of a polygon with a uniform radius (Figma-style).
  *
  * Each vertex V is replaced by two tangent-point anchors T1/T2 pulled back
@@ -675,61 +723,12 @@ export function roundedPolygonPoints(
   const r = Math.max(0, radius)
   if (!(r > 0.01)) return sharp()
 
-  let area2 = 0
-  for (let i = 0; i < n; i++) {
-    const p = vertices[i]
-    const q = vertices[(i + 1) % n]
-    area2 += p.x * q.y - q.x * p.y
-  }
-  const winding = area2 >= 0 ? 1 : -1
-
   const pts: VectorPoint[] = []
   for (let i = 0; i < n; i++) {
     const V = vertices[i]
     const P = vertices[(i - 1 + n) % n]
     const N = vertices[(i + 1) % n]
-    const inLen = Math.hypot(V.x - P.x, V.y - P.y)
-    const outLen = Math.hypot(N.x - V.x, N.y - V.y)
-    if (!(inLen > 1e-6 && outLen > 1e-6)) {
-      pts.push({ x: round(V.x), y: round(V.y) })
-      continue
-    }
-    // Unit vectors from V back along the incoming edge and out along the outgoing edge.
-    const e1 = { x: (P.x - V.x) / inLen, y: (P.y - V.y) / inLen }
-    const e2 = { x: (N.x - V.x) / outLen, y: (N.y - V.y) / outLen }
-    // Travel direction turn at V determines convex vs reflex given the winding.
-    const uIn = { x: -e1.x, y: -e1.y }
-    const turn = Math.atan2(uIn.x * e2.y - uIn.y * e2.x, uIn.x * e2.x + uIn.y * e2.y)
-    const theta = Math.PI - turn * winding // interior angle, 0..2pi
-    const phi = Math.abs(Math.PI - theta) // arc span
-    if (phi < 1e-3) {
-      pts.push({ x: round(V.x), y: round(V.y) })
-      continue
-    }
-    const tanHalf = Math.tan(theta / 2)
-    if (!(Math.abs(tanHalf) > 1e-6)) {
-      pts.push({ x: round(V.x), y: round(V.y) })
-      continue
-    }
-    const t = Math.min(r / Math.abs(tanHalf), (Math.min(inLen, outLen) / 2) * (1 - 1e-4))
-    const rEff = t * Math.abs(tanHalf)
-    const d = (4 / 3) * Math.tan(phi / 4) * rEff
-    // Controls always run back toward V along each edge: the arc midpoint
-    // sits closer to V than the tangent points, for convex corners and
-    // reflex notches alike. (Flipping them for reflex corners inverts the
-    // arc so notches bulge outward instead of filleting inward.)
-    const t1 = { x: V.x + e1.x * t, y: V.y + e1.y * t }
-    const t2 = { x: V.x + e2.x * t, y: V.y + e2.y * t }
-    pts.push({
-      x: round(t1.x),
-      y: round(t1.y),
-      cp2: { x: round(t1.x - e1.x * d), y: round(t1.y - e1.y * d) },
-    })
-    pts.push({
-      x: round(t2.x),
-      y: round(t2.y),
-      cp1: { x: round(t2.x - e2.x * d), y: round(t2.y - e2.y * d) },
-    })
+    pts.push(...roundCorner(V, P, N, r))
   }
   return pts
 }
@@ -1525,6 +1524,180 @@ export const VECTOR_PRESETS: VectorPreset[] = [
     },
   },
 ]
+
+/**
+ * Detects whether consecutive anchors A (carrying cp2) and B (carrying cp1)
+ * form a corner previously produced by roundCorner: both handles present,
+ * each collinear with its outer straight segment, with mutually consistent
+ * tangent distances and control offsets. Returns the reconstructed sharp
+ * vertex, or null for artistic curves (which are left untouched).
+ */
+function unroundCorner(
+  P: { x: number; y: number }, // anchor before A; segment P→A must be straight
+  A: VectorPoint, // tangent anchor, cp2 only
+  B: VectorPoint, // tangent anchor, cp1 only
+  N: { x: number; y: number }, // anchor after B; segment B→N must be straight
+): { x: number; y: number } | null {
+  const C1 = A.cp2
+  const C2 = B.cp1
+  if (!C1 || !C2 || A.cp1 !== undefined || B.cp2 !== undefined) return null
+  const COL_TOL = 0.03
+  const dir1 = { x: A.x - P.x, y: A.y - P.y }
+  const dir2 = { x: N.x - B.x, y: N.y - B.y }
+  const len1 = Math.hypot(dir1.x, dir1.y)
+  const len2 = Math.hypot(dir2.x, dir2.y)
+  if (!(len1 > 1e-6 && len2 > 1e-6)) return null
+  // Each handle must lie on its outer edge line.
+  const cross1 = ((C1.x - P.x) * dir1.y - (C1.y - P.y) * dir1.x) / len1
+  const cross2 = ((C2.x - B.x) * dir2.y - (C2.y - B.y) * dir2.x) / len2
+  if (Math.abs(cross1) > COL_TOL || Math.abs(cross2) > COL_TOL) return null
+  // Reconstruct V as the intersection of the two edge lines.
+  const d1 = { x: dir1.x / len1, y: dir1.y / len1 }
+  const d2 = { x: dir2.x / len2, y: dir2.y / len2 }
+  const cross = d1.x * d2.y - d1.y * d2.x
+  if (Math.abs(cross) < 1e-9) return null
+  const s = ((B.x - P.x) * d2.y - (B.y - P.y) * d2.x) / cross
+  const V = { x: P.x + d1.x * s, y: P.y + d1.y * s }
+  // V must sit ahead of A along travel and behind B: a genuine corner tip.
+  if ((V.x - A.x) * d1.x + (V.y - A.y) * d1.y < -COL_TOL) return null
+  if ((V.x - B.x) * d2.x + (V.y - B.y) * d2.y > COL_TOL) return null
+  // Tangent distances from V must agree (rounding uses one t per corner).
+  const t1 = Math.hypot(V.x - A.x, V.y - A.y)
+  const t2 = Math.hypot(V.x - B.x, V.y - B.y)
+  if (Math.abs(t1 - t2) > Math.max(0.05, 0.02 * Math.max(t1, t2))) return null
+  // Control offsets must match the arc approximation for the implied radius.
+  const e1 = { x: (P.x - V.x) / Math.max(1e-9, Math.hypot(P.x - V.x, P.y - V.y)), y: (P.y - V.y) / Math.max(1e-9, Math.hypot(P.x - V.x, P.y - V.y)) }
+  const e2 = { x: (N.x - V.x) / Math.max(1e-9, Math.hypot(N.x - V.x, N.y - V.y)), y: (N.y - V.y) / Math.max(1e-9, Math.hypot(N.x - V.x, N.y - V.y)) }
+  const gamma = Math.acos(Math.min(1, Math.max(-1, e1.x * e2.x + e1.y * e2.y)))
+  if (gamma < 1e-3 || Math.PI - gamma < 1e-3) return null
+  const t = (t1 + t2) / 2
+  const rEff = t * Math.tan(gamma / 2)
+  const dExp = (4 / 3) * Math.tan((Math.PI - gamma) / 4) * rEff
+  const D_TOL = Math.max(0.06, 0.03 * dExp)
+  const along1 = { x: (V.x - A.x) / Math.max(1e-9, t1), y: (V.y - A.y) / Math.max(1e-9, t1) }
+  const along2 = { x: (V.x - B.x) / Math.max(1e-9, t2), y: (V.y - B.y) / Math.max(1e-9, t2) }
+  if (Math.hypot(C1.x - (A.x + along1.x * dExp), C1.y - (A.y + along1.y * dExp)) > D_TOL) return null
+  if (Math.hypot(C2.x - (B.x + along2.x * dExp), C2.y - (B.y + along2.y * dExp)) > D_TOL) return null
+  return { x: round(V.x), y: round(V.y) }
+}
+
+function cloneAnchor(p: VectorPoint): VectorPoint {
+  return {
+    x: p.x,
+    y: p.y,
+    cp1: p.cp1 ? { ...p.cp1 } : undefined,
+    cp2: p.cp2 ? { ...p.cp2 } : undefined,
+    mode: p.mode,
+    subpathStart: p.subpathStart,
+  }
+}
+
+/**
+ * Rounds the sharp corners of an arbitrary vector path in place (Figma-style).
+ *
+ * Unlike template regeneration, this preserves the artwork: sharp corners
+ * (straight segments on both sides) are rounded with `radius`, already-curved
+ * corners are left untouched, and open-path endpoints are never rounded.
+ * Corners rounded by a previous call are detected and re-rounded, so dragging
+ * the slider repeatedly stays consistent instead of stacking arcs.
+ * A radius <= 0.01 collapses prior rounding back to sharp corners.
+ */
+export function roundVectorPoints(
+  points: VectorPoint[],
+  radius: number,
+  closed: boolean = true,
+): VectorPoint[] {
+  if (!points || points.length === 0) return []
+  const r = Math.max(0, radius)
+  // Split into subpath runs at subpathStart flags.
+  const runs: VectorPoint[][] = []
+  for (const pt of points) {
+    if (pt.subpathStart || runs.length === 0) runs.push([])
+    runs[runs.length - 1].push(cloneAnchor(pt))
+  }
+  const out: VectorPoint[] = []
+  for (const run of runs) {
+    if (run.length < 2) {
+      out.push(...run)
+      continue
+    }
+    const runClosed = closed && run.length >= 3
+    // Pass 1: collapse rounding-generated corner pairs back to sharp vertices.
+    // Rounding pairs are always adjacent with a curved middle segment; outer
+    // segments must be straight. For closed runs the seam pair (last, first)
+    // is checked up front so pairs straddling the array boundary are found.
+    const unrounded: VectorPoint[] = []
+    const m = run.length
+    let start = 0
+    let end = m
+    if (runClosed && m >= 4) {
+      const sA = run[m - 1]
+      const sB = run[0]
+      if (sA.cp2 !== undefined && sB.cp1 !== undefined) {
+        const sP = run[m - 2]
+        const sN = run[1]
+        if (sP.cp2 === undefined && sA.cp1 === undefined && sB.cp2 === undefined && sN.cp1 === undefined) {
+          const sV = unroundCorner(sP, sA, sB, sN)
+          if (sV) {
+            unrounded.push(sA.subpathStart || sB.subpathStart ? { ...sV, subpathStart: true } : sV)
+            start = 1
+            end = m - 1
+          }
+        }
+      }
+    }
+    let j = start
+    while (j < end) {
+      // NOTE: B never wraps (consuming run[0] twice would corrupt output);
+      // N may wrap since it is context only, never consumed.
+      const A = run[j]
+      const B = j + 1 < end ? run[j + 1] : undefined
+      const P = unrounded.length > 0
+        ? unrounded[unrounded.length - 1]
+        : (runClosed ? run[(j - 1 + m) % m] : undefined)
+      const N = B !== undefined
+        ? (j + 2 < end ? run[j + 2] : runClosed ? run[(j + 2) % m] : undefined)
+        : undefined
+      const isEndpointPair = !runClosed && (j === 0 || (B !== undefined && j + 1 === m - 1))
+      const V = B !== undefined && P !== undefined && N !== undefined && !isEndpointPair
+        && A.cp2 !== undefined && B.cp1 !== undefined
+        && P.cp2 === undefined && A.cp1 === undefined
+        && B.cp2 === undefined && N.cp1 === undefined
+        ? unroundCorner(P, A, B, N)
+        : null
+      if (V && B) {
+        const keepStart = A.subpathStart || B.subpathStart
+        unrounded.push(keepStart ? { ...V, subpathStart: true } : V)
+        j += 2
+      } else {
+        unrounded.push(A)
+        j += 1
+      }
+    }
+    // Pass 2: round the sharp corners.
+    const last = unrounded.length - 1
+    for (let k = 0; k <= last; k++) {
+      const C = unrounded[k]
+      const isEndpoint = !runClosed && (k === 0 || k === last)
+      if (isEndpoint) {
+        out.push(C)
+        continue
+      }
+      const P = unrounded[runClosed ? (k - 1 + unrounded.length) % unrounded.length : k - 1]
+      const N = unrounded[runClosed ? (k + 1) % unrounded.length : k + 1]
+      const sharpNeighborhood = P.cp2 === undefined && C.cp1 === undefined
+        && C.cp2 === undefined && N.cp1 === undefined
+      if (!sharpNeighborhood) {
+        out.push(C)
+        continue
+      }
+      const rounded = roundCorner(C, P, N, r)
+      if (C.subpathStart && rounded.length > 0) rounded[0] = { ...rounded[0], subpathStart: true }
+      out.push(...rounded)
+    }
+  }
+  return out
+}
 
 /**
  * Template points for a vector layer box. Shape templates are generated
