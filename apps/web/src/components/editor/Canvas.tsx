@@ -3387,6 +3387,10 @@ export default function Canvas() {
       }
       updateLayer(l.id, { ...patch, crop: undefined })
       select(l.id)
+      // The handles overlay measures the live DOM node, which still has
+      // the pre-snap layout during this commit — refresh after paint so
+      // the handles land on the new box instead of the previous step's.
+      requestAnimationFrame(() => select(l.id))
     } else if (l.type === 'text' || l.type === 'button') {
       setEditingId(l.id)
     } else if (l.type === 'path') {
@@ -3405,6 +3409,7 @@ export default function Canvas() {
       imageCycleRef.current.set(l.id, -1)
       updateLayer(l.id, { x: 0, w: preset.w, crop: undefined })
       select(l.id)
+      requestAnimationFrame(() => select(l.id))
       return
     }
     if (l.type === 'text' || l.type === 'button') {
