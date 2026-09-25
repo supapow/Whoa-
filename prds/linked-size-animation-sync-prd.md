@@ -161,18 +161,24 @@ Unit (no runner exists yet — `apps/web/moon.yml`'s `test` task has no backing 
   harmless, but keep it inside the `modeChanged` guard.
 - Open question: should a *variant*-side duration edit detach, sync to master, or stay local?
   Current proposal keeps it local (§6.2).
+- **§7.3 only half-holds after §6.1:** adding an animation while a size is active *does* make
+  master animated (mode mirrors, export formats match), but master does not **play** it — anim
+  data flows master → size only, and a size-side edit marks `contentDetached`, which §5 pins as
+  out of scope. Verified in the browser: master's Animate panel shows *None*, layer opacity stays
+  `1` at `0.0s`. Making master play size-authored animations is separate work (reverse content
+  sync) and was not done here.
+- **§7.4 has no UI:** `setDuration` is dispatched by no component today, so duration sync is
+  only covered by the unit tests (C3/C4) — it cannot be exercised in the browser.
 
 ## 9. Test assets
 
-- **No test file ships with this PRD.** The diagnostic used for the diagnosis
-  (`apps/web/scripts/sync-check.ts`, a plain `bun run` script — no framework) was deleted after
-  the findings were captured. Re-create it when implementing: it imports `createAdSet` +
-  `diffAndSync` from `apps/web/src/lib/adset.ts` and `createLayer`/`PRESETS` from
-  `apps/web/src/lib/data.ts`, builds a 2-size ad set with one text layer, and asserts the
-  scenarios listed in §3 (A–E) — extend with `mode`/`duration` assertions for §6.1/§6.2.
-  Run with `~/.bun/bin/bun run apps/web/scripts/sync-check.ts`. No `bun test` runner exists in
-  `apps/web` (`moon.yml`'s `test` task has no backing script), so either keep it as a script and
-  delete it after verification, or introduce `bun test` and fold it in.
+- **Regression tests ship as `apps/web/tests/adset-sync.test.ts`** (`bun test`) — scenarios A–E
+  from §3 plus the §6.1 `mode` / §6.2 `duration` assertions, run with
+  `cd apps/web && bun run test` (or `moon run web:test`). The original diagnostic was a plain
+  `bun run` script (`apps/web/scripts/sync-check.ts`); when implementing, it was folded into
+  `bun test` instead of deleted. `apps/web/tests/` is excluded from `tsconfig.json` because
+  `bun:test` types are not installed (adding them would leak Bun globals into the app's
+  type-check), so `bun run lint` stays at the pre-existing baseline.
 - Manual repro steps are in §2; both the master and the linked size must be measured at
   `time-display = 0.0s` with the timeline open, otherwise `active` is false for unrelated reasons
   (`active = mode === 'animated' && (playing || time > 0 || timelineOpen)`).

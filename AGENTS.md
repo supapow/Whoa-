@@ -42,6 +42,7 @@ This file is shared by every AI coding tool that works on this repo.
 ```sh
 bun install                                   # install/refresh deps from bun.lock
 cd apps/web && bun run dev                    # dev server → http://localhost:3000
+cd apps/web && bun run test                   # bun test suite (apps/web/tests/)
 bun run lint                                  # tsc --noEmit (verified passing)
 ```
 
@@ -59,7 +60,6 @@ bun run lint                                  # tsc --noEmit (verified passing)
 - `README.md` — still upstream OpenCut's README. Says `moon run web:dev` → localhost:**5173**; the app actually runs on **3000**.
 - `memory/PRD.md` — uses the old name "Bannr" and claims the app has **no routing**; it now uses TanStack Router.
 - `metadata.json` — spells the name **"Woah!"** (should be "Whoa!").
-- `apps/web/moon.yml` — defines a `test` task (`bun run test`), but `apps/web/package.json` has **no `test` script**, so that task fails.
 
 ---
 
