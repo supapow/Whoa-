@@ -1,5 +1,5 @@
 import { useEffect } from 'react'
-import { X, Sun, Moon, Laptop, User, Check, Palette, Sliders, Info, ShieldCheck, Sparkles } from 'lucide-react'
+import { X, Sun, Moon, Laptop, User, Check, Palette, Sliders, Info, ShieldCheck, Sparkles, Code } from 'lucide-react'
 import BottomSheet from '#/components/BottomSheet'
 import { useTheme, type Theme } from '#/store/theme'
 import { usePrefs } from '#/store/prefs'
@@ -11,7 +11,14 @@ interface SettingsModalProps {
 
 export default function SettingsModal({ isOpen, onClose }: SettingsModalProps) {
   const { theme, resolvedTheme, setTheme } = useTheme()
-  const { autoAnimateNewLayers, setAutoAnimateNewLayers } = usePrefs()
+  const {
+    autoAnimateNewLayers,
+    setAutoAnimateNewLayers,
+    showElementIdsAndClasses,
+    setShowElementIdsAndClasses,
+    codeDialect,
+    setCodeDialect,
+  } = usePrefs()
 
   useEffect(() => {
     if (!isOpen) return
@@ -245,6 +252,120 @@ export default function SettingsModal({ isOpen, onClose }: SettingsModalProps) {
                   }`}
                 />
               </button>
+            </div>
+          </div>
+
+          {/* Developer & Code Preferences */}
+          <div data-testid="settings-developer-section">
+            <div className="mb-2.5 flex items-center gap-1.5">
+              <Code className="h-4 w-4 text-accent" />
+              <h3 className="text-xs font-bold uppercase tracking-wider text-txt2">
+                Developer & Code
+              </h3>
+            </div>
+
+            <div
+              onClick={() => setShowElementIdsAndClasses(!showElementIdsAndClasses)}
+              data-testid="show-element-ids-toggle"
+              className="flex w-full items-center gap-3.5 rounded-2xl border border-line bg-surface2/40 p-3.5 text-left transition-all hover:bg-surface2/80 cursor-pointer"
+            >
+              <div className="flex-1 min-w-0">
+                <span className="text-xs font-bold text-txt">Show element ID & classes</span>
+                <p className="text-[11px] text-txt3 leading-tight mt-0.5">
+                  Display layer ID and class tags above selected elements on canvas for referencing in code
+                </p>
+              </div>
+              <button
+                type="button"
+                role="switch"
+                aria-checked={showElementIdsAndClasses}
+                aria-label="Show element ID & classes"
+                onClick={(e) => {
+                  e.stopPropagation()
+                  setShowElementIdsAndClasses(!showElementIdsAndClasses)
+                }}
+                data-testid="show-element-ids-switch"
+                className={`relative inline-flex h-[22px] w-[38px] shrink-0 items-center rounded-full transition-colors ${
+                  showElementIdsAndClasses ? 'bg-accent' : 'bg-surface2 border border-line-strong'
+                }`}
+              >
+                <span
+                  className={`inline-block h-4 w-4 rounded-full bg-white shadow transition-transform ${
+                    showElementIdsAndClasses ? 'translate-x-[18px]' : 'translate-x-[3px]'
+                  }`}
+                />
+              </button>
+            </div>
+
+            {/* Code Dialect / Format Selection */}
+            <div className="mt-3 space-y-1.5" data-testid="settings-code-dialect">
+              <span className="text-xs font-bold text-txt">Default Code Language</span>
+              <p className="text-[11px] text-txt3 leading-tight mb-2">
+                Choose the default format for the code editor. React with TypeScript (.tsx) is the modern agency standard.
+              </p>
+
+              <div className="grid grid-cols-1 gap-1.5">
+                {[
+                  {
+                    id: 'typescript',
+                    label: 'TypeScript (.tsx)',
+                    tag: 'Default · React / Next.js',
+                    desc: 'Typed React component with TypeScript interfaces, props, and autocompletion.',
+                  },
+                  {
+                    id: 'javascript',
+                    label: 'JavaScript / JSX (.jsx)',
+                    tag: 'React JSX',
+                    desc: 'Standard JSX React component without TypeScript type annotations.',
+                  },
+                  {
+                    id: 'vanilla',
+                    label: 'Vanilla JS / HTML (.html)',
+                    tag: 'Pure DOM / Ad Tech',
+                    desc: 'Raw HTML5 elements, CSS, and Vanilla JavaScript with no framework dependencies.',
+                  },
+                ].map((item) => {
+                  const isSelected = codeDialect === item.id
+                  return (
+                    <button
+                      key={item.id}
+                      type="button"
+                      onClick={() => setCodeDialect(item.id as typeof codeDialect)}
+                      data-testid={`dialect-${item.id}`}
+                      className={`flex w-full items-center justify-between rounded-xl border p-2.5 text-left transition-all cursor-pointer ${
+                        isSelected
+                          ? 'border-accent bg-accent/10 shadow-xs ring-1 ring-accent/40'
+                          : 'border-line bg-surface2/30 hover:bg-surface2/60'
+                      }`}
+                    >
+                      <div className="min-w-0 flex-1 pr-2">
+                        <div className="flex items-center gap-1.5">
+                          <span className="text-xs font-bold text-txt">{item.label}</span>
+                          <span
+                            className={`rounded px-1.5 py-0.5 text-[9px] font-semibold ${
+                              isSelected
+                                ? 'bg-accent text-white'
+                                : 'bg-surface2 text-txt3'
+                            }`}
+                          >
+                            {item.tag}
+                          </span>
+                        </div>
+                        <p className="text-[11px] text-txt3 mt-0.5 leading-tight">{item.desc}</p>
+                      </div>
+                      <div
+                        className={`grid h-4 w-4 shrink-0 place-items-center rounded-full border ${
+                          isSelected
+                            ? 'border-accent bg-accent text-white'
+                            : 'border-line-strong bg-transparent'
+                        }`}
+                      >
+                        {isSelected && <Check className="h-2.5 w-2.5 stroke-[3]" />}
+                      </div>
+                    </button>
+                  )
+                })}
+              </div>
             </div>
           </div>
 

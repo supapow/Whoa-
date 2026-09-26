@@ -1,7 +1,8 @@
 import { Fragment, useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react'
-import { ArrowLeft, ArrowRight, ArrowUp, ArrowDown, Move, RotateCw } from 'lucide-react'
+import { ArrowLeft, ArrowRight, ArrowUp, ArrowDown, Move, RotateCw, Copy, Check } from 'lucide-react'
 import type { Layer, LayerType, ShadowEffect, VectorPoint, LayerGradient } from '#/types'
 import { useEditor } from '#/store/editor'
+import { usePrefs } from '#/store/prefs'
 import { getDescendantLayers, getTopmostGroup, computeGroupBounds, getMaskedGroupIds } from '#/lib/groups'
 import { findCornerSizeMatch, findSizeMatch, getCandidateTargets, type SizeMatch } from '#/lib/sizeMatch'
 import { findGapMatch, type GapMatchResult } from '#/lib/gapMatch'
@@ -1023,6 +1024,8 @@ type Pinch =
   | null
 
 export default function Canvas() {
+  const { showElementIdsAndClasses } = usePrefs()
+  const [copiedId, setCopiedId] = useState<string | null>(null)
   const {
     project, selectedId, selectedIds, select, toggleSelect, updateLayer, time, mode, playing,
     artboardSnap, vectorSnap, selectedAnchorIndices, setSelectedAnchors, toggleSelectedAnchor,
@@ -4748,6 +4751,66 @@ export default function Canvas() {
                     <div style={{ position: 'absolute', left: '66.666%', top: 0, bottom: 0, width: 1 / eff, backgroundColor: 'rgba(255,255,255,0.4)' }} />
                     <div style={{ position: 'absolute', top: '33.333%', left: 0, right: 0, height: 1 / eff, backgroundColor: 'rgba(255,255,255,0.4)' }} />
                     <div style={{ position: 'absolute', top: '66.666%', left: 0, right: 0, height: 1 / eff, backgroundColor: 'rgba(255,255,255,0.4)' }} />
+                  </div>
+                )}
+                {showElementIdsAndClasses && !isImagePositioning && (
+                  <div
+                    data-testid="element-id-badge"
+                    onPointerDown={(e) => e.stopPropagation()}
+                    onClick={(e) => e.stopPropagation()}
+                    style={{
+                      position: 'absolute',
+                      top: -30 / eff,
+                      left: 0,
+                      backgroundColor: 'rgba(15, 17, 23, 0.95)',
+                      color: '#ffffff',
+                      fontSize: Math.max(10, 11 / eff),
+                      fontWeight: 500,
+                      fontFamily: 'monospace',
+                      padding: `${3 / eff}px ${8 / eff}px`,
+                      borderRadius: 6 / eff,
+                      border: `${1 / eff}px solid rgba(255, 255, 255, 0.25)`,
+                      boxShadow: '0 4px 12px rgba(0,0,0,0.5)',
+                      display: 'flex',
+                      alignItems: 'center',
+                      gap: 6 / eff,
+                      zIndex: 80,
+                      pointerEvents: 'auto',
+                      whiteSpace: 'nowrap',
+                      userSelect: 'none',
+                    }}
+                  >
+                    <span style={{ color: '#fbbf24', fontWeight: 700 }}>#{sel.id}</span>
+                    <span style={{ color: '#9ca3af' }}>
+                      .{sel.type}-layer{sel.isComponent ? ' .component' : ''}{isGroup ? ' .group' : ''}
+                    </span>
+                    <button
+                      type="button"
+                      title="Copy element ID"
+                      data-testid="copy-element-id-badge-btn"
+                      onClick={(e) => {
+                        e.stopPropagation()
+                        navigator.clipboard?.writeText(sel.id)
+                        setCopiedId(sel.id)
+                        setTimeout(() => setCopiedId(null), 1500)
+                      }}
+                      style={{
+                        background: 'transparent',
+                        border: 'none',
+                        color: copiedId === sel.id ? '#34d399' : '#9ca3af',
+                        cursor: 'pointer',
+                        padding: 0,
+                        marginLeft: 4 / eff,
+                        display: 'flex',
+                        alignItems: 'center',
+                      }}
+                    >
+                      {copiedId === sel.id ? (
+                        <Check style={{ width: 12 / eff, height: 12 / eff }} />
+                      ) : (
+                        <Copy style={{ width: 12 / eff, height: 12 / eff }} />
+                      )}
+                    </button>
                   </div>
                 )}
                 {(sel.type === 'group' || sel.isComponent) && (

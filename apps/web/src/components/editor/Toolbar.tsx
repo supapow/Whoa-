@@ -352,7 +352,7 @@ export default function Toolbar({ onExport }: { onExport?: () => void }) {
         key: 'shadow',
         label: 'Shadow',
         icon: <SunMedium className="h-4 w-4" />,
-        active: Boolean(selected.shadowEnabled || selected.innerShadowEnabled),
+        active: Boolean(selected.dropShadow || selected.innerShadow),
       },
       {
         key: 'blur',

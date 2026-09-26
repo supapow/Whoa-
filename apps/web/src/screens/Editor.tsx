@@ -1,7 +1,8 @@
 import { useState, useEffect, useRef } from 'react'
-import { ChevronLeft, Undo2, Redo2, User } from 'lucide-react'
+import { ChevronLeft, Undo2, Redo2, User, Code } from 'lucide-react'
 import type { AdSet } from '#/types'
 import { EditorProvider, useEditor } from '#/store/editor'
+import { usePrefs } from '#/store/prefs'
 import Canvas from '#/components/editor/Canvas'
 import Toolbar from '#/components/editor/Toolbar'
 import Timeline from '#/components/editor/Timeline'
@@ -10,6 +11,7 @@ import ExportSheet from '#/components/editor/ExportSheet'
 import SizeSheet from '#/components/editor/SizeSheet'
 import ColorLoupe from '#/components/editor/ColorLoupe'
 import SettingsModal from '#/components/SettingsModal'
+import CodeEditorModal from '#/components/editor/CodeEditorModal'
 
 export default function Editor({ adSet, onExit }: { adSet: AdSet; onExit: () => void }) {
   return (
@@ -23,11 +25,21 @@ function EditorInner({ onExit }: { onExit: () => void }) {
   const [exportOpen, setExportOpen] = useState(false)
   const [settingsOpen, setSettingsOpen] = useState(false)
   const [sizeOpen, setSizeOpen] = useState(false)
+  const [codeEditorOpen, setCodeEditorOpen] = useState(false)
+  const { hasOpenedCodeEditor, setHasOpenedCodeEditor, setShowElementIdsAndClasses } = usePrefs()
   const { playing, time, setTime, project, adSet, undo, redo, canUndo, canRedo, selectedId, selectedIds, deleteLayer, deleteLayers } = useEditor()
   const raf = useRef(0)
   const last = useRef(0)
   const timeRef = useRef(time)
   timeRef.current = time
+
+  const handleOpenCodeEditor = () => {
+    if (!hasOpenedCodeEditor) {
+      setShowElementIdsAndClasses(true)
+      setHasOpenedCodeEditor(true)
+    }
+    setCodeEditorOpen(true)
+  }
 
   useEffect(() => {
     if (!playing) return
@@ -155,6 +167,19 @@ function EditorInner({ onExit }: { onExit: () => void }) {
           <Redo2 className="h-4 w-4" />
         </button>
 
+        {/* Code Editor toggle button */}
+        <button
+          type="button"
+          onClick={handleOpenCodeEditor}
+          data-testid="code-editor-btn"
+          id="code-editor-btn"
+          aria-label="Code Editor"
+          title="Open Code Editor"
+          className="grid h-9 w-9 place-items-center rounded-full bg-surface/85 text-txt backdrop-blur-md border border-line shadow-lg hover:bg-surface2 active:scale-90 transition-all focus:outline-none cursor-pointer"
+        >
+          <Code className="h-4 w-4 text-accent" />
+        </button>
+
         {/* User Avatar - opens Settings menu */}
         <button
           type="button"
@@ -181,6 +206,7 @@ function EditorInner({ onExit }: { onExit: () => void }) {
       {exportOpen && <ExportSheet onClose={() => setExportOpen(false)} />}
       {sizeOpen && <SizeSheet onClose={() => setSizeOpen(false)} />}
       <SettingsModal isOpen={settingsOpen} onClose={() => setSettingsOpen(false)} />
+      <CodeEditorModal isOpen={codeEditorOpen} onClose={() => setCodeEditorOpen(false)} />
     </div>
   )
 }

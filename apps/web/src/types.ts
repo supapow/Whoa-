@@ -173,6 +173,9 @@ export interface Layer {
   isComponent?: boolean
   componentId?: string
   collapsed?: boolean
+  // masking
+  isMaskGroup?: boolean
+  maskId?: string
 }
 
 export interface Preset {

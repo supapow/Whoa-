@@ -128,6 +128,8 @@ type Action =
   | { t: 'deleteKeyframe'; layerId: string; keyframeId: string }
   | { t: 'clearKeyframes'; layerId: string }
   | { t: 'replaceLayerWithLayers'; targetId: string; newLayers: Layer[]; selectId?: string; selectIds?: string[] }
+  | { t: 'replaceLayers'; layers: Layer[] }
+  | { t: 'setPresetDimensions'; w: number; h: number }
   | { t: 'startEyedropper'; session: EyedropperSession }
   | { t: 'updateEyedropperColor'; color: string }
   | { t: 'cancelEyedropper' }
@@ -875,6 +877,10 @@ function innerReducer(state: State, a: Action): State {
       const layers = reorderSibling(p.layers, a.id, a.dir)
       return { ...state, project: touch({ ...p, layers }) }
     }
+    case 'replaceLayers':
+      return { ...state, project: touch({ ...p, layers: a.layers }) }
+    case 'setPresetDimensions':
+      return { ...state, project: touch({ ...p, preset: { ...p.preset, w: a.w, h: a.h } }) }
     case 'setBackground':
       return { ...state, project: touch({ ...p, background: a.bg }) }
     case 'setTime':
@@ -1384,6 +1390,8 @@ interface Ctx extends State {
   deleteKeyframe: (layerId: string, keyframeId: string) => void
   clearKeyframes: (layerId: string) => void
   replaceLayerWithLayers: (targetId: string, newLayers: Layer[], selectId?: string, selectIds?: string[]) => void
+  replaceLayers: (layers: Layer[]) => void
+  setArtboardDimensions: (w: number, h: number) => void
   eyedropper: EyedropperSession | null
   startEyedropper: (session: EyedropperSession) => void
   updateEyedropperColor: (color: string) => void
@@ -1512,6 +1520,9 @@ export function EditorProvider({ adSet: initialAdSet, children }: { adSet: AdSet
     },
     [],
   )
+
+  const replaceLayers = useCallback((layers: Layer[]) => dispatch({ t: 'replaceLayers', layers }), [])
+  const setArtboardDimensions = useCallback((w: number, h: number) => dispatch({ t: 'setPresetDimensions', w, h }), [])
 
   const convertTextToVectors = useCallback(
     async (
@@ -1643,6 +1654,8 @@ export function EditorProvider({ adSet: initialAdSet, children }: { adSet: AdSet
       deleteKeyframe,
       clearKeyframes,
       replaceLayerWithLayers,
+      replaceLayers,
+      setArtboardDimensions,
       convertTextToVectors,
       eyedropper: state.eyedropper,
       startEyedropper,
