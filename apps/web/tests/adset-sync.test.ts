@@ -26,6 +26,10 @@ interface Ctx {
 function setup(): Ctx {
   const layer = createLayer('text', masterPreset)
   const adSet = createAdSet([masterPreset, sizePreset], 'Sync Check', [layer])
+  // Pin the PRD §2 premise: sizes created before any animation (mode 'static').
+  // New ad sets default to animated (lib/data.ts); the sync tests exercise the
+  // static → animated transition, so the static start is set explicitly here.
+  adSet.variants = adSet.variants.map((v) => ({ ...v, mode: 'static' as const }))
   const project = getMaster(adSet)
   return { adSet, project, activeId: project.id }
 }

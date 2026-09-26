@@ -2,10 +2,14 @@ import { useState } from 'react'
 import { X, Check, Download } from 'lucide-react'
 import BottomSheet from '#/components/BottomSheet'
 import { useEditor } from '#/store/editor'
+import { projectHasAnimation } from '#/lib/project'
 
 export default function ExportSheet({ onClose }: { onClose: () => void }) {
   const { project, mode } = useEditor()
-  const formats = mode === 'animated' ? ['MP4', 'GIF', 'PNG'] : ['PNG', 'JPG', 'SVG']
+  // Effective mode: an animation-less project exports as static even though
+  // new projects default to `mode: 'animated'`.
+  const animated = projectHasAnimation(project)
+  const formats = animated ? ['MP4', 'GIF', 'PNG'] : ['PNG', 'JPG', 'SVG']
   const [fmt, setFmt] = useState(formats[0])
   const [quality, setQuality] = useState('HD')
   const [phase, setPhase] = useState<'idle' | 'rendering' | 'done'>('idle')
@@ -46,7 +50,10 @@ export default function ExportSheet({ onClose }: { onClose: () => void }) {
             <div>
               <p className="font-bold text-txt">{project.name}</p>
               <p className="text-sm text-txt2">{project.preset.label} · {project.preset.w}×{project.preset.h}</p>
-              <p className="text-xs text-txt3 capitalize">{mode} banner</p>
+              <p className="text-xs text-txt3 capitalize">{animated ? 'animated' : 'static'} banner</p>
+              {mode === 'animated' && !animated && (
+                <p className="text-xs text-txt3">No animations yet — static formats</p>
+              )}
             </div>
           </div>
 

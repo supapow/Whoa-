@@ -238,7 +238,7 @@ export function newProject(preset: Preset, name?: string): Project {
     background: { type: 'color', value: '#000000' },
     layers: [],
     duration: 5000,
-    mode: 'static',
+    mode: 'animated',
     updatedAt: Date.now(),
   }
 }
@@ -256,7 +256,7 @@ export interface Template {
   build: () => Project
 }
 
-function tmpl(id: string, name: string, presetId: string, thumb: string, bg: Background, layers: (p: Preset) => Layer[], mode: 'static' | 'animated' = 'static'): Template {
+function tmpl(id: string, name: string, presetId: string, thumb: string, bg: Background, layers: (p: Preset) => Layer[], mode: 'static' | 'animated' = 'animated'): Template {
   return {
     id,
     name,
