@@ -8,6 +8,8 @@ import { findGapMatch, type GapMatchResult } from '#/lib/gapMatch'
 import { findElementAlignMatch, type ElementAlignResult } from '#/lib/elementAlign'
 import { parseImagePosition, formatImagePosition, calcImagePositionDelta } from '#/lib/imagePosition'
 import { interpolateKeyframes } from '#/lib/keyframes'
+import { splitTextFxUnits, effectiveFxIndex } from '#/lib/textFx'
+import { inAnimState, fxUnitState } from '#/lib/textFxAnim'
 import { fillGradientDefId, gradientEndpoints, angleFromEndpoints, layerGradientToCss, blurFadeMaskCss } from '#/lib/gradients'
 import { layerNeedsSvgFilter, shadowFilterId, dropShadowCss, shadowFilterRegion, dropCasterFilterId, innerCasterFilterId, estimateTextBoxSize, colorToRgba } from '#/lib/shadows'
 import {
@@ -100,62 +102,7 @@ function anim(layer: Layer, time: number, active: boolean, allLayers?: Layer[]) 
 
   // 1. In-animation phase
   if (isInActive) {
-    const inP = Math.max(0, Math.min(1, inElapsed / inDur))
-    const easeOut = 1 - Math.pow(1 - inP, 3) // cubic ease out
-
-    let opacity = layer.opacity * easeOut
-    let transform = baseRot
-    let filter = baseBlur
-
-    switch (inAnimType) {
-      case 'fade':
-        opacity = layer.opacity * easeOut
-        break
-      case 'rise': {
-        const dy = (1 - easeOut) * 28
-        transform = [dy > 0.1 ? `translateY(${dy.toFixed(1)}px)` : '', baseRot].filter(Boolean).join(' ')
-        break
-      }
-      case 'pop': {
-        const scale = 0.72 + 0.28 * easeOut
-        transform = [Math.abs(scale - 1) > 0.005 ? `scale(${scale.toFixed(3)})` : '', baseRot].filter(Boolean).join(' ')
-        break
-      }
-      case 'slide': {
-        const dx = (1 - easeOut) * -48
-        transform = [Math.abs(dx) > 0.1 ? `translateX(${dx.toFixed(1)}px)` : '', baseRot].filter(Boolean).join(' ')
-        break
-      }
-      case 'blur': {
-        // Pure optical rack-focus: deep 28px blur smoothly resolving into razor-sharp focus (or layer blur)
-        const falloff = Math.pow(1 - inP, 1.8)
-        const addedBlur = layer.blurType !== 'backdrop' ? (layer.blur || 0) : 0
-        const blurPx = falloff * 28 + addedBlur
-        opacity = layer.opacity * easeOut
-        filter = blurPx > 0.1 ? `blur(${blurPx.toFixed(1)}px)` : 'none'
-        transform = baseRot
-        break
-      }
-      case 'rotate': {
-        const startDeg = layer.inRotateStart ?? 0
-        const endDeg = layer.inRotateEnd ?? 30
-        const currentDeg = startDeg + (endDeg - startDeg) * easeOut
-        const totalRot = (layer.rotation || 0) + currentDeg
-        opacity = layer.opacity * easeOut
-        transform = `rotate(${totalRot.toFixed(2)}deg)`
-        break
-      }
-      case 'pulse': {
-        // Pulse entrance: enters with smooth opacity fade and a rhythmic scale pulse
-        opacity = layer.opacity * Math.min(1, inP * 2)
-        const pulseCycle = Math.sin(inP * Math.PI * 2) * Math.pow(1 - inP, 0.75) * 0.22
-        const scale = 1 + pulseCycle
-        transform = [Math.abs(scale - 1) > 0.005 ? `scale(${scale.toFixed(3)})` : '', baseRot].filter(Boolean).join(' ')
-        break
-      }
-    }
-
-    return { opacity, transform, filter, hidden: false }
+    return inAnimState(layer, inAnimType, inElapsed, inDur)
   }
 
   // 2. Out-animation phase
@@ -3720,6 +3667,9 @@ export default function Canvas() {
               eff={eff}
               onEdit={() => {}}
               onEndEdit={() => {}}
+              time={time}
+              active={active}
+              mode={mode}
             />
           </div>
         )
@@ -4569,6 +4519,9 @@ export default function Canvas() {
                     eff={eff}
                     onEdit={(t) => updateLayer(l.id, { text: t })}
                     onEndEdit={() => setEditingId(null)}
+                    time={time}
+                    active={active}
+                    mode={mode}
                   />
                 </div>
               </div>
@@ -6365,6 +6318,9 @@ function LayerContent({
   eff = 1,
   onEdit,
   onEndEdit,
+  time = 0,
+  active = false,
+  mode = 'static',
 }: {
   layer: Layer
   editing: boolean
@@ -6372,6 +6328,9 @@ function LayerContent({
   eff?: number
   onEdit: (t: string) => void
   onEndEdit: () => void
+  time?: number
+  active?: boolean
+  mode?: 'static' | 'animated'
 }) {
   if (layer.type === 'group') {
     return null
@@ -6403,6 +6362,42 @@ function LayerContent({
     }
     if (editing) {
       return <EditableText style={style} initial={layer.text || ''} onCommit={(t) => onEdit(t)} onDone={onEndEdit} />
+    }
+    // Text FX: per-unit spans with staggered in-animation (animated mode only).
+    // Letters render as children of the layer box, so the layer-level transform
+    // (presets + keyframes via getCompositeAnim) composes with them for free.
+    // When inactive the units sit at rest, so the text reads as normal text.
+    if (layer.textFx && mode === 'animated') {
+      const fx = layer.textFx
+      const start = layer.start ?? 0
+      const lines = splitTextFxUnits(layer.text || '', fx.unit)
+      return (
+        <div style={style}>
+          {lines.map((units, li) => (
+            <Fragment key={li}>
+              {li > 0 && <br />}
+              {units.map((u) => {
+                const slot = effectiveFxIndex(u.unitIndex, units.length, fx.order, fx.seed)
+                const elapsed = active ? time - start - slot * fx.stagger : Number.POSITIVE_INFINITY
+                const s = fxUnitState(layer, fx, elapsed)
+                return (
+                  <span
+                    key={u.unitIndex}
+                    style={{
+                      display: 'inline-block',
+                      opacity: s.opacity,
+                      transform: s.transform || undefined,
+                      filter: s.filter && s.filter !== 'none' ? s.filter : undefined,
+                    }}
+                  >
+                    {u.chars.join('')}
+                  </span>
+                )
+              })}
+            </Fragment>
+          ))}
+        </div>
+      )
     }
     return <div style={style}>{layer.text}</div>
   }

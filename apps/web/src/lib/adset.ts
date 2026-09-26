@@ -10,6 +10,7 @@ export const CONTENT_SYNC_KEYS = [
   'fontWeight',
   'color',
   'align',
+  'textFx',
   'fill',
   'fillGradient',
   'stroke',
