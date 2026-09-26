@@ -944,6 +944,11 @@ function TimelineRow({
               <span className="rounded bg-amber-400/20 px-1 py-0.2 text-[8px] font-bold text-amber-300 tracking-wider shrink-0">
                 ◆ {layer.keyframes.length}
               </span>
+              {layer.textFx && (
+                <span className="rounded bg-white/25 px-1 py-0.2 text-[8px] font-bold text-white tracking-wider shrink-0">
+                  FX
+                </span>
+              )}
             </div>
 
             {/* Keyframe Diamond Markers */}
@@ -1148,6 +1153,11 @@ function TimelineRow({
                 selected ? 'px-12' : 'px-6'
               }`}
             >
+              {layer.textFx && (
+                <span className="mr-1 inline-block rounded bg-white/25 px-1 py-0.2 align-middle text-[8px] font-bold uppercase">
+                  FX
+                </span>
+              )}
               {label}
             </span>
             <div

@@ -28,6 +28,7 @@ import {
 import GoogleFontsSearchView from '#/components/editor/GoogleFontsSearchView'
 import type { DivButtonPreset, VectorButtonPreset } from '#/lib/data'
 import { getLibraryComponents, deleteComponentFromLibrary, type ComponentItem } from '#/lib/groups'
+import { TEXT_FX_PRESETS, makeTextFxSeed, textFxFromPreset } from '#/lib/textFx'
 import {
   VECTOR_PRESETS, convertShapeToVector, buildSvgPath, tightenVectorLayer, simplifyVectorPoints,
   createShapeVectorPoints, fitVectorPointsToBounds, getPointBezierMode, switchPointBezierMode,
@@ -44,6 +45,7 @@ const TITLES: Record<string, string> = {
   animate: 'Animation', mask: 'Mask & Cut', crop: 'Crop',
   vector: 'Vector Path & Béziers',
   convertText: 'Convert Text to Vector',
+  textFx: 'Text FX',
 }
 
 export default function ToolSheet() {
@@ -107,7 +109,7 @@ function PanelBody({
   setFontSubView?: (v: 'standard' | 'googleSearch') => void
 }) {
   const { selected, updateLayer } = useEditor()
-  const needsLayer = ['font', 'color', 'fill', 'blur', 'effects', 'style', 'align', 'shape', 'radius', 'animate', 'mask', 'crop', 'vector', 'convertText']
+  const needsLayer = ['font', 'color', 'fill', 'blur', 'effects', 'style', 'align', 'shape', 'radius', 'animate', 'mask', 'crop', 'vector', 'convertText', 'textFx']
   if (needsLayer.includes(tool) && !selected) {
     return <MockPanel text="Select a layer on the canvas first." />
   }
@@ -148,6 +150,7 @@ function PanelBody({
     case 'effects': return <EffectsPanel />
     case 'style': return <StylePanel />
     case 'convertText': return <ConvertTextPanel />
+    case 'textFx': return <TextFxPanel />
     case 'align': return <AlignPanel />
     case 'shape': return <ShapePanel />
     case 'radius': return <RadiusPanel />
@@ -1123,6 +1126,15 @@ function LayersPanel() {
           {isMask && (
             <span className="rounded bg-teal-500/30 px-1.5 py-0.5 text-[9px] font-bold text-teal-200">
               MASK
+            </span>
+          )}
+
+          {Boolean(layer.textFx) && (
+            <span
+              className="rounded bg-white/15 px-1.5 py-0.5 text-[9px] font-bold text-white/90"
+              title="Text FX"
+            >
+              FX
             </span>
           )}
 
@@ -2685,6 +2697,103 @@ function AlignPanel() {
   )
 }
 
+function TextFxPanel() {
+  const { l, up } = useSel()
+  if (!l || l.type !== 'text') return <MockPanel text="Text FX works on text layers." />
+  const fx = l.textFx
+  return (
+    <div className="pb-4 space-y-3">
+      {/* Preset gallery (motion only — styles are built manually + saved as components) */}
+      <div className="grid grid-cols-3 gap-1.5">
+        {TEXT_FX_PRESETS.map((p) => {
+          const isActive = fx?.kind === p.kind
+          return (
+            <button
+              key={p.kind}
+              type="button"
+              data-testid={`textfx-preset-${p.kind}`}
+              onClick={() => {
+                const next = textFxFromPreset(p.kind)
+                if (next) up({ textFx: next })
+              }}
+              className={`rounded-xl border px-1 py-2.5 text-center transition-colors cursor-pointer ${
+                isActive ? 'border-accent bg-accent/10 text-white' : 'border-line bg-surface2 text-txt2'
+              }`}
+            >
+              <span className="flex items-center justify-center gap-[3px] pb-1" aria-hidden>
+                {[0, 1, 2].map((i) => (
+                  <span key={i} className="h-1.5 w-1.5 rounded-full bg-current" style={{ opacity: 1 - i * 0.3 }} />
+                ))}
+              </span>
+              <span className="block text-xs font-semibold">{p.label}</span>
+              <span className="block text-[9px] opacity-70 capitalize">{p.unit}s · {p.order}</span>
+            </button>
+          )
+        })}
+        <button
+          type="button"
+          data-testid="textfx-off"
+          onClick={() => up({ textFx: undefined })}
+          className={`rounded-xl border px-1 py-2.5 text-center transition-colors cursor-pointer ${
+            !fx ? 'border-accent bg-accent/10 text-white' : 'border-line bg-surface2 text-txt2'
+          }`}
+        >
+          <span className="flex items-center justify-center gap-[3px] pb-1" aria-hidden>
+            <span className="h-1.5 w-6 rounded-full bg-current opacity-40" />
+          </span>
+          <span className="block text-xs font-semibold">Off</span>
+          <span className="block text-[9px] opacity-70">Plain text</span>
+        </button>
+      </div>
+
+      {fx && (
+        <>
+          <div className="space-y-1.5">
+            <div className="text-xs font-medium text-txt2">Animate</div>
+            <div className="flex gap-1.5">
+              {(['letter', 'word'] as const).map((u) => (
+                <button
+                  key={u}
+                  type="button"
+                  data-testid={`textfx-unit-${u}`}
+                  onClick={() => up({ textFx: { ...fx, unit: u } })}
+                  className={`flex-1 rounded-xl border py-2 text-sm font-semibold capitalize transition-colors cursor-pointer ${
+                    fx.unit === u ? 'border-accent bg-accent/10 text-white' : 'border-line bg-surface2 text-txt2'
+                  }`}
+                >
+                  {u === 'letter' ? 'Letters' : 'Words'}
+                </button>
+              ))}
+            </div>
+          </div>
+
+          <div className="space-y-1.5">
+            <div className="text-xs font-medium text-txt2">Order</div>
+            <div className="flex gap-1.5">
+              {(['ltr', 'rtl', 'center', 'random'] as const).map((o) => (
+                <button
+                  key={o}
+                  type="button"
+                  data-testid={`textfx-order-${o}`}
+                  onClick={() => up({ textFx: { ...fx, order: o, seed: o === 'random' ? makeTextFxSeed() : fx.seed } })}
+                  className={`flex-1 rounded-xl border py-2 text-xs font-semibold uppercase transition-colors cursor-pointer ${
+                    fx.order === o ? 'border-accent bg-accent/10 text-white' : 'border-line bg-surface2 text-txt2'
+                  }`}
+                >
+                  {o === 'ltr' ? '→' : o === 'rtl' ? '←' : o === 'center' ? '◎' : '⚄'}
+                </button>
+              ))}
+            </div>
+          </div>
+
+          <Slider label="Stagger" tid="slider-fx-stagger" value={fx.stagger} min={0} max={300} step={5} suffix="ms" onChange={(v: number) => up({ textFx: { ...fx, stagger: v } })} />
+          <Slider label="Duration" tid="slider-fx-duration" value={fx.duration} min={100} max={1500} step={10} suffix="ms" onChange={(v: number) => up({ textFx: { ...fx, duration: v } })} />
+        </>
+      )}
+    </div>
+  )
+}
+
 function ShapePanel() {
   const { l, up } = useSel()
   const { updateLayer, openTool } = useEditor()
@@ -3666,7 +3775,7 @@ const sideBtnClass = 'grid h-8 w-8 place-items-center rounded-full transition-al
 const sideInactiveBtnClass = `${sideBtnClass} text-white/70 hover:bg-white/20 hover:text-white`
 
 export function TextFloatingPanel() {
-  const { selected, tool, openTool, updateLayer, startEyedropper } = useEditor()
+  const { selected, tool, openTool, updateLayer, startEyedropper, mode } = useEditor()
   const [expanded, setExpanded] = useState(true)
 
   if (!selected || selected.type !== 'text' || tool) return null
@@ -3773,6 +3882,20 @@ export function TextFloatingPanel() {
       >
         <Spline className="size-4 text-accent" />
       </button>
+
+      {/* 6. Text FX (animated projects only) */}
+      {mode === 'animated' && (
+        <button
+          type="button"
+          data-testid="text-floating-fx-btn"
+          onClick={() => openTool('textFx')}
+          aria-label="Text FX"
+          title="Text FX: staggered letter and word animations"
+          className={`${sideInactiveBtnClass} hover:text-accent`}
+        >
+          <Sparkles className={`size-4 ${l.textFx ? 'text-accent' : ''}`} />
+        </button>
+      )}
     </ElementSidePanel>
   )
 }
