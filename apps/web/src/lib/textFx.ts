@@ -28,10 +28,11 @@ export function splitTextFxUnits(text: string, unit: TextFxUnit): TextFxUnitChun
 
 /** Grapheme-cluster split (emoji ZWJ sequences stay together). Falls back to
  *  code points where `Intl.Segmenter` is unavailable. */
+let cachedSegmenter: Intl.Segmenter | null = null
 export function segmentGraphemes(s: string): string[] {
   try {
-    const seg = new Intl.Segmenter(undefined, { granularity: 'grapheme' })
-    return Array.from(seg.segment(s), (part) => part.segment)
+    if (!cachedSegmenter) cachedSegmenter = new Intl.Segmenter(undefined, { granularity: 'grapheme' })
+    return Array.from(cachedSegmenter.segment(s), (part) => part.segment)
   } catch {
     return Array.from(s)
   }
