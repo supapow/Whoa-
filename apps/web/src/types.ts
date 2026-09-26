@@ -72,6 +72,22 @@ export interface Keyframe {
   points?: VectorPoint[]
 }
 
+// Per-unit in-animation applied on top of a text layer ("Text FX").
+// The letters/words are derived at render time from `Layer.text` — nothing is
+// materialized into `project.layers`, so edits to the text keep working.
+export type TextFxUnit = 'letter' | 'word'
+export type TextFxOrder = 'ltr' | 'rtl' | 'center' | 'random'
+
+export interface TextFx {
+  kind: string // effect id from TEXT_FX_PRESETS (lib/textFx.ts)
+  unit: TextFxUnit
+  order: TextFxOrder
+  stagger: number // ms between units
+  duration: number // ms per unit's in-animation
+  anim: 'fade' | 'rise' | 'pop' | 'slide' | 'blur' | 'rotate' | 'pulse'
+  seed: number // fixed at creation; stabilizes 'random' order
+}
+
 export interface Layer {
   id: string
   type: LayerType
@@ -113,6 +129,7 @@ export interface Layer {
   fontWeight?: number
   color?: string
   align?: 'left' | 'center' | 'right'
+  textFx?: TextFx
   // shape
   shape?: ShapeKind
   fill?: string
