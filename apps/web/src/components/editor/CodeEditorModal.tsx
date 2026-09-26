@@ -36,7 +36,7 @@ interface CodeEditorModalProps {
 }
 
 export default function CodeEditorModal({ isOpen, onClose }: CodeEditorModalProps) {
-  const { project, replaceLayers, setArtboardDimensions, setBackground } = useEditor()
+  const { project, replaceLayers, setArtboardDimensions, setBackground, setCustomAnimations } = useEditor()
   const { codeDialect } = usePrefs()
   const [language, setLanguage] = useState<CodeLanguage>(codeDialect === 'vanilla' ? 'html' : 'react')
   const [code, setCode] = useState<string>('')
@@ -89,7 +89,8 @@ export default function CodeEditorModal({ isOpen, onClose }: CodeEditorModalProp
           ? html()
           : css()
 
-    return [langExt, tailwindAutocompleteExtension]
+    // Tailwind and custom class autocomplete is intended for markup (JSX & HTML), not CSS
+    return language === 'css' ? [langExt] : [langExt, tailwindAutocompleteExtension]
   }, [language, codeDialect])
 
   // Handle code change inside CodeMirror with debounced sync back to Canvas
@@ -120,6 +121,9 @@ export default function CodeEditorModal({ isOpen, onClose }: CodeEditorModalProp
             if (parsed.project.layers) {
               replaceLayers(parsed.project.layers)
             }
+            if (parsed.project.customAnimations) {
+              setCustomAnimations(parsed.project.customAnimations)
+            }
             setTimeout(() => setIsSyncing(false), 300)
           }
         }
@@ -141,6 +145,9 @@ export default function CodeEditorModal({ isOpen, onClose }: CodeEditorModalProp
             }
             if (parsed.project.layers) {
               replaceLayers(parsed.project.layers)
+            }
+            if (parsed.project.customAnimations) {
+              setCustomAnimations(parsed.project.customAnimations)
             }
             setTimeout(() => setIsSyncing(false), 300)
           }
@@ -164,12 +171,15 @@ export default function CodeEditorModal({ isOpen, onClose }: CodeEditorModalProp
             if (parsed.project.layers) {
               replaceLayers(parsed.project.layers)
             }
+            if (parsed.project.customAnimations) {
+              setCustomAnimations(parsed.project.customAnimations)
+            }
             setTimeout(() => setIsSyncing(false), 300)
           }
         }
       }
     }, 400)
-  }, [language, project, replaceLayers, setArtboardDimensions, setBackground])
+  }, [language, project, replaceLayers, setArtboardDimensions, setBackground, setCustomAnimations])
 
   // Copy code to clipboard
   const handleCopy = () => {

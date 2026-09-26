@@ -275,4 +275,42 @@ describe('codeSync - HTML & CSS', () => {
     expect(heading?.anim).toBe('pop')
     expect(heading?.textFx?.kind).toBe('wave')
   })
+
+  it('outputs whoa-anim- classes and keyframes in generated CSS so coders can modify them', () => {
+    const css = projectToCss(mockProject)
+    expect(css).toContain('.whoa-anim-pulse')
+    expect(css).toContain('@keyframes whoa-pulse')
+    expect(css).toContain('animation: whoa-pulse')
+  })
+
+  it('detects custom animation classes in CSS and auto-creates corresponding out-animation', () => {
+    const css = projectToCss(mockProject)
+    // Coder defines or customizes whoa-anim-pulse-in in CSS
+    const modifiedCss = `${css}
+.whoa-anim-pulse-in {
+  animation: whoa-pulse-in 0.8s ease-in-out forwards;
+}
+@keyframes whoa-pulse-in {
+  0% { transform: scale(0.5); opacity: 0; }
+  50% { transform: scale(1.15); opacity: 1; }
+  100% { transform: scale(1); opacity: 1; }
+}
+`
+    const parsed = parseCssToProject(modifiedCss, mockProject)
+    expect(parsed.success).toBe(true)
+    expect(parsed.project?.customAnimations).toBeDefined()
+    const customAnims = parsed.project?.customAnimations || []
+
+    // 1. Stored in customAnimations as in-anim with custom badge
+    const customIn = customAnims.find((a) => a.id === 'pulse-custom' && a.side === 'in')
+    expect(customIn).toBeDefined()
+    expect(customIn?.label).toBe('Pulse In')
+    expect(customIn?.isCustom).toBe(true)
+
+    // 2. Automatically created corresponding out-anim with custom badge
+    const customOut = customAnims.find((a) => a.id === 'pulse-custom-out' && a.side === 'out')
+    expect(customOut).toBeDefined()
+    expect(customOut?.label).toBe('Pulse Out')
+    expect(customOut?.isCustom).toBe(true)
+  })
 })

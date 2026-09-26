@@ -117,55 +117,42 @@ function anim(layer: Layer, time: number, active: boolean, allLayers?: Layer[]) 
     let transform = baseRot
     let filter = baseBlur
 
-    switch (outAnimType) {
-      case 'fade':
-        opacity = layer.opacity * (1 - easeIn)
-        break
-      case 'rise': {
-        // Drifts upward gracefully while fading out
-        const dy = -easeIn * 28
-        transform = [Math.abs(dy) > 0.1 ? `translateY(${dy.toFixed(1)}px)` : '', baseRot].filter(Boolean).join(' ')
-        break
-      }
-      case 'pop': {
-        // Scales down smoothly as it fades
-        const scale = 1 - 0.28 * easeInQuad
-        transform = [Math.abs(scale - 1) > 0.005 ? `scale(${scale.toFixed(3)})` : '', baseRot].filter(Boolean).join(' ')
-        break
-      }
-      case 'slide': {
-        // Slides out cleanly to the right
-        const dx = easeIn * 48
-        transform = [Math.abs(dx) > 0.1 ? `translateX(${dx.toFixed(1)}px)` : '', baseRot].filter(Boolean).join(' ')
-        break
-      }
-      case 'blur': {
-        // Cinematic defocus: smoothly defocuses into a deep 28px blur as it dissolves away
-        const defocus = Math.pow(outP, 1.8)
-        const addedBlur = layer.blurType !== 'backdrop' ? (layer.blur || 0) : 0
-        const blurPx = defocus * 28 + addedBlur
-        opacity = layer.opacity * (1 - easeIn)
-        filter = blurPx > 0.1 ? `blur(${blurPx.toFixed(1)}px)` : 'none'
-        transform = baseRot
-        break
-      }
-      case 'rotate': {
-        const startDeg = layer.outRotateStart ?? 0
-        const endDeg = layer.outRotateEnd ?? 30
-        const currentDeg = startDeg + (endDeg - startDeg) * easeIn
-        const totalRot = (layer.rotation || 0) + currentDeg
-        opacity = layer.opacity * (1 - easeIn)
-        transform = `rotate(${totalRot.toFixed(2)}deg)`
-        break
-      }
-      case 'pulse': {
-        // Pulse exit: quick energetic pulse swell, then smoothly shrinks and dissolves
-        const pulseCycle = Math.sin(outP * Math.PI * 2) * (1 - outP) * 0.2
-        const scale = Math.max(0.01, (1 + pulseCycle) * (1 - outP * 0.35))
-        opacity = layer.opacity * (1 - Math.pow(outP, 1.4))
-        transform = [Math.abs(scale - 1) > 0.005 ? `scale(${scale.toFixed(3)})` : '', baseRot].filter(Boolean).join(' ')
-        break
-      }
+    const outT = outAnimType.toLowerCase()
+    if (outT.includes('fade')) {
+      opacity = layer.opacity * (1 - easeIn)
+    } else if (outT.includes('rise')) {
+      // Drifts upward gracefully while fading out
+      const dy = -easeIn * 28
+      transform = [Math.abs(dy) > 0.1 ? `translateY(${dy.toFixed(1)}px)` : '', baseRot].filter(Boolean).join(' ')
+    } else if (outT.includes('pop')) {
+      // Scales down smoothly as it fades
+      const scale = 1 - 0.28 * easeInQuad
+      transform = [Math.abs(scale - 1) > 0.005 ? `scale(${scale.toFixed(3)})` : '', baseRot].filter(Boolean).join(' ')
+    } else if (outT.includes('slide')) {
+      // Slides out cleanly to the right
+      const dx = easeIn * 48
+      transform = [Math.abs(dx) > 0.1 ? `translateX(${dx.toFixed(1)}px)` : '', baseRot].filter(Boolean).join(' ')
+    } else if (outT.includes('blur')) {
+      // Cinematic defocus: smoothly defocuses into a deep 28px blur as it dissolves away
+      const defocus = Math.pow(outP, 1.8)
+      const addedBlur = layer.blurType !== 'backdrop' ? (layer.blur || 0) : 0
+      const blurPx = defocus * 28 + addedBlur
+      opacity = layer.opacity * (1 - easeIn)
+      filter = blurPx > 0.1 ? `blur(${blurPx.toFixed(1)}px)` : 'none'
+      transform = baseRot
+    } else if (outT.includes('rotate')) {
+      const startDeg = layer.outRotateStart ?? 0
+      const endDeg = layer.outRotateEnd ?? 30
+      const currentDeg = startDeg + (endDeg - startDeg) * easeIn
+      const totalRot = (layer.rotation || 0) + currentDeg
+      opacity = layer.opacity * (1 - easeIn)
+      transform = `rotate(${totalRot.toFixed(2)}deg)`
+    } else if (outT.includes('pulse')) {
+      // Pulse exit: quick energetic pulse swell, then smoothly shrinks and dissolves
+      const pulseCycle = Math.sin(outP * Math.PI * 2) * (1 - outP) * 0.2
+      const scale = Math.max(0.01, (1 + pulseCycle) * (1 - outP * 0.35))
+      opacity = layer.opacity * (1 - Math.pow(outP, 1.4))
+      transform = [Math.abs(scale - 1) > 0.005 ? `scale(${scale.toFixed(3)})` : '', baseRot].filter(Boolean).join(' ')
     }
 
     return { opacity, transform, filter, hidden: false }

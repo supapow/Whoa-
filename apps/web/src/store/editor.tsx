@@ -1,5 +1,5 @@
 import React, { createContext, useContext, useReducer, useCallback, useMemo } from 'react'
-import type { Project, Layer, LayerType, Background, AdSet, Preset } from '#/types'
+import type { Project, Layer, LayerType, Background, AdSet, Preset, CustomAnimationDef } from '#/types'
 import { createLayer } from '#/lib/data'
 import {
   addVariant as adSetAddVariant,
@@ -129,6 +129,7 @@ type Action =
   | { t: 'clearKeyframes'; layerId: string }
   | { t: 'replaceLayerWithLayers'; targetId: string; newLayers: Layer[]; selectId?: string; selectIds?: string[] }
   | { t: 'replaceLayers'; layers: Layer[] }
+  | { t: 'setCustomAnimations'; customAnimations: CustomAnimationDef[] }
   | { t: 'setPresetDimensions'; w: number; h: number }
   | { t: 'startEyedropper'; session: EyedropperSession }
   | { t: 'updateEyedropperColor'; color: string }
@@ -879,6 +880,8 @@ function innerReducer(state: State, a: Action): State {
     }
     case 'replaceLayers':
       return { ...state, project: touch({ ...p, layers: a.layers }) }
+    case 'setCustomAnimations':
+      return { ...state, project: touch({ ...p, customAnimations: a.customAnimations }) }
     case 'setPresetDimensions':
       return { ...state, project: touch({ ...p, preset: { ...p.preset, w: a.w, h: a.h } }) }
     case 'setBackground':
@@ -1391,6 +1394,7 @@ interface Ctx extends State {
   clearKeyframes: (layerId: string) => void
   replaceLayerWithLayers: (targetId: string, newLayers: Layer[], selectId?: string, selectIds?: string[]) => void
   replaceLayers: (layers: Layer[]) => void
+  setCustomAnimations: (customAnimations: CustomAnimationDef[]) => void
   setArtboardDimensions: (w: number, h: number) => void
   eyedropper: EyedropperSession | null
   startEyedropper: (session: EyedropperSession) => void
@@ -1522,6 +1526,7 @@ export function EditorProvider({ adSet: initialAdSet, children }: { adSet: AdSet
   )
 
   const replaceLayers = useCallback((layers: Layer[]) => dispatch({ t: 'replaceLayers', layers }), [])
+  const setCustomAnimations = useCallback((customAnimations: CustomAnimationDef[]) => dispatch({ t: 'setCustomAnimations', customAnimations }), [])
   const setArtboardDimensions = useCallback((w: number, h: number) => dispatch({ t: 'setPresetDimensions', w, h }), [])
 
   const convertTextToVectors = useCallback(
@@ -1655,6 +1660,7 @@ export function EditorProvider({ adSet: initialAdSet, children }: { adSet: AdSet
       clearKeyframes,
       replaceLayerWithLayers,
       replaceLayers,
+      setCustomAnimations,
       setArtboardDimensions,
       convertTextToVectors,
       eyedropper: state.eyedropper,

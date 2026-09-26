@@ -24,52 +24,39 @@ export function inAnimState(
   let transform = baseRot
   let filter = baseBlur
 
-  switch (type) {
-    case 'fade':
-      opacity = layer.opacity * easeOut
-      break
-    case 'rise': {
-      const dy = (1 - easeOut) * 28
-      transform = [dy > 0.1 ? `translateY(${dy.toFixed(1)}px)` : '', baseRot].filter(Boolean).join(' ')
-      break
-    }
-    case 'pop': {
-      const scale = 0.72 + 0.28 * easeOut
-      transform = [Math.abs(scale - 1) > 0.005 ? `scale(${scale.toFixed(3)})` : '', baseRot].filter(Boolean).join(' ')
-      break
-    }
-    case 'slide': {
-      const dx = (1 - easeOut) * -48
-      transform = [Math.abs(dx) > 0.1 ? `translateX(${dx.toFixed(1)}px)` : '', baseRot].filter(Boolean).join(' ')
-      break
-    }
-    case 'blur': {
-      // Pure optical rack-focus: deep 28px blur smoothly resolving into razor-sharp focus (or layer blur)
-      const falloff = Math.pow(1 - inP, 1.8)
-      const addedBlur = layer.blurType !== 'backdrop' ? (layer.blur || 0) : 0
-      const blurPx = falloff * 28 + addedBlur
-      opacity = layer.opacity * easeOut
-      filter = blurPx > 0.1 ? `blur(${blurPx.toFixed(1)}px)` : 'none'
-      transform = baseRot
-      break
-    }
-    case 'rotate': {
-      const startDeg = layer.inRotateStart ?? 0
-      const endDeg = layer.inRotateEnd ?? 30
-      const currentDeg = startDeg + (endDeg - startDeg) * easeOut
-      const totalRot = (layer.rotation || 0) + currentDeg
-      opacity = layer.opacity * easeOut
-      transform = `rotate(${totalRot.toFixed(2)}deg)`
-      break
-    }
-    case 'pulse': {
-      // Pulse entrance: enters with smooth opacity fade and a rhythmic scale pulse
-      opacity = layer.opacity * Math.min(1, inP * 2)
-      const pulseCycle = Math.sin(inP * Math.PI * 2) * Math.pow(1 - inP, 0.75) * 0.22
-      const scale = 1 + pulseCycle
-      transform = [Math.abs(scale - 1) > 0.005 ? `scale(${scale.toFixed(3)})` : '', baseRot].filter(Boolean).join(' ')
-      break
-    }
+  const t = type.toLowerCase()
+  if (t.includes('fade')) {
+    opacity = layer.opacity * easeOut
+  } else if (t.includes('rise')) {
+    const dy = (1 - easeOut) * 28
+    transform = [dy > 0.1 ? `translateY(${dy.toFixed(1)}px)` : '', baseRot].filter(Boolean).join(' ')
+  } else if (t.includes('pop')) {
+    const scale = 0.72 + 0.28 * easeOut
+    transform = [Math.abs(scale - 1) > 0.005 ? `scale(${scale.toFixed(3)})` : '', baseRot].filter(Boolean).join(' ')
+  } else if (t.includes('slide')) {
+    const dx = (1 - easeOut) * -48
+    transform = [Math.abs(dx) > 0.1 ? `translateX(${dx.toFixed(1)}px)` : '', baseRot].filter(Boolean).join(' ')
+  } else if (t.includes('blur')) {
+    // Pure optical rack-focus: deep 28px blur smoothly resolving into razor-sharp focus (or layer blur)
+    const falloff = Math.pow(1 - inP, 1.8)
+    const addedBlur = layer.blurType !== 'backdrop' ? (layer.blur || 0) : 0
+    const blurPx = falloff * 28 + addedBlur
+    opacity = layer.opacity * easeOut
+    filter = blurPx > 0.1 ? `blur(${blurPx.toFixed(1)}px)` : 'none'
+    transform = baseRot
+  } else if (t.includes('rotate')) {
+    const startDeg = layer.inRotateStart ?? 0
+    const endDeg = layer.inRotateEnd ?? 30
+    const currentDeg = startDeg + (endDeg - startDeg) * easeOut
+    const totalRot = (layer.rotation || 0) + currentDeg
+    opacity = layer.opacity * easeOut
+    transform = `rotate(${totalRot.toFixed(2)}deg)`
+  } else if (t.includes('pulse')) {
+    // Pulse entrance: enters with smooth opacity fade and a rhythmic scale pulse
+    opacity = layer.opacity * Math.min(1, inP * 2)
+    const pulseCycle = Math.sin(inP * Math.PI * 2) * Math.pow(1 - inP, 0.75) * 0.22
+    const scale = 1 + pulseCycle
+    transform = [Math.abs(scale - 1) > 0.005 ? `scale(${scale.toFixed(3)})` : '', baseRot].filter(Boolean).join(' ')
   }
 
   return { opacity, transform, filter, hidden: false }

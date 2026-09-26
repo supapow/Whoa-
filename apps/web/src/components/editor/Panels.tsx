@@ -3001,7 +3001,7 @@ function RadiusPanel() {
 
   function AnimatePanel() {
     const { l, up } = useSel()
-    const { setMode, animationSide, setAnimationSide, setTime, time, toggleKeyframe, clearKeyframes, deleteKeyframe } = useEditor()
+    const { setMode, animationSide, setAnimationSide, setTime, time, toggleKeyframe, clearKeyframes, deleteKeyframe, project } = useEditor()
     const [configOpen, setConfigOpen] = useState(false)
 
     const hasKeyframes = Boolean(l.keyframes && l.keyframes.length > 0)
@@ -3124,16 +3124,27 @@ function RadiusPanel() {
       )
     }
 
-    const anims = [
-      { k: 'none', label: 'None' },
-      { k: 'pulse', label: animationSide === 'in' ? 'Pulse In' : 'Pulse Out' },
-      { k: 'pop', label: animationSide === 'in' ? 'Pop In' : 'Pop Out' },
-      { k: 'fade', label: animationSide === 'in' ? 'Fade In' : 'Fade Out' },
-      { k: 'rise', label: animationSide === 'in' ? 'Rise Up' : 'Rise Out' },
-      { k: 'slide', label: animationSide === 'in' ? 'Slide In' : 'Slide Out' },
-      { k: 'blur', label: animationSide === 'in' ? 'Blur In' : 'Blur Out' },
-      { k: 'rotate', label: 'Rotate' },
+    const customList = (project.customAnimations || [])
+      .filter((ca) => ca.side === animationSide || ca.side === 'both')
+      .map((ca) => ({
+        k: ca.id,
+        label: ca.label,
+        isCustom: true,
+        baseAnim: ca.baseAnim || 'pulse',
+      }))
+
+    const standardAnims = [
+      { k: 'none', label: 'None', isCustom: false, baseAnim: 'none' },
+      { k: 'pulse', label: animationSide === 'in' ? 'Pulse In' : 'Pulse Out', isCustom: false, baseAnim: 'pulse' },
+      { k: 'pop', label: animationSide === 'in' ? 'Pop In' : 'Pop Out', isCustom: false, baseAnim: 'pop' },
+      { k: 'fade', label: animationSide === 'in' ? 'Fade In' : 'Fade Out', isCustom: false, baseAnim: 'fade' },
+      { k: 'rise', label: animationSide === 'in' ? 'Rise Up' : 'Rise Out', isCustom: false, baseAnim: 'rise' },
+      { k: 'slide', label: animationSide === 'in' ? 'Slide In' : 'Slide Out', isCustom: false, baseAnim: 'slide' },
+      { k: 'blur', label: animationSide === 'in' ? 'Blur In' : 'Blur Out', isCustom: false, baseAnim: 'blur' },
+      { k: 'rotate', label: 'Rotate', isCustom: false, baseAnim: 'rotate' },
     ]
+
+    const anims = [...standardAnims, ...customList]
     const current = animationSide === 'in' ? (l.inAnim || l.anim || 'none') : (l.outAnim || 'none')
 
     const isRotate = current === 'rotate'
@@ -3252,18 +3263,23 @@ function RadiusPanel() {
                   onClick={() => {
                     up(animationSide === 'in' ? { anim: a.k, inAnim: a.k } : { outAnim: a.k })
                     if (a.k !== 'none') {
-                      previewAnim(a.k)
+                      previewAnim(a.baseAnim || a.k)
                     }
                   }}
-                  className={`flex h-11 w-full items-center justify-center rounded-xl border py-2 text-xs font-semibold transition-all ${
-                    isRotateBtn ? 'pr-7 pl-2.5' : 'px-2.5'
+                  className={`flex h-11 w-full flex-col items-center justify-center rounded-xl border py-1 text-xs font-semibold transition-all relative ${
+                    isRotateBtn ? 'pr-7 pl-2' : 'px-2'
                   } ${
                     isSel
                       ? 'border-accent bg-accent/10 text-white shadow-sm ring-1 ring-accent/30'
                       : 'border-line bg-surface2 text-txt2 hover:border-white/20 hover:text-white'
                   }`}
                 >
-                  <span className="truncate">{a.label}</span>
+                  <span className="truncate max-w-full leading-tight">{a.label}</span>
+                  {a.isCustom && (
+                    <span className="mt-0.5 inline-block rounded bg-accent/25 px-1 py-0.2 text-[8px] font-bold text-accent uppercase tracking-wider">
+                      Custom
+                    </span>
+                  )}
                 </button>
 
                 {/* Dot icon button for Rotate animation options */}

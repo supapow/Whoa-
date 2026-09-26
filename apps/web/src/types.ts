@@ -110,9 +110,9 @@ export interface Layer {
   locked: boolean
   start: number // ms
   end: number // ms
-  anim: 'none' | 'fade' | 'rise' | 'pop' | 'slide' | 'blur' | 'rotate' | 'pulse'
-  inAnim?: 'none' | 'fade' | 'rise' | 'pop' | 'slide' | 'blur' | 'rotate' | 'pulse'
-  outAnim?: 'none' | 'fade' | 'rise' | 'pop' | 'slide' | 'blur' | 'rotate' | 'pulse'
+  anim: 'none' | 'fade' | 'rise' | 'pop' | 'slide' | 'blur' | 'rotate' | 'pulse' | (string & {})
+  inAnim?: 'none' | 'fade' | 'rise' | 'pop' | 'slide' | 'blur' | 'rotate' | 'pulse' | (string & {})
+  outAnim?: 'none' | 'fade' | 'rise' | 'pop' | 'slide' | 'blur' | 'rotate' | 'pulse' | (string & {})
   // rotate animation settings
   inRotateStart?: number // degrees (default: 0)
   inRotateEnd?: number // degrees (default: 30)
@@ -178,6 +178,15 @@ export interface Layer {
   maskId?: string
 }
 
+export interface CustomAnimationDef {
+  id: string
+  label: string
+  side: 'in' | 'out' | 'both'
+  baseAnim?: string
+  css?: string
+  isCustom: boolean
+}
+
 export interface Preset {
   id: string
   label: string
@@ -196,6 +205,7 @@ export interface Project {
   duration: number // ms
   mode: 'static' | 'animated'
   updatedAt: number
+  customAnimations?: CustomAnimationDef[]
 }
 
 export interface AdSet {

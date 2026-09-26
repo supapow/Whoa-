@@ -1,5 +1,154 @@
-import type { Project, Layer, LayerType, ShapeKind, Background } from '#/types'
+import type { Project, Layer, LayerType, ShapeKind, Background, CustomAnimationDef } from '#/types'
 import { textFxFromPreset } from '#/lib/textFx'
+
+export const STANDARD_WHOA_ANIM_CSS: Record<string, { className: string; keyframes: string }> = {
+  pulse: {
+    className: `.whoa-anim-pulse {
+  animation: whoa-pulse 1.2s ease-in-out infinite;
+}`,
+    keyframes: `@keyframes whoa-pulse {
+  0%, 100% {
+    transform: scale(1);
+  }
+  50% {
+    transform: scale(1.08);
+  }
+}`,
+  },
+  'pulse-in': {
+    className: `.whoa-anim-pulse-in,
+.whoa-in-pulse {
+  animation: whoa-pulse-in 0.6s cubic-bezier(0.34, 1.56, 0.64, 1) forwards;
+}`,
+    keyframes: `@keyframes whoa-pulse-in {
+  0% {
+    opacity: 0;
+    transform: scale(0.6);
+  }
+  50% {
+    opacity: 1;
+    transform: scale(1.15);
+  }
+  100% {
+    opacity: 1;
+    transform: scale(1);
+  }
+}`,
+  },
+  'pulse-out': {
+    className: `.whoa-anim-pulse-out,
+.whoa-out-pulse {
+  animation: whoa-pulse-out 0.5s ease-in-out forwards;
+}`,
+    keyframes: `@keyframes whoa-pulse-out {
+  0% {
+    opacity: 1;
+    transform: scale(1);
+  }
+  40% {
+    transform: scale(1.1);
+  }
+  100% {
+    opacity: 0;
+    transform: scale(0);
+  }
+}`,
+  },
+  fade: {
+    className: `.whoa-anim-fade,
+.whoa-in-fade {
+  animation: whoa-fade 0.5s ease-out forwards;
+}`,
+    keyframes: `@keyframes whoa-fade {
+  0% {
+    opacity: 0;
+  }
+  100% {
+    opacity: 1;
+  }
+}`,
+  },
+  pop: {
+    className: `.whoa-anim-pop,
+.whoa-in-pop {
+  animation: whoa-pop 0.4s cubic-bezier(0.34, 1.56, 0.64, 1) forwards;
+}`,
+    keyframes: `@keyframes whoa-pop {
+  0% {
+    opacity: 0;
+    transform: scale(0.5);
+  }
+  100% {
+    opacity: 1;
+    transform: scale(1);
+  }
+}`,
+  },
+  rise: {
+    className: `.whoa-anim-rise,
+.whoa-in-rise {
+  animation: whoa-rise 0.5s cubic-bezier(0.16, 1, 0.3, 1) forwards;
+}`,
+    keyframes: `@keyframes whoa-rise {
+  0% {
+    opacity: 0;
+    transform: translateY(32px);
+  }
+  100% {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}`,
+  },
+  slide: {
+    className: `.whoa-anim-slide,
+.whoa-in-slide {
+  animation: whoa-slide 0.45s cubic-bezier(0.16, 1, 0.3, 1) forwards;
+}`,
+    keyframes: `@keyframes whoa-slide {
+  0% {
+    opacity: 0;
+    transform: translateX(-48px);
+  }
+  100% {
+    opacity: 1;
+    transform: translateX(0);
+  }
+}`,
+  },
+  blur: {
+    className: `.whoa-anim-blur,
+.whoa-in-blur {
+  animation: whoa-blur 0.65s ease-out forwards;
+}`,
+    keyframes: `@keyframes whoa-blur {
+  0% {
+    opacity: 0;
+    filter: blur(24px);
+  }
+  100% {
+    opacity: 1;
+    filter: blur(0px);
+  }
+}`,
+  },
+  rotate: {
+    className: `.whoa-anim-rotate,
+.whoa-in-rotate {
+  animation: whoa-rotate 0.35s cubic-bezier(0.34, 1.56, 0.64, 1) forwards;
+}`,
+    keyframes: `@keyframes whoa-rotate {
+  0% {
+    opacity: 0;
+    transform: rotate(0deg);
+  }
+  100% {
+    opacity: 1;
+    transform: rotate(30deg);
+  }
+}`,
+  },
+}
 
 export type CodeLanguage = 'react' | 'html' | 'css'
 
@@ -213,6 +362,63 @@ export function projectToCss(project: Project): string {
     }
     lines.push('}')
     lines.push('')
+  }
+
+  // Collect all animations used in project layers or customAnimations
+  const animKeys = new Set<string>()
+  for (const layer of layers) {
+    if (layer.anim && layer.anim !== 'none') animKeys.add(layer.anim)
+    if (layer.inAnim && layer.inAnim !== 'none') animKeys.add(layer.inAnim)
+    if (layer.outAnim && layer.outAnim !== 'none') animKeys.add(layer.outAnim)
+  }
+  if (project.customAnimations) {
+    for (const ca of project.customAnimations) {
+      animKeys.add(ca.baseAnim || ca.id)
+    }
+  }
+  // Default to pulse if no animation is currently applied, so coders can easily inspect and customize it!
+  if (animKeys.size === 0) {
+    animKeys.add('pulse')
+  }
+
+  lines.push('/* ==========================================================================')
+  lines.push('   Whoa! Custom Animation & Effect Classes')
+  lines.push('   Modify keyframes, timing, or easing below. Customized classes are')
+  lines.push('   automatically detected and saved to the Animation panel with a "Custom" badge.')
+  lines.push('   ========================================================================== */')
+  lines.push('')
+
+  for (const key of animKeys) {
+    const normKey = key.replace(/[-_]custom(?:[-_]out)?$/i, '').toLowerCase()
+    const def = STANDARD_WHOA_ANIM_CSS[normKey] || STANDARD_WHOA_ANIM_CSS[key]
+    if (def) {
+      lines.push(`/* ${normKey.toUpperCase()} Animation */`)
+      lines.push(def.className)
+      lines.push('')
+      lines.push(def.keyframes)
+      lines.push('')
+    } else {
+      // User-defined custom animation
+      const customDef = project.customAnimations?.find((ca) => ca.id === key)
+      if (customDef?.css) {
+        lines.push(customDef.css)
+        lines.push('')
+      } else {
+        lines.push(`.whoa-anim-${key} {`)
+        lines.push(`  animation: whoa-${key} 0.6s ease-in-out infinite;`)
+        lines.push('}')
+        lines.push('')
+        lines.push(`@keyframes whoa-${key} {`)
+        lines.push('  0%, 100% {')
+        lines.push('    transform: scale(1);')
+        lines.push('  }')
+        lines.push('  50% {')
+        lines.push('    transform: scale(1.1);')
+        lines.push('  }')
+        lines.push('}')
+        lines.push('')
+      }
+    }
   }
 
   return lines.join('\n')
@@ -754,6 +960,47 @@ export function parseCssToProject(cssCode: string, currentProject: Project): Cod
       }
     }
 
+    // Parse custom animation classes and keyframes
+    const customAnimations: CustomAnimationDef[] = currentProject.customAnimations
+      ? [...currentProject.customAnimations]
+      : []
+
+    // Match rules like: .whoa-anim-pulse { ... } or .whoa-in-pulse { ... } or .whoa-anim-pulse-in { ... }
+    const animClassRegex = /\.(whoa[-_](?:anim|in|out)[-_]([a-zA-Z0-9_-]+))\s*\{([^}]*)\}/gi
+    let animMatch: RegExpExecArray | null
+
+    while ((animMatch = animClassRegex.exec(cssCode)) !== null) {
+      const animSlug = animMatch[2].toLowerCase()
+      const baseName = animSlug.replace(/[-_]?(?:in|out)$/i, '').replace(/[-_]custom$/i, '') || animSlug
+
+      const inId = `${baseName}-custom`
+      const outId = `${baseName}-custom-out`
+
+      const capitalized = baseName.charAt(0).toUpperCase() + baseName.slice(1)
+
+      // Add custom in-animation if not present
+      if (!customAnimations.some((c) => c.id === inId)) {
+        customAnimations.push({
+          id: inId,
+          label: `${capitalized} In`,
+          side: 'in',
+          baseAnim: baseName,
+          isCustom: true,
+        })
+      }
+
+      // Automatically create corresponding out-animation (with custom badge)
+      if (!customAnimations.some((c) => c.id === outId)) {
+        customAnimations.push({
+          id: outId,
+          label: `${capitalized} Out`,
+          side: 'out',
+          baseAnim: baseName,
+          isCustom: true,
+        })
+      }
+    }
+
     return {
       success: true,
       project: {
@@ -767,6 +1014,7 @@ export function parseCssToProject(cssCode: string, currentProject: Project): Cod
           value: artboardBg,
         },
         layers: newLayers,
+        customAnimations,
       },
       diagnostics,
     }
