@@ -14,10 +14,10 @@ import CodeMirror from '@uiw/react-codemirror'
 import { javascript } from '@codemirror/lang-javascript'
 import { html } from '@codemirror/lang-html'
 import { css } from '@codemirror/lang-css'
-import { oneDark } from '@codemirror/theme-one-dark'
 import { useEditor } from '#/store/editor'
 import { usePrefs } from '#/store/prefs'
 import { tailwindAutocompleteExtension } from '#/lib/tailwindCompletions'
+import { afterDarkTheme } from '#/lib/codeThemes'
 import {
   type CodeLanguage,
   type CodeDiagnostic,
@@ -376,11 +376,14 @@ export default function CodeEditorModal({ isOpen, onClose }: CodeEditorModalProp
       )}
 
       {/* CodeMirror Editor Workspace */}
-      <div className="flex-1 min-h-0 relative overflow-hidden bg-[#282c34]" data-testid="codemirror-wrapper">
+      <div
+        className="flex-1 min-h-0 relative overflow-hidden bg-black [&_.cm-editor]:!bg-black [&_.cm-scroller]:!bg-black [&_.cm-content]:!bg-black [&_.cm-gutters]:!bg-black [&_.cm-gutters]:!border-r-0 [&_.cm-gutter]:!border-r-0"
+        data-testid="codemirror-wrapper"
+      >
         <CodeMirror
           value={code}
           height="100%"
-          theme={oneDark}
+          theme={afterDarkTheme}
           extensions={extensions}
           onChange={handleCodeChange}
           basicSetup={{
@@ -409,7 +412,7 @@ export default function CodeEditorModal({ isOpen, onClose }: CodeEditorModalProp
             completionKeymap: true,
             lintKeymap: true,
           }}
-          className="h-full text-xs font-mono"
+          className="h-full text-[13px] font-mono leading-[1.8]"
         />
       </div>
 
