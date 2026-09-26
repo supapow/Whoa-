@@ -215,10 +215,10 @@ export default function CodeEditorModal({ isOpen, onClose }: CodeEditorModalProp
       aria-modal="true"
       aria-label="Code Editor"
       data-testid="code-editor-modal"
-      className="fixed inset-0 z-50 flex flex-col bg-[#1e1e24] text-neutral-100 backdrop-blur-xl animate-in fade-in duration-200"
+      className="fixed inset-0 z-50 flex flex-col bg-black text-neutral-100 animate-in fade-in duration-200"
     >
       {/* Top Header Bar */}
-      <header className="flex h-14 shrink-0 items-center justify-between border-b border-white/10 bg-[#16161a] px-3.5 sm:px-5">
+      <header className="flex h-14 shrink-0 items-center justify-between bg-black px-3.5 sm:px-5">
         <div className="flex items-center gap-3">
           <div className="flex items-center gap-2">
             <div className="grid h-8 w-8 place-items-center rounded-lg bg-accent/20 text-accent ring-1 ring-accent/30">
@@ -300,7 +300,7 @@ export default function CodeEditorModal({ isOpen, onClose }: CodeEditorModalProp
       </header>
 
       {/* Language Tabs & Meta Bar */}
-      <div className="flex h-11 shrink-0 items-center justify-between border-b border-white/10 bg-[#1a1a1f] px-3 sm:px-4">
+      <div className="flex h-11 shrink-0 items-center justify-between bg-black px-3 sm:px-4">
         {/* Language Tabs */}
         <div
           role="tablist"
@@ -359,7 +359,7 @@ export default function CodeEditorModal({ isOpen, onClose }: CodeEditorModalProp
       {diagnostics.length > 0 && (
         <div
           data-testid="code-diagnostics-banner"
-          className="flex flex-col gap-1 border-b border-amber-500/20 bg-amber-950/40 px-4 py-2 text-xs text-amber-200 max-h-28 overflow-y-auto"
+          className="flex flex-col gap-1 bg-amber-950/40 px-4 py-2 text-xs text-amber-200 max-h-28 overflow-y-auto"
         >
           {diagnostics.map((d, i) => (
             <div key={i} className="flex items-start gap-2">
@@ -415,20 +415,6 @@ export default function CodeEditorModal({ isOpen, onClose }: CodeEditorModalProp
           className="h-full text-[13px] font-mono leading-[1.8]"
         />
       </div>
-
-      {/* Bottom Status Bar & Developer Tip */}
-      <footer className="flex h-8 shrink-0 items-center justify-between border-t border-white/10 bg-[#16161a] px-3 sm:px-4 text-[11px] text-neutral-400">
-        <div className="flex items-center gap-2 truncate">
-          <span className="inline-block h-1.5 w-1.5 rounded-full bg-emerald-400" />
-          <span className="truncate">
-            💡 Elements with <code className="text-amber-300 font-mono">id="..."</code> match canvas layer IDs. Changes sync live.
-          </span>
-        </div>
-        <div className="flex items-center gap-3 shrink-0 font-mono text-[10px] text-neutral-500">
-          <span>UTF-8</span>
-          <span>{language === 'react' ? (codeDialect === 'javascript' ? 'React (.jsx)' : 'TypeScript (.tsx)') : language.toUpperCase()}</span>
-        </div>
-      </footer>
     </div>
   )
 }

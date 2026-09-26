@@ -95,11 +95,11 @@ const afterDarkEditorTheme = EditorView.theme(
       backgroundColor: afterDarkColors.selection,
     },
     '.cm-panels': {
-      backgroundColor: '#0a0a0e',
+      backgroundColor: '#000000',
       color: afterDarkColors.fg,
     },
-    '.cm-panels.cm-panels-top': { borderBottom: '1px solid rgba(255,255,255,0.1)' },
-    '.cm-panels.cm-panels-bottom': { borderTop: '1px solid rgba(255,255,255,0.1)' },
+    '.cm-panels.cm-panels-top': { borderBottom: 'none' },
+    '.cm-panels.cm-panels-bottom': { borderTop: 'none' },
     '.cm-searchMatch': {
       backgroundColor: 'rgba(255, 203, 107, 0.3)',
       outline: '1px solid #FFCB6B',
