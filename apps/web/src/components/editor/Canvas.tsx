@@ -4582,8 +4582,10 @@ export default function Canvas() {
             }
             const boxW = Math.max(20, bounds.right - bounds.left)
             const boxH = Math.max(20, bounds.bottom - bounds.top)
-            const size = hs * 3.8
-            const dot = hs * 1.5
+            // Clamp handle touch size so handles don't overlap each other or swallow the inner move area
+            const maxHandleTouchSize = Math.max(14 / eff, Math.min(boxW, boxH) * 0.32)
+            const size = Math.min(hs * 2.5, maxHandleTouchSize)
+            const dot = Math.min(size * 0.75, hs * 1.5)
             const corners: { c: ResizeHandle; cx: number; cy: number }[] = [
               { c: 'tl', cx: 0, cy: 0 },
               { c: 'tr', cx: boxW, cy: 0 },
@@ -4596,7 +4598,8 @@ export default function Canvas() {
               { h: 'b', cx: boxW / 2, cy: boxH, cursor: 'ns-resize' },
               { h: 'l', cx: 0, cy: boxH / 2, cursor: 'ew-resize' },
             ]
-            const showSideHandles = !sel.isComponent || editingComponentId === sel.id
+            const showSideHandles = (!sel.isComponent || editingComponentId === sel.id) &&
+              boxW >= (48 / eff) && boxH >= (48 / eff)
             const groupItems = (isGroup && sel.type === 'group' && !selected.some((l) => l.id === sel.id))
               ? [...selected, sel]
               : selected
@@ -4862,6 +4865,30 @@ export default function Canvas() {
                       </button>
                     )}
                   </div>
+                )}
+                {!isImagePositioning && !isVectorEditing && (
+                  <div
+                    data-testid={`selection-move-area-${isGroup ? 'group' : sel.id}`}
+                    onPointerDown={(e) => {
+                      if (e.button !== 0 && e.button !== undefined) return
+                      startMove(e, sel)
+                    }}
+                    onClick={(e) => handleLayerClick(e, sel)}
+                    onDoubleClick={(e) => {
+                      e.stopPropagation()
+                      if (sel.locked) return
+                      const last = lastDoubleRef.current
+                      if (last && last.id === sel.id && Date.now() - last.time < 500) return
+                      handleDoubleTap(sel)
+                    }}
+                    style={{
+                      position: 'absolute',
+                      inset: 0,
+                      pointerEvents: 'auto',
+                      cursor: 'move',
+                      touchAction: 'none',
+                    }}
+                  />
                 )}
                 {!isImagePositioning && !isVectorEditing && corners.map(({ c, cx, cy }) => (
                   <div

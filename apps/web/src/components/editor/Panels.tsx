@@ -31,7 +31,7 @@ import { getLibraryComponents, deleteComponentFromLibrary, type ComponentItem } 
 import { TEXT_FX_PRESETS, makeTextFxSeed, textFxFromPreset } from '#/lib/textFx'
 import {
   VECTOR_PRESETS, convertShapeToVector, buildSvgPath, tightenVectorLayer, simplifyVectorPoints,
-  createShapeVectorPoints, fitVectorPointsToBounds, getPointBezierMode, switchPointBezierMode,
+  getPointBezierMode, switchPointBezierMode,
   getAdjacentVectorPoints, getVectorBoundingBox, shapeTemplatePoints, roundVectorPoints,
 } from '#/lib/vector'
 
@@ -3167,64 +3167,6 @@ function RadiusPanel() {
 
     return (
       <div className="pb-4">
-        {/* Quick Button Shapes (Pill & Rectangle) for quick button workflow */}
-        {(l.type === 'shape' || l.type === 'path') && (
-          <div className="mb-3 rounded-2xl border border-line bg-surface2/80 p-2.5">
-            <div className="mb-1.5 flex items-center justify-between">
-              <span className="text-[11px] font-bold uppercase tracking-wider text-txt3">Button Shape</span>
-              <span className="text-[10px] text-txt3 font-medium">Quick Button ({l.type === 'path' ? 'Vector' : 'Div'})</span>
-            </div>
-            <div className="grid grid-cols-2 gap-2">
-              <button
-                type="button"
-                data-testid="anim-pill-shape-btn"
-                title="Pill Shape for Buttons"
-                onClick={() => {
-                  if (l.type === 'path') {
-                    const rawPts = createShapeVectorPoints('pill', l.w, l.h, Math.min(l.w, l.h) / 2)
-                    const pts = fitVectorPointsToBounds(rawPts, true, l.w, l.h)
-                    up({ points: pts, closed: true, shape: 'pill' })
-                  } else {
-                    up({ shape: 'pill', radius: 9999 })
-                  }
-                }}
-                className={`flex items-center justify-center gap-2 rounded-xl py-2 px-3 text-xs font-semibold border transition-all cursor-pointer ${
-                  l.shape === 'pill'
-                    ? 'border-accent bg-accent/20 text-white ring-1 ring-accent/40 shadow-sm'
-                    : 'border-line bg-surface1 text-txt2 hover:border-white/20 hover:text-white'
-                }`}
-              >
-                <div className="h-3.5 w-7 rounded-full bg-current" />
-                <span>Pill Shape</span>
-              </button>
-
-              <button
-                type="button"
-                data-testid="anim-rectangle-shape-btn"
-                title="Rectangle Shape for Buttons"
-                onClick={() => {
-                  if (l.type === 'path') {
-                    const rad = l.radius ?? 0
-                    const rawPts = createShapeVectorPoints('rectangle', l.w, l.h, rad)
-                    const pts = fitVectorPointsToBounds(rawPts, true, l.w, l.h)
-                    up({ points: pts, closed: true, shape: 'rectangle', radius: rad })
-                  } else {
-                    up({ shape: 'rectangle', radius: l.radius ?? 0 })
-                  }
-                }}
-                className={`flex items-center justify-center gap-2 rounded-xl py-2 px-3 text-xs font-semibold border transition-all cursor-pointer ${
-                  l.shape === 'rectangle'
-                    ? 'border-accent bg-accent/20 text-white ring-1 ring-accent/40 shadow-sm'
-                    : 'border-line bg-surface1 text-txt2 hover:border-white/20 hover:text-white'
-                }`}
-              >
-                <div className="h-3.5 w-7 rounded-md bg-current" />
-                <span>Rectangle Shape</span>
-              </button>
-            </div>
-          </div>
-        )}
-
         <div className="mb-3 flex rounded-xl bg-surface2 p-1">
           {(['in', 'out'] as const).map((side) => (
             <button
@@ -4000,7 +3942,7 @@ export function ShapeFloatingPanel() {
 }
 
 export function ButtonFloatingPanel() {
-  const { selected, tool, openTool } = useEditor()
+  const { selected, tool, openTool, startEyedropper } = useEditor()
   const [expanded, setExpanded] = useState(true)
 
   if (!selected || selected.type !== 'button' || tool) return null
@@ -4054,6 +3996,27 @@ export function ButtonFloatingPanel() {
           className="h-3.5 w-3.5 rounded-full border border-white/40 shadow-xs"
           style={{ backgroundColor: typeof l.fill === 'string' ? l.fill : '#007AFF' }}
         />
+      </button>
+
+      {/* 3b. Button fill eyedropper loupe */}
+      <button
+        type="button"
+        data-testid="button-floating-picker-btn"
+        id="button-floating-picker-btn"
+        onClick={() => {
+          startEyedropper({
+            target: 'layer',
+            layerId: l.id,
+            key: 'fill',
+            initialColor: typeof l.fill === 'string' ? l.fill : '#007AFF',
+            currentColor: typeof l.fill === 'string' ? l.fill : '#007AFF',
+          })
+        }}
+        aria-label="Color Loupe Eyedropper"
+        title="Pick button fill color from screen"
+        className={sideInactiveBtnClass}
+      >
+        <Pipette className="size-3.5" />
       </button>
 
       {/* 4. Label color */}
@@ -4158,7 +4121,7 @@ export function GroupFloatingPanel() {
 }
 
 export function PathFloatingPanel() {
-  const { selected, tool, openTool, setVectorEditingId } = useEditor()
+  const { selected, tool, openTool, setVectorEditingId, startEyedropper } = useEditor()
   const [expanded, setExpanded] = useState(true)
 
   if (!selected || selected.type !== 'path' || tool) return null
@@ -4213,6 +4176,27 @@ export function PathFloatingPanel() {
           className="h-3.5 w-3.5 rounded-full border border-white/40 shadow-xs"
           style={{ backgroundColor: fill && fill !== 'transparent' ? fill : '#3a3a3f' }}
         />
+      </button>
+
+      {/* 3b. Fill color eyedropper loupe */}
+      <button
+        type="button"
+        data-testid="path-floating-picker-btn"
+        id="path-floating-picker-btn"
+        onClick={() => {
+          startEyedropper({
+            target: 'layer',
+            layerId: l.id,
+            key: 'fill',
+            initialColor: fill && fill !== 'transparent' ? fill : '#3a3a3f',
+            currentColor: fill && fill !== 'transparent' ? fill : '#3a3a3f',
+          })
+        }}
+        aria-label="Color Loupe Eyedropper"
+        title="Pick vector fill color from screen"
+        className={sideInactiveBtnClass}
+      >
+        <Pipette className="size-3.5" />
       </button>
 
       {/* 4. Corner radius */}

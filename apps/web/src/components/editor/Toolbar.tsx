@@ -324,6 +324,15 @@ export default function Toolbar({ onExport }: { onExport?: () => void }) {
     },
   ]
 
+  const isLayerAnimated = Boolean(
+    selected && (
+      (selected.anim && selected.anim !== 'none') ||
+      (selected.inAnim && selected.inAnim !== 'none') ||
+      (selected.outAnim && selected.outAnim !== 'none') ||
+      (selected.keyframes && selected.keyframes.length > 0)
+    )
+  )
+
   let items: Item[] = []
 
   if (!selected) {
@@ -347,6 +356,13 @@ export default function Toolbar({ onExport }: { onExport?: () => void }) {
       { key: 'layers', label: 'Layers', icon: <LayersIcon /> },
     ]
   } else {
+    const animateItem: Item = {
+      key: 'animate',
+      label: 'Animate',
+      icon: <Wand2 />,
+      active: isLayerAnimated,
+    }
+
     const common: Item[] = [
       {
         key: 'shadow',
@@ -360,7 +376,6 @@ export default function Toolbar({ onExport }: { onExport?: () => void }) {
         icon: <Droplet className="h-4 w-4" />,
         active: Boolean(selected.blur && selected.blur > 0),
       },
-      { key: 'animate', label: 'Animate', icon: <Wand2 /> },
       { key: 'dup', label: 'Duplicate', icon: <Copy />, onClick: () => duplicate(selected.id, isMulti ? selectedIds : undefined) },
       { key: 'del', label: 'Delete', icon: <Trash2 />, onClick: () => (isMulti ? deleteLayers(selectedIds) : deleteLayer(selected.id)), danger: true },
     ]
@@ -401,12 +416,13 @@ export default function Toolbar({ onExport }: { onExport?: () => void }) {
             saveAsComponent(name, selected.id)
           },
         },
+        animateItem,
         ...common,
       ]
     } else if (selected.type === 'text') {
       items = [
         { key: 'font', label: 'Font', icon: <Type /> },
-        { key: 'color', label: 'Color', icon: <PaintBucket /> },
+        animateItem,
         { key: 'style', label: 'Style', icon: <Bold /> },
         { key: 'align', label: 'Align', icon: <AlignLeft /> },
         ...(project.mode === 'animated'
@@ -420,27 +436,30 @@ export default function Toolbar({ onExport }: { onExport?: () => void }) {
           onClick: () => openTool('convertText'),
         },
         ...common,
+        { key: 'color', label: 'Color', icon: <PaintBucket /> },
       ]
     } else if (selected.type === 'button') {
       items = [
         { key: 'font', label: 'Font', icon: <Type /> },
-        { key: 'color', label: 'Label', icon: <PaintBucket /> },
-        { key: 'fill', label: 'Fill', icon: <PaintBucket /> },
+        animateItem,
         { key: 'style', label: 'Style', icon: <Bold /> },
         { key: 'align', label: 'Align', icon: <AlignLeft /> },
         { key: 'radius', label: 'Corners', icon: <Square /> },
         { key: 'mask', label: 'Mask', icon: <Scissors />, onClick: handleMask },
         ...common,
+        { key: 'fill', label: 'Fill', icon: <PaintBucket /> },
+        { key: 'color', label: 'Label', icon: <PaintBucket /> },
       ]
     } else if (selected.type === 'shape') {
       items = [
         { key: 'shape', label: 'Shape', icon: <Square /> },
-        { key: 'color', label: 'Fill', icon: <PaintBucket /> },
+        animateItem,
         ...(selected.shape === 'circle'
           ? []
           : [{ key: 'radius', label: selected.shape === 'line' ? 'Ends' : 'Corners', icon: <Square /> }]),
         { key: 'mask', label: 'Mask', icon: <Scissors />, onClick: handleMask },
         ...common,
+        { key: 'color', label: 'Fill', icon: <PaintBucket /> },
       ]
     } else if (selected.type === 'path') {
       items = [
@@ -451,11 +470,12 @@ export default function Toolbar({ onExport }: { onExport?: () => void }) {
           active: isProportionsLocked,
           onClick: handleToggleLockProportions,
         },
+        animateItem,
         { key: 'shape', label: 'Shape', icon: <Square /> },
         { key: 'radius', label: 'Corners', icon: <Square /> },
         { key: 'mask', label: 'Mask', icon: <Scissors />, onClick: handleMask },
-        { key: 'color', label: 'Color', icon: <PaintBucket /> },
         ...common,
+        { key: 'color', label: 'Color', icon: <PaintBucket /> },
       ]
     } else if (selected.type === 'image') {
       items = [
@@ -466,13 +486,18 @@ export default function Toolbar({ onExport }: { onExport?: () => void }) {
           active: isProportionsLocked,
           onClick: handleToggleLockProportions,
         },
+        animateItem,
         { key: 'image', label: 'Replace', icon: <ImageIcon /> },
         { key: 'crop', label: 'Crop', icon: <Crop /> },
         { key: 'mask', label: 'Mask', icon: <Scissors />, onClick: handleMask },
         ...common,
       ]
     } else {
-      items = [{ key: 'stickers', label: 'Replace', icon: <Sticker /> }, ...common]
+      items = [
+        animateItem,
+        { key: 'stickers', label: 'Replace', icon: <Sticker /> },
+        ...common,
+      ]
     }
   }
 
@@ -861,6 +886,24 @@ export default function Toolbar({ onExport }: { onExport?: () => void }) {
             >
               <Magnet className="h-3.5 w-3.5" fill={artboardSnap ? 'currentColor' : 'none'} />
             </button>
+            {/* Shadow — same icon for every element type; highlighted when active */}
+            <button
+              type="button"
+              id="floating-tool-shadow"
+              data-testid="floating-tool-shadow"
+              data-floating-tool="shadow"
+              aria-label="Shadow"
+              aria-pressed={Boolean(selected && (selected.dropShadow || selected.innerShadow))}
+              title="Shadow"
+              onClick={() => openTool('shadow')}
+              className={`grid h-6 w-6 place-items-center rounded-full transition-all active:scale-90 focus:outline-none cursor-pointer ${
+                selected && (selected.dropShadow || selected.innerShadow)
+                  ? 'text-white hover:bg-surface2'
+                  : 'text-txt hover:bg-surface2'
+              }`}
+            >
+              <SunMedium className="h-3.5 w-3.5" />
+            </button>
             {/* Blur — same icon for every element type; filled when active, no blue background */}
             <button
               type="button"
@@ -881,6 +924,24 @@ export default function Toolbar({ onExport }: { onExport?: () => void }) {
                 className="h-3.5 w-3.5"
                 fill={selected && selected.blur && selected.blur > 0 ? 'currentColor' : 'none'}
               />
+            </button>
+            {/* Animate — general action for every element type; highlighted when active */}
+            <button
+              type="button"
+              id="floating-tool-animate"
+              data-testid="floating-tool-animate"
+              data-floating-tool="animate"
+              aria-label="Animate"
+              aria-pressed={isLayerAnimated}
+              title="Animate"
+              onClick={() => openTool('animate')}
+              className={`grid h-6 w-6 place-items-center rounded-full transition-all active:scale-90 focus:outline-none cursor-pointer ${
+                isLayerAnimated
+                  ? 'text-accent hover:bg-accent/20'
+                  : 'text-txt hover:bg-surface2'
+              }`}
+            >
+              <Wand2 className="h-3.5 w-3.5" />
             </button>
             {/* Duplicate */}
             <button
